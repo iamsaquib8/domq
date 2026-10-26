@@ -22,6 +22,11 @@ use args::{Command, Mode, Options};
 /// Attributes holding a single URL, rewritten by `--base`.
 const URL_ATTRS: &[&str] = &["href", "src", "action", "cite", "poster", "formaction"];
 
+struct Output {
+    text: String,
+    matched: bool,
+}
+
 fn main() -> ExitCode {
     let opts = match args::parse(std::env::args_os().skip(1)) {
         Ok(Command::Run(opts)) => opts,
@@ -48,7 +53,14 @@ fn main() -> ExitCode {
         }
     };
     match run(&opts) {
-        Ok(out) => emit(opts.output.as_deref(), &out),
+        Ok(out) => match write_output(opts.output.as_deref(), &out.text) {
+            Ok(()) if opts.exit_status && !out.matched => ExitCode::FAILURE,
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("domq: {e}");
+                ExitCode::FAILURE
+            }
+        },
         Err(e) => {
             eprintln!("domq: {e}");
             ExitCode::FAILURE
@@ -56,7 +68,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(opts: &Options) -> Result<String, String> {
+fn run(opts: &Options) -> Result<Output, String> {
     let html = read_input(opts.input.as_deref(), opts.encoding.as_deref())?;
     let mut dom = domq::parse(&html);
 
@@ -75,7 +87,10 @@ fn run(opts: &Options) -> Result<String, String> {
 
     if opts.meta {
         // Page-level, so read before `--main` narrows the document.
-        return Ok(meta_output(&dom, base.as_deref()));
+        return Ok(Output {
+            text: meta_output(&dom, base.as_deref()),
+            matched: true,
+        });
     }
     if opts.main
         && let Some(main) = dom.main_content().map(|m| m.to_html())
@@ -102,7 +117,10 @@ fn run(opts: &Options) -> Result<String, String> {
     };
 
     let Some(selector) = selector else {
-        return Ok(document_output(&dom, opts));
+        return Ok(Output {
+            text: document_output(&dom, opts),
+            matched: true,
+        });
     };
     let mut matches: Vec<NodeRef<'_>> = dom.select(&selector).collect();
     if opts.mode == Mode::Csv {
@@ -135,29 +153,39 @@ fn document_output(dom: &Dom, opts: &Options) -> String {
 }
 
 /// Output for a list of selected elements.
-fn match_output(matches: &[NodeRef<'_>], opts: &Options) -> String {
+fn match_output(matches: &[NodeRef<'_>], opts: &Options) -> Output {
     if let Some(name) = &opts.attribute {
         let values: Vec<&str> = matches
             .iter()
             .filter_map(|m| m.attr(name))
             .filter(|v| !(opts.ignore_whitespace && v.trim().is_empty()))
             .collect();
-        return match opts.mode {
+        let matched = !values.is_empty();
+        let text = match opts.mode {
             Mode::Count => format!("{}\n", values.len()),
             Mode::Json => format!("{}\n", json::string_array(values)),
             Mode::Jsonl => lines(values.iter().map(|v| json::string(v)), "\n"),
             _ => lines(values.iter().map(|v| v.to_string()), "\n"),
         };
+        return Output { text, matched };
     }
-    match opts.mode {
+    let mut matched = !matches.is_empty();
+    let text = match opts.mode {
         Mode::Count => format!("{}\n", matches.len()),
         Mode::Json => format!("{}\n", json::array(matches.iter().map(|m| m.to_json()))),
         Mode::Jsonl => lines(matches.iter().map(|m| m.to_json()), "\n"),
-        Mode::Text => lines(non_blank(matches.iter().map(|m| m.to_text()), opts), "\n"),
-        Mode::Markdown => lines(
-            non_blank(matches.iter().map(|m| m.to_markdown()), opts),
-            "\n\n",
-        ),
+        Mode::Text => {
+            let values: Vec<String> =
+                non_blank(matches.iter().map(|m| m.to_text()), opts).collect();
+            matched = !values.is_empty();
+            lines(values.into_iter(), "\n")
+        }
+        Mode::Markdown => {
+            let values: Vec<String> =
+                non_blank(matches.iter().map(|m| m.to_markdown()), opts).collect();
+            matched = !values.is_empty();
+            lines(values.into_iter(), "\n\n")
+        }
         Mode::Html if opts.pretty => {
             let mut out = String::new();
             for m in matches {
@@ -166,45 +194,56 @@ fn match_output(matches: &[NodeRef<'_>], opts: &Options) -> String {
             out
         }
         Mode::Html | Mode::Csv => lines(matches.iter().map(|m| m.to_html()), "\n"),
-    }
+    };
+    Output { text, matched }
 }
 
 /// `--csv`: each matched `<table>` with rows as RFC 4180 CSV, separated by a
 /// blank line. Other matches and tables without rows are skipped.
-fn csv_output(matches: &[NodeRef<'_>], first: bool) -> String {
-    let tables = matches
+fn csv_output(matches: &[NodeRef<'_>], first: bool) -> Output {
+    let tables: Vec<String> = matches
         .iter()
         .filter(|m| m.tag_name() == Some("table"))
         .map(|t| t.table_rows())
         .filter(|rows| !rows.is_empty())
         .take(if first { 1 } else { usize::MAX })
-        .map(domq::to_csv);
-    tables.collect::<Vec<_>>().join("\r\n")
+        .map(domq::to_csv)
+        .collect();
+    Output {
+        matched: !tables.is_empty(),
+        text: tables.join("\r\n"),
+    }
 }
 
 /// `-e`: one object, or one per match of the scope selector.
-fn extract_output(dom: &Dom, scope: Option<&Selector>, opts: &Options) -> Result<String, String> {
+fn extract_output(dom: &Dom, scope: Option<&Selector>, opts: &Options) -> Result<Output, String> {
     let fields = extract::compile(&opts.extract)?;
     let ws = opts.ignore_whitespace;
     let Some(scope) = scope else {
-        return Ok(format!("{}\n", extract::object(dom, &fields, ws)));
+        return Ok(Output {
+            text: format!("{}\n", extract::object(dom, &fields, ws)),
+            matched: true,
+        });
     };
     let mut scopes: Vec<NodeRef<'_>> = dom.select(scope).collect();
     if opts.first {
         scopes.truncate(1);
     }
     let objects = extract::scoped_objects(dom, &scopes, &fields, ws).into_iter();
-    Ok(if opts.mode == Mode::Jsonl {
-        lines(objects, "\n")
-    } else {
-        format!("{}\n", json::array(objects))
+    Ok(Output {
+        text: if opts.mode == Mode::Jsonl {
+            lines(objects, "\n")
+        } else {
+            format!("{}\n", json::array(objects))
+        },
+        matched: !scopes.is_empty(),
     })
 }
 
 /// `--links`: every link (inside a match of `scope`, if given), its URL
 /// resolved as `--base`/`-B` say — so with neither, URLs print as written.
 /// With `-w`, links without text are skipped.
-fn links_output(dom: &Dom, scope: Option<&Selector>, base: Option<&str>, opts: &Options) -> String {
+fn links_output(dom: &Dom, scope: Option<&Selector>, base: Option<&str>, opts: &Options) -> Output {
     let inside = scope.map(|sel| inside_matches(dom, sel));
     let in_scope = |node: NodeRef<'_>| {
         inside
@@ -227,7 +266,8 @@ fn links_output(dom: &Dom, scope: Option<&Selector>, base: Option<&str>, opts: &
             .field("text", &json::string(text));
         obj.finish()
     };
-    match opts.mode {
+    let matched = !links.is_empty();
+    let text = match opts.mode {
         Mode::Count => format!("{}\n", links.len()),
         Mode::Json => format!("{}\n", json::array(links.iter().map(object))),
         Mode::Jsonl => lines(links.iter().map(object), "\n"),
@@ -237,7 +277,8 @@ fn links_output(dom: &Dom, scope: Option<&Selector>, base: Option<&str>, opts: &
                 .map(|(url, text)| format!("{}\t{}", one_field(url), one_field(text))),
             "\n",
         ),
-    }
+    };
+    Output { text, matched }
 }
 
 /// Which nodes are a match of `sel` or inside one, indexed by

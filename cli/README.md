@@ -63,6 +63,7 @@ domq -j 'table tr:nth-child(3)' -f report.html
 | `-p, --pretty` | indent HTML output |
 | `-1, --first` | only the first match |
 | `-w, --ignore-whitespace` | skip blank results (with `--links`, links without text) |
+| `--exit-status` | exit 1 when nothing matches; without it, no matches still exit 0 |
 | `-e, --extract <NAME=SPEC>` | add a field to a JSON object (repeatable; see below) |
 | `--links` | every link as `url<TAB>text` (JSON objects with `-j`/`--jsonl`) |
 | `--meta` | page metadata (title, description, canonical, OpenGraph, JSON-LD, …) as JSON |
@@ -88,8 +89,9 @@ The document is prepared in this order: decode, parse, `-r` removals, `-b`/`-B`
 URL resolution, `--main`; then the selector runs. `--meta` always describes the
 whole page, so `--main` does not narrow it.
 
-Exit codes: `0` success (including "no matches"), `1` invalid selector or I/O
-error, `2` bad command-line usage.
+Exit codes: `0` success (including "no matches" unless `--exit-status` is set),
+`1` invalid selector, I/O error or no matches with `--exit-status`, `2` bad
+command-line usage.
 
 ## Extract structured data
 

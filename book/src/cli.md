@@ -58,6 +58,7 @@ OUTPUT (default: matching elements as HTML, one per line; -t, -m, -j, --jsonl,
     -1, --first                 Only use the first match
     -w, --ignore-whitespace     Skip matches whose output is empty or whitespace
                                 (with --links, links without text)
+        --exit-status           Exit 1 when nothing matches
 
 EXTRACT:
     -e, --extract <NAME=SPEC>   Print a JSON object with a NAME key (repeat it);
@@ -98,8 +99,8 @@ combinators, :nth-child(), :not(), :is(), :has(), :contains("text"), and more.
 In --extract SPECs only the last @NAME and a trailing [] are special; write \@
 for a literal @ in a selector.
 
-Exit codes: 0 success (also when nothing matches), 1 invalid selector or I/O
-error, 2 bad usage.
+Exit codes: 0 success (also when nothing matches, unless --exit-status is set),
+1 invalid selector, I/O error or no matches with --exit-status, 2 bad usage.
 Docs: https://github.com/iamsaquib8/domq
 ```
 

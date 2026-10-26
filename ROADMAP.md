@@ -458,7 +458,7 @@ good first issues; each lands in whichever release is next.
 - [ ] **S** `shell` Several inputs in one run (`-f` repeatable, globs), with
       grep-style `FILE:` prefixes and a `file` field in `--jsonl`; batch output
       with `-o DIR --keep-dirs --parallel N` and `--deduplicate`. ([#26](https://github.com/iamsaquib8/domq/issues/26))
-- [ ] **S** `shell` `--exit-status`: exit 1 when nothing matches, for
+- [x] **S** `shell` `--exit-status`: exit 1 when nothing matches, for
       `if domq --exit-status …; then`. The default stays htmlq-compatible. ([#22](https://github.com/iamsaquib8/domq/issues/22))
 - [ ] **S** `shell` Shell completions (bash, zsh, fish, PowerShell) and a man
       page, generated from `--help` and shipped in the release archives and

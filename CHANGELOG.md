@@ -28,6 +28,7 @@ when to re-embed. See [Output stability](./README.md#output-stability).
   (the "ahead of `tl`" claim held only for generated inputs).
 - **Output stability policy:** output changes only in minor releases, listed
   under "Output changes" ([README](README.md#output-stability)).
+- CLI `--exit-status` to exit 1 when no results match; without it, no matches still exit 0.
 
 ### Output changes
 - **`<noscript>` that holds the page is shown.** When a document has more

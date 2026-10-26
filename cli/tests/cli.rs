@@ -48,6 +48,52 @@ fn ok(args: &[&str], stdin: &str) -> String {
 }
 
 #[test]
+fn exit_status_is_opt_in_and_tracks_matches() {
+    let (out, err, code) = domq(&[".missing"], PAGE);
+    assert_eq!((out.as_str(), err.as_str(), code), ("", "", 0));
+
+    let (out, err, code) = domq(&["--exit-status", ".missing"], PAGE);
+    assert_eq!((out.as_str(), err.as_str(), code), ("", "", 1));
+
+    assert_eq!(domq(&["--exit-status", "h1"], PAGE).2, 0);
+    assert_eq!(domq(&["--exit-status", "-t", "h1"], PAGE).2, 0);
+    assert_eq!(domq(&["--exit-status", "-t", ".missing"], PAGE).2, 1);
+    assert_eq!(domq(&["--exit-status", "-a", "href", "a[href]"], PAGE).2, 0);
+    assert_eq!(domq(&["--exit-status", "-a", "href", "h1"], PAGE).2, 1);
+
+    let (out, _, code) = domq(&["--exit-status", "-c", ".missing"], PAGE);
+    assert_eq!((out.as_str(), code), ("0\n", 1));
+    assert_eq!(domq(&["-c", ".missing"], PAGE).2, 0);
+
+    assert_eq!(domq(&["--exit-status", "--links", "a"], PAGE).2, 0);
+    assert_eq!(domq(&["--exit-status", "--links", "img"], PAGE).2, 1);
+    assert_eq!(
+        domq(&["--exit-status", "-e", "title=h1", "article"], PAGE).2,
+        0
+    );
+
+    let (out, _, code) = domq(&["--exit-status", "-e", "title=h1", ".missing"], PAGE);
+    assert_eq!((out.as_str(), code), ("[]\n", 1));
+}
+
+#[test]
+fn exit_status_tracks_text_after_ignoring_whitespace() {
+    let whitespace = "<span>   </span>";
+    assert_eq!(
+        domq(&["--exit-status", "-w", "-t", "span"], whitespace).2,
+        1
+    );
+    assert_eq!(
+        domq(&["--exit-status", "-w", "-m", "span"], whitespace).2,
+        1
+    );
+
+    let text = "<span>visible</span>";
+    assert_eq!(domq(&["--exit-status", "-w", "-t", "span"], text).2, 0);
+    assert_eq!(domq(&["--exit-status", "-w", "-m", "span"], text).2, 0);
+}
+
+#[test]
 fn selects_elements_as_html() {
     assert_eq!(ok(&["li"], PAGE), "<li>one</li>\n<li>two</li>\n");
 }
