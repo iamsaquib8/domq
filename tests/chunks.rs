@@ -123,6 +123,37 @@ fn heading_paths_are_plain_text() {
 }
 
 #[test]
+fn heading_paths_strip_links_with_parens_and_titles() {
+    // Links with balanced parentheses in URLs (e.g. Wikipedia links).
+    let all = Chunk::from_markdown(
+        "# [Rust](https://en.wikipedia.org/wiki/Rust_(programming_language)) Guide\n\nContent",
+        1000,
+    );
+    assert_eq!(all[0].heading_path, ["Rust Guide"]);
+
+    // Single-quoted titles with parentheses.
+    let all = Chunk::from_markdown(
+        "# [Link](https://example.com/a 'Doc (v1)') Section\n\nContent",
+        1000,
+    );
+    assert_eq!(all[0].heading_path, ["Link Section"]);
+
+    // Double-quoted titles with parentheses and nested parens in URLs.
+    let all = Chunk::from_markdown(
+        "# [Nested](https://example.com/a(b(c)d)e \"Title (v2)\") Here\n\nContent",
+        1000,
+    );
+    assert_eq!(all[0].heading_path, ["Nested Here"]);
+
+    // Pointy-bracketed URLs with parens.
+    let all = Chunk::from_markdown(
+        "# [Pointy](<https://example.com/(a)> 'Title') Test\n\nContent",
+        1000,
+    );
+    assert_eq!(all[0].heading_path, ["Pointy Test"]);
+}
+
+#[test]
 fn long_heading_titles_are_capped_in_the_path() {
     // Cut at 256 characters, then `…`; the heading line itself stays whole.
     let long = "word ".repeat(100);
