@@ -136,6 +136,7 @@ content indexed with 0.4 if exact text matters.
     `<image>` is an `<img>` (outside SVG and MathML).
 
 ### Fixed
+- **Image-input accessibility lint.** Flag unnamed `<input type="image">` controls and recognize their `alt` text as a name for enclosing links and buttons. A submission `value` alone does not name an image button.
 - Docs: the README's Cargo snippet asked for `domq = "0.3"`, which does not
   exist under the new name, and the npm README's CDN URL pointed at the wrong
   package.
