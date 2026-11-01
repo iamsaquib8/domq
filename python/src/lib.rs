@@ -138,7 +138,9 @@ impl Document {
         base_url: Option<String>,
     ) -> PyResult<String> {
         let opts = parse_py_markdown_options(links, images, drop_data_uris, base_url)?;
-        Ok(maybe_detach(py, self.large(), || self.dom.to_markdown_with(&opts)))
+        Ok(maybe_detach(py, self.large(), || {
+            self.dom.to_markdown_with(&opts)
+        }))
     }
 
     /// The document re-serialized as HTML.

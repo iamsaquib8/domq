@@ -22,7 +22,6 @@
 
 use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
-use core::fmt::Write as _;
 use core::mem;
 
 use super::{is_space, push_verbatim, skip_newline, walk};
@@ -959,7 +958,9 @@ impl<'a> Markdown<'a> {
                     let at = out.len();
                     match list.and_then(|i| lists.get_mut(i)) {
                         Some(l) if l.ordered => {
-                            let _ = write!(out, "{}{} ", l.next, if l.alt { ')' } else { '.' });
+                            push_usize(out, l.next as usize);
+                            out.push(if l.alt { ')' } else { '.' });
+                            out.push(' ');
                             l.next = if l.reversed {
                                 l.next.saturating_sub(1)
                             } else {
@@ -1068,7 +1069,9 @@ impl<'a> Markdown<'a> {
                         if i > 0 {
                             self.out.push('\n');
                         }
-                        let _ = write!(self.out, "[{}]: ", r.id);
+                        self.out.push('[');
+                        push_usize(&mut self.out, r.id);
+                        self.out.push_str("]: ");
                         push_destination(&mut self.out, &r.url);
                         push_title(&mut self.out, r.title.as_deref());
                     }
@@ -1082,7 +1085,8 @@ impl<'a> Markdown<'a> {
                         if i > 0 {
                             self.out.push('\n');
                         }
-                        let _ = write!(self.out, "{}. [", r.id);
+                        push_usize(&mut self.out, r.id);
+                        self.out.push_str(". [");
                         for c in r.text.chars() {
                             if matches!(c, '[' | ']' | '\\') {
                                 self.out.push('\\');
@@ -1288,15 +1292,37 @@ fn push_close(
                 }
                 LinkStyle::Reference => {
                     let id = record_reference(references, &url, title, "");
-                    let _ = write!(out, "][{id}]");
+                    out.push_str("][");
+                    push_usize(out, id);
+                    out.push(']');
                 }
                 LinkStyle::Footer => {
                     let text = a.text_content();
                     let id = record_reference(references, &url, title, &text);
-                    let _ = write!(out, "][{id}]");
+                    out.push_str("][");
+                    push_usize(out, id);
+                    out.push(']');
                 }
             }
         }
+    }
+}
+
+fn push_usize(out: &mut String, mut n: usize) {
+    if n == 0 {
+        out.push('0');
+        return;
+    }
+    let mut buf = [0u8; 20];
+    let mut i = 0;
+    while n > 0 {
+        buf[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+        i += 1;
+    }
+    while i > 0 {
+        i -= 1;
+        out.push(buf[i] as char);
     }
 }
 

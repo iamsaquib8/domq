@@ -75,10 +75,16 @@ def test_document_serializers():
 
 
 def test_document_to_markdown_options():
-    doc = domq.parse('<p><a href="/guide">Guide</a> <img src="data:image/png;base64,abc" alt="Logo"></p>')
-    assert doc.to_markdown(links="reference") == "[Guide][1]\n\n[1]: /guide"
-    assert doc.to_markdown(links="footer") == "[Guide][1]\n\n### Links\n\n1. [Guide](/guide)"
-    assert doc.to_markdown(images="alt") == "[Guide](/guide) ![Logo]"
+    doc = domq.parse(
+        '<p><a href="/guide">Guide</a> <img src="data:image/png;base64,abc" alt="Logo"></p>'
+    )
+    assert doc.to_markdown(links="reference") == (
+        "[Guide][1] ![Logo](data:image/png;base64,abc)\n\n[1]: /guide"
+    )
+    assert doc.to_markdown(links="footer") == (
+        "[Guide][1] ![Logo](data:image/png;base64,abc)\n\n### Links\n\n1. [Guide](/guide)"
+    )
+    assert doc.to_markdown(images="alt") == "[Guide](/guide) Logo"
     assert doc.to_markdown(images="drop") == "[Guide](/guide)"
     assert doc.to_markdown(drop_data_uris=True) == "[Guide](/guide)"
     assert doc.to_markdown(base_url="https://example.com/blog/") == (
