@@ -35,6 +35,7 @@ fn basic_page_outline() {
     let outline = dom.outline();
 
     // Verify all selectors uniquely resolve back to their element
+    #[cfg(feature = "query")]
     for node in outline.nodes() {
         let matches: Vec<_> = dom.select(&node.selector).collect();
         assert_eq!(
@@ -161,19 +162,23 @@ fn unique_selector_synthesis_types() {
 
     let btn = &outline.nodes()[0];
     assert_eq!(btn.selector, "[data-testid=\"checkout-btn\"]");
-    assert_eq!(dom.select(&btn.selector).count(), 1);
 
     let input = &outline.nodes()[1];
     assert_eq!(input.selector, "input[name=\"email_address\"]");
-    assert_eq!(dom.select(&input.selector).count(), 1);
 
     let submit = &outline.nodes()[2];
     assert_eq!(submit.selector, ".primary-btn");
-    assert_eq!(dom.select(&submit.selector).count(), 1);
 
     let link_b = &outline.nodes()[5];
     assert_eq!(link_b.selector, "#s1 > a:nth-of-type(2)");
-    assert_eq!(dom.select(&link_b.selector).count(), 1);
+
+    #[cfg(feature = "query")]
+    {
+        assert_eq!(dom.select(&btn.selector).count(), 1);
+        assert_eq!(dom.select(&input.selector).count(), 1);
+        assert_eq!(dom.select(&submit.selector).count(), 1);
+        assert_eq!(dom.select(&link_b.selector).count(), 1);
+    }
 }
 
 #[test]
