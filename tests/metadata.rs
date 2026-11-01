@@ -13,6 +13,47 @@ fn pairs(v: &[(&str, &str)]) -> Vec<(String, String)> {
 }
 
 #[test]
+fn property_and_name_alias_same_key_keeps_single_entry() {
+    let meta = parse(
+        r#"<html lang="en"><head>
+             <meta property="og:title" name="og:title" content="Shared title">
+             <meta property="og:description" name="og:description" content="Shared desc">
+             <meta property="twitter:card" name="twitter:card" content="summary_large_image">
+             <meta name="description" content="Plain description">
+             <meta property="og:image" content="/a.png">
+             <meta property="og:image" content="/b.png">
+           </head></html>"#,
+    )
+    .metadata();
+    // Both attributes name the same key -> one entry, not two.
+    let og_titles: Vec<_> = meta
+        .og
+        .iter()
+        .filter(|(k, _)| k == "og:title")
+        .map(|(_, v)| v.as_str())
+        .collect();
+    assert_eq!(og_titles, ["Shared title"]);
+    let og_descs: Vec<_> = meta
+        .og
+        .iter()
+        .filter(|(k, _)| k == "og:description")
+        .map(|(_, v)| v.as_str())
+        .collect();
+    assert_eq!(og_descs, ["Shared desc"]);
+    // Distinct properties still all survive (multi-image stays intact).
+    assert_eq!(
+        meta.og.iter().filter(|(k, _)| k == "og:image").count(),
+        2
+    );
+    assert_eq!(
+        meta.twitter,
+        pairs(&[("twitter:card", "summary_large_image")])
+    );
+    // And `name` lookup still sees the plain description.
+    assert_eq!(meta.description, s("Plain description"));
+}
+
+#[test]
 fn blog_fixture() {
     let meta = parse(include_str!("pages/reader/blog-comments.html")).metadata();
     assert_eq!(
