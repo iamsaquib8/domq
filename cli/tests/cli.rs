@@ -711,6 +711,39 @@ fn meta_output() {
     assert!(usage_error(&["--meta", "p"], html).contains("SELECTOR"));
 }
 
+#[test]
+fn outline_output() {
+    let html = r#"<nav><a href="/">Home</a></nav><main><h1>Title</h1><button type="submit">Send</button></main>"#;
+    assert_eq!(
+        ok(&["--outline"], html),
+        "[1] navigation\n[2]   link \"Home\" -> nav > a\n[3] main\n[4]   heading 1 \"Title\"\n[5]   button \"Send\" -> button[type=\"submit\"]\n"
+    );
+    assert_eq!(ok(&["--outline", "-c"], html), "5\n");
+    assert_eq!(ok(&["--outline", "-1"], html), "[1] navigation\n");
+
+    let json_out = ok(&["--outline", "-j"], html);
+    assert!(json_out.starts_with("[{\"ref\":1,\"role\":\"navigation\""));
+    assert!(json_out.contains("\"role\":\"button\""));
+    assert!(json_out.contains("\"selector\":\"button[type=\\\"submit\\\"]\""));
+
+    let jsonl_out = ok(&["--outline", "--jsonl"], html);
+    let lines: Vec<&str> = jsonl_out.lines().collect();
+    assert_eq!(lines.len(), 5);
+    assert!(lines[0].contains("\"role\":\"navigation\""));
+    assert!(lines[4].contains("\"role\":\"button\""));
+
+    // Scoped outline
+    assert_eq!(
+        ok(&["--outline", "main"], html),
+        "[1] main\n[2]   heading 1 \"Title\"\n[3]   button \"Send\" -> button[type=\"submit\"]\n"
+    );
+
+    // Conflicting flags
+    assert!(usage_error(&["--outline", "--links"], html).contains("cannot be combined"));
+    assert!(usage_error(&["--outline", "-m"], html).contains("--markdown"));
+    assert!(usage_error(&["--outline", "-a", "href"], html).contains("--attribute"));
+}
+
 // --- encoding ----------------------------------------------------------------
 
 #[test]
@@ -1008,11 +1041,12 @@ fn mcp_server_over_stdio() {
         r#"{"jsonrpc":"2.0","id":2,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#,
         r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"markdown","arguments":{"html":"<p>A <a href=x>link</a> and <img src=y.png alt=cat></p>","links":"reference","images":"alt"}}}"#,
         r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"chunks","arguments":{"html":"<h1>Guide</h1><p><a href=/page>Link</a></p>","base_url":"https://example.com/","links":"footer"}}}"#,
+        r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"outline","arguments":{"html":"<nav><a href=/>Home</a></nav>"}}}"#,
     ];
     let (out, err, code) = domq(&["mcp"], &(requests.join("\n") + "\n"));
     assert_eq!(code, 0, "stderr: {err}");
     let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines.len(), 5, "{out}");
+    assert_eq!(lines.len(), 6, "{out}");
     assert!(
         lines[0].starts_with(r#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-11-25""#),
         "{}",
@@ -1037,6 +1071,13 @@ fn mcp_server_over_stdio() {
         lines[4].contains(r##"[Link][1]"##) && lines[4].contains(r##"https://example.com/page"##),
         "{}",
         lines[4]
+    );
+    assert!(
+        lines[5].contains("navigation")
+            && lines[5].contains("structuredContent")
+            && lines[5].contains("link"),
+        "{}",
+        lines[5]
     );
 }
 

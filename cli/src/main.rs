@@ -108,6 +108,9 @@ fn run(opts: &Options) -> Result<Output, String> {
     if opts.links {
         return Ok(links_output(&dom, scope.as_ref(), base.as_deref(), opts));
     }
+    if opts.outline {
+        return Ok(outline_output(&dom, scope.as_ref(), opts));
+    }
 
     let selector = match (scope, &opts.attribute, opts.mode) {
         (Some(sel), _, _) => Some(sel),
@@ -278,6 +281,40 @@ fn links_output(dom: &Dom, scope: Option<&Selector>, base: Option<&str>, opts: &
                 .map(|(url, text)| format!("{}\t{}", one_field(url), one_field(text))),
             "\n",
         ),
+    };
+    Output { text, matched }
+}
+
+fn outline_output(dom: &Dom, scope: Option<&Selector>, opts: &Options) -> Output {
+    let mut outline = match scope {
+        Some(sel) => {
+            let mut combined = domq::PageOutline::default();
+            for m in dom.select(sel) {
+                combined.nodes.extend(m.outline().nodes);
+            }
+            for (i, node) in combined.nodes.iter_mut().enumerate() {
+                node.ref_id = i + 1;
+            }
+            combined
+        }
+        None => dom.outline(),
+    };
+    if opts.first {
+        outline.nodes.truncate(1);
+    }
+    let matched = !outline.nodes.is_empty();
+    let text = match opts.mode {
+        Mode::Count => format!("{}\n", outline.nodes.len()),
+        Mode::Json => with_newline(outline.to_json()),
+        Mode::Jsonl => {
+            let mut out = String::new();
+            for node in &outline.nodes {
+                out.push_str(&node.to_json());
+                out.push('\n');
+            }
+            out
+        }
+        _ => with_newline(outline.to_text()),
     };
     Output { text, matched }
 }

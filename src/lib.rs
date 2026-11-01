@@ -299,7 +299,7 @@ mod from_html;
 
 pub use error::{ErrorKind, ParseError};
 pub use events::{Event, Events};
-pub use extract::{Link, Metadata, Resource, to_csv};
+pub use extract::{Link, Metadata, OutlineNode, PageOutline, Resource, to_csv};
 pub use node::{NodeId, NodeKind};
 pub use source::line_col;
 pub use token::{AttrValue, Token};

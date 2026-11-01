@@ -66,6 +66,7 @@ domq -j 'table tr:nth-child(3)' -f report.html
 | `--exit-status` | exit 1 when nothing matches; without it, no matches still exit 0 |
 | `-e, --extract <NAME=SPEC>` | add a field to a JSON object (repeatable; see below) |
 | `--links` | every link as `url<TAB>text` (JSON objects with `-j`/`--jsonl`) |
+| `--outline` | semantic page outline (landmarks, headings, controls) with selectors |
 | `--meta` | page metadata (title, description, canonical, OpenGraph, JSON-LD, …) as JSON |
 | `-r, --remove-nodes <SEL>` | remove matching nodes first (repeatable) |
 | `--main` | keep only the main content (the article, without navigation, sidebars, footer) |
@@ -82,7 +83,8 @@ give at most one: combining two is a usage error (exit 2), not "the last one
 wins". The modifiers `-1`, `-w` and `-p` can be added to any of them; `-a`
 works with the default output, `-t`, `-j`, `--jsonl` and `-c`. `-e` prints JSON (`-j`, the default, or
 `--jsonl`); `--links` prints text lines (the default, or `-t`), `-c`, `-j` or
-`--jsonl`; `--meta` prints JSON. `-e`, `--links` and `--meta` are one task each
+`--jsonl`; `--outline` prints text lines (the default, or `-t`), `-c`, `-j` or
+`--jsonl`; `--meta` prints JSON. `-e`, `--links`, `--outline` and `--meta` are one task each
 and don't combine with each other or with `-a`.
 
 The document is prepared in this order: decode, parse, `-r` removals, `-b`/`-B`

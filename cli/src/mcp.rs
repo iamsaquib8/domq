@@ -47,10 +47,11 @@ const TTL_MS: &str = "3600000";
 const INSTRUCTIONS: &str = "domq parses HTML that you pass in the `html` \
 argument; it never fetches URLs, so get the page first (with a fetch tool, \
 for example) and pass its HTML. To read a page, use `markdown` (main=true \
-keeps just the article). To find elements, use `select`; to pull structured \
-fields, such as one object per product card or table row, use `extract`. \
-`chunks` prepares Markdown for embeddings; `links`, `metadata` and `tables` \
-read those parts of a page; `lint` checks HTML for accessibility and markup \
+keeps just the article). To understand page structure, use `outline`; \
+to find elements, use `select`; to pull structured fields, such as one \
+object per product card or table row, use `extract`. `chunks` prepares \
+Markdown for embeddings; `links`, `metadata` and `tables` read those \
+parts of a page; `lint` checks HTML for accessibility and markup \
 problems. Invalid selectors come back as errors that point at the problem.";
 
 /// Serve requests from stdin until it closes.
@@ -543,6 +544,24 @@ const TOOLS: &[Tool] = &[
         run: text,
     },
     Tool {
+        name: "outline",
+        title: "Page outline",
+        description: "Semantic page outline of landmarks, headings, interactive controls \
+            and forms, with synthesized unique selectors and accessible names. Returns \
+            both a compact indented text outline and structured nodes.",
+        input: concat!(
+            r#"{"type":"object","properties":{"#,
+            html_arg!(),
+            ",",
+            selector_arg!(),
+            r#"},"required":["html"],"additionalProperties":false}"#
+        ),
+        output: Some(
+            r#"{"type":"object","properties":{"count":{"type":"integer"},"outline":{"type":"array","items":{"type":"object","properties":{"ref":{"type":"integer"},"role":{"type":"string"},"name":{"type":["string","null"]},"level":{"type":["integer","null"]},"selector":{"type":"string"},"href":{"type":["string","null"]},"tag":{"type":"string"},"depth":{"type":"integer"},"source_range":{"type":["array","null"],"items":{"type":"integer"}}},"required":["ref","role","selector","tag","depth"]}},"nodes":{"type":"array","items":{"type":"object"}}},"required":["count","outline"]}"#,
+        ),
+        run: outline,
+    },
+    Tool {
         name: "select",
         title: "Select elements",
         description: "Find the elements matching a CSS selector. Returns how many \
@@ -771,6 +790,52 @@ fn text(args: &Args<'_>) -> Result<Output, String> {
         None => Output::text(dom.to_text()),
         Some(m) if m.is_empty() => no_match(),
         Some(m) => Output::text(join_blocks(m.iter().map(|n| n.to_text()))),
+    })
+}
+
+fn outline(args: &Args<'_>) -> Result<Output, String> {
+    let dom = domq::parse(args.required_str("html")?);
+    let (text, count, json_array) = match args.selector("selector")? {
+        None => {
+            let outline = dom.outline();
+            let text = outline.to_text();
+            let count = outline.len();
+            let json_array = outline.to_json();
+            (text, count, json_array)
+        }
+        Some(s) => {
+            let selector = crate::compile(s)?;
+            let matches: Vec<NodeRef<'_>> = dom.select(&selector).collect();
+            let mut combined_nodes = Vec::new();
+            let mut text_parts = Vec::new();
+            for m in &matches {
+                let sub = m.outline();
+                if !sub.is_empty() {
+                    text_parts.push(sub.to_text());
+                    combined_nodes.extend(sub.nodes);
+                }
+            }
+            for (i, node) in combined_nodes.iter_mut().enumerate() {
+                node.ref_id = i + 1;
+            }
+            let mut json_arr = String::from("[");
+            for (i, node) in combined_nodes.iter().enumerate() {
+                if i > 0 {
+                    json_arr.push(',');
+                }
+                json_arr.push_str(&node.to_json());
+            }
+            json_arr.push(']');
+            (text_parts.join("\n\n"), combined_nodes.len(), json_arr)
+        }
+    };
+    let mut out = json::Object::default();
+    out.field("count", &count.to_string())
+        .field("outline", &json_array)
+        .field("nodes", &json_array);
+    Ok(Output {
+        text,
+        structured: Some(out.finish()),
     })
 }
 
@@ -1230,6 +1295,49 @@ mod tests {
         assert_eq!(text_of(&text), "Widget\n\nGizmo");
         let none = call("text", &page_args(r#","selector":"video""#));
         assert_eq!(text_of(&none), "No elements match the selector.");
+    }
+
+    #[test]
+    fn outline_tool() {
+        let result = call("outline", &page_args(""));
+        assert!(!is_error(&result));
+        let text = text_of(&result);
+        assert!(text.contains("[1] navigation"));
+        assert!(text.contains("link \"Home\" -> nav > a"));
+        assert!(text.contains("heading 1 \"Gadgets\""));
+        assert!(text.contains("heading 2 \"Widget\""));
+
+        let structured = result.get("structuredContent").unwrap();
+        assert_eq!(structured.get("count"), Some(&Value::Number("8".into())));
+        let outline = structured.get("outline").unwrap();
+        match outline {
+            Value::Array(items) => {
+                assert_eq!(items.len(), 8);
+                assert_eq!(items[0].get("ref"), Some(&Value::Number("1".into())));
+                assert_eq!(
+                    items[0].get("role").and_then(Value::as_str),
+                    Some("navigation")
+                );
+                assert_eq!(items[1].get("ref"), Some(&Value::Number("2".into())));
+                assert_eq!(items[1].get("role").and_then(Value::as_str), Some("link"));
+                assert_eq!(items[1].get("name").and_then(Value::as_str), Some("Home"));
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // Scoped outline
+        let scoped = call("outline", &page_args(r#","selector":"nav""#));
+        assert!(!is_error(&scoped));
+        let s_text = text_of(&scoped);
+        assert!(s_text.contains("navigation"));
+        assert!(s_text.contains("link \"Home\""));
+        assert!(!s_text.contains("Gadgets"));
+        let s_structured = scoped.get("structuredContent").unwrap();
+        assert_eq!(s_structured.get("count"), Some(&Value::Number("2".into())));
+
+        // Invalid selector
+        let bad = call("outline", &page_args(r#","selector":"a:hover""#));
+        assert!(is_error(&bad));
     }
 
     #[test]
