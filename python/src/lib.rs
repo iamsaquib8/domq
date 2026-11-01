@@ -57,6 +57,42 @@ impl Document {
     }
 }
 
+fn parse_py_markdown_options(
+    links: Option<&str>,
+    images: Option<&str>,
+    drop_data_uris: bool,
+    base_url: Option<String>,
+) -> PyResult<domq::MarkdownOptions> {
+    let mut opts = domq::MarkdownOptions::default();
+    if let Some(l) = links {
+        opts.link_style = match l.to_ascii_lowercase().as_str() {
+            "inline" => domq::LinkStyle::Inline,
+            "reference" => domq::LinkStyle::Reference,
+            "footer" => domq::LinkStyle::Footer,
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unknown links style {other:?}; expected 'inline', 'reference' or 'footer'"
+                )));
+            }
+        };
+    }
+    if let Some(img) = images {
+        opts.image_style = match img.to_ascii_lowercase().as_str() {
+            "keep" => domq::ImageStyle::Keep,
+            "alt" => domq::ImageStyle::AltOnly,
+            "drop" => domq::ImageStyle::Drop,
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unknown images style {other:?}; expected 'keep', 'alt' or 'drop'"
+                )));
+            }
+        };
+    }
+    opts.drop_data_uris = drop_data_uris;
+    opts.base_url = base_url;
+    Ok(opts)
+}
+
 #[pymethods]
 impl Document {
     /// Every element matching a CSS selector, in document order.
@@ -92,8 +128,19 @@ impl Document {
 
     /// CommonMark + GFM Markdown (headings, lists, links, images, code
     /// blocks, tables, quotes) — handy for LLM prompts and RAG indexes.
-    fn to_markdown(&self, py: Python<'_>) -> String {
-        maybe_detach(py, self.large(), || self.dom.to_markdown())
+    #[pyo3(signature = (links = None, images = None, drop_data_uris = false, base_url = None))]
+    fn to_markdown(
+        &self,
+        py: Python<'_>,
+        links: Option<&str>,
+        images: Option<&str>,
+        drop_data_uris: bool,
+        base_url: Option<String>,
+    ) -> PyResult<String> {
+        let opts = parse_py_markdown_options(links, images, drop_data_uris, base_url)?;
+        Ok(maybe_detach(py, self.large(), || {
+            self.dom.to_markdown_with(&opts)
+        }))
     }
 
     /// The document re-serialized as HTML.
@@ -306,8 +353,16 @@ impl Element {
     }
 
     /// This element as Markdown.
-    fn to_markdown(&self) -> PyResult<String> {
-        Ok(self.node()?.to_markdown())
+    #[pyo3(signature = (links = None, images = None, drop_data_uris = false, base_url = None))]
+    fn to_markdown(
+        &self,
+        links: Option<&str>,
+        images: Option<&str>,
+        drop_data_uris: bool,
+        base_url: Option<String>,
+    ) -> PyResult<String> {
+        let opts = parse_py_markdown_options(links, images, drop_data_uris, base_url)?;
+        Ok(self.node()?.to_markdown_with(&opts))
     }
 
     /// This element's subtree as a JSON string.

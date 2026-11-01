@@ -144,7 +144,7 @@ fn document_output(dom: &Dom, opts: &Options) -> String {
         }
         Mode::Html => dom.to_html(),
         Mode::Text => dom.to_text(),
-        Mode::Markdown => dom.to_markdown(),
+        Mode::Markdown => dom.to_markdown_with(&opts.markdown_options()),
         Mode::Json | Mode::Jsonl => dom.to_json(),
         // Both always have a selector (see `run`).
         Mode::Count | Mode::Csv => String::new(),
@@ -181,8 +181,9 @@ fn match_output(matches: &[NodeRef<'_>], opts: &Options) -> Output {
             lines(values.into_iter(), "\n")
         }
         Mode::Markdown => {
+            let md_opts = opts.markdown_options();
             let values: Vec<String> =
-                non_blank(matches.iter().map(|m| m.to_markdown()), opts).collect();
+                non_blank(matches.iter().map(|m| m.to_markdown_with(&md_opts)), opts).collect();
             matched = !values.is_empty();
             lines(values.into_iter(), "\n\n")
         }

@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 use core::mem;
 
 use super::is_space;
+use super::markdown::MarkdownOptions;
 use crate::tree::{Dom, NodeRef};
 
 /// The longest heading title kept in a [`Chunk::heading_path`], in characters;
@@ -120,9 +121,46 @@ impl Dom {
     pub fn to_markdown_chunks(&self, max_chars: usize) -> Vec<Chunk> {
         chunk_markdown(&self.to_markdown(), max_chars)
     }
+
+    /// Split the document into Markdown chunks using custom options; see [`Dom::to_markdown_chunks`].
+    ///
+    /// ```
+    /// use domq::{LinkStyle, MarkdownOptions};
+    ///
+    /// let dom = domq::parse("<h1>Guide</h1><p><a href='/x'>Link</a></p>");
+    /// let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
+    /// let chunks = dom.to_markdown_chunks_with(500, &opts);
+    /// assert_eq!(chunks[0].markdown, "# Guide\n\n[Link][1]\n\n[1]: /x");
+    /// ```
+    pub fn to_markdown_chunks_with(
+        &self,
+        max_chars: usize,
+        options: &MarkdownOptions,
+    ) -> Vec<Chunk> {
+        chunk_markdown(&self.to_markdown_with(options), max_chars)
+    }
 }
 
 impl NodeRef<'_> {
+    /// This node's subtree as Markdown chunks with custom options; see [`Dom::to_markdown_chunks`].
+    ///
+    /// ```
+    /// use domq::{LinkStyle, MarkdownOptions};
+    ///
+    /// let dom = domq::parse("<article><h1>Guide</h1><p><a href='/x'>Link</a></p></article>");
+    /// let article = dom.find_by_tag("article").next().unwrap();
+    /// let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
+    /// let chunks = article.to_markdown_chunks_with(500, &opts);
+    /// assert_eq!(chunks[0].markdown, "# Guide\n\n[Link][1]\n\n[1]: /x");
+    /// ```
+    pub fn to_markdown_chunks_with(
+        &self,
+        max_chars: usize,
+        options: &MarkdownOptions,
+    ) -> Vec<Chunk> {
+        chunk_markdown(&self.to_markdown_with(options), max_chars)
+    }
+
     /// This node's subtree as Markdown chunks; see [`Dom::to_markdown_chunks`].
     ///
     /// ```

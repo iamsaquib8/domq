@@ -74,6 +74,31 @@ def test_document_serializers():
     assert str(doc) == ARTICLE
 
 
+def test_document_to_markdown_options():
+    doc = domq.parse(
+        '<p><a href="/guide">Guide</a> <img src="data:image/png;base64,abc" alt="Logo"></p>'
+    )
+    assert doc.to_markdown(links="reference") == (
+        "[Guide][1] ![Logo](data:image/png;base64,abc)\n\n[1]: /guide"
+    )
+    assert doc.to_markdown(links="footer") == (
+        "[Guide][1] ![Logo](data:image/png;base64,abc)\n\n### Links\n\n1. [Guide](/guide)"
+    )
+    assert doc.to_markdown(images="alt") == "[Guide](/guide) Logo"
+    assert doc.to_markdown(images="drop") == "[Guide](/guide)"
+    assert doc.to_markdown(drop_data_uris=True) == "[Guide](/guide) Logo"
+    assert doc.to_markdown(base_url="https://example.com/blog/") == (
+        "[Guide](https://example.com/guide) ![Logo](data:image/png;base64,abc)"
+    )
+
+    import pytest
+
+    with pytest.raises(ValueError, match="unknown links style"):
+        doc.to_markdown(links="invalid")
+    with pytest.raises(ValueError, match="unknown images style"):
+        doc.to_markdown(images="invalid")
+
+
 def test_document_to_json():
     data = json.loads(domq.parse("<p class=a>hi</p>").to_json())
     assert data["type"] == "document"
@@ -227,6 +252,10 @@ def test_tree_navigation(page):
 
 def test_element_markdown_and_json(page):
     assert page.select_first("a.buy").to_markdown() == "[Buy](/buy/1)"
+    assert (
+        page.select_first("a.buy").to_markdown(links="reference")
+        == "[Buy][1]\n\n[1]: /buy/1"
+    )
     data = json.loads(page.select_first("h2").to_json())
     assert data["tag"] == "h2"
 

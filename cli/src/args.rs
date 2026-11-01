@@ -47,6 +47,14 @@ OUTPUT (default: matching elements as HTML, one per line; -t, -m, -j, --jsonl,
     -w, --ignore-whitespace     Skip matches whose output is empty or whitespace
                                 (with --links, links without text)
         --exit-status           Exit 1 when nothing matches
+        --markdown-links <STYLE>
+                                Link style for -m/--markdown: inline (default),
+                                reference or footer
+        --markdown-images <STYLE>
+                                Image style for -m/--markdown: keep (default),
+                                alt or drop
+        --markdown-drop-data-uris
+                                Strip data: URIs in Markdown links and images
 
 EXTRACT:
     -e, --extract <NAME=SPEC>   Print a JSON object with a NAME key (repeat it);
@@ -217,6 +225,35 @@ pub struct Options {
     pub input: Option<String>,
     pub output: Option<String>,
     pub encoding: Option<String>,
+    pub markdown_links: Option<String>,
+    pub markdown_images: Option<String>,
+    pub markdown_drop_data_uris: bool,
+}
+
+impl Options {
+    /// Build [`domq::MarkdownOptions`] from CLI flags.
+    pub fn markdown_options(&self) -> domq::MarkdownOptions {
+        let mut mo = domq::MarkdownOptions::default();
+        if let Some(links) = &self.markdown_links {
+            mo.link_style = match links.as_str() {
+                "reference" => domq::LinkStyle::Reference,
+                "footer" => domq::LinkStyle::Footer,
+                _ => domq::LinkStyle::Inline,
+            };
+        }
+        if let Some(images) = &self.markdown_images {
+            mo.image_style = match images.as_str() {
+                "alt" => domq::ImageStyle::AltOnly,
+                "drop" => domq::ImageStyle::Drop,
+                _ => domq::ImageStyle::Keep,
+            };
+        }
+        mo.drop_data_uris = self.markdown_drop_data_uris;
+        if let Some(base) = &self.base {
+            mo.base_url = Some(base.clone());
+        }
+        mo
+    }
 }
 
 /// `domq lint` options.
@@ -465,6 +502,9 @@ enum Flag {
     Filename,
     Output,
     Encoding,
+    MarkdownLinks,
+    MarkdownImages,
+    MarkdownDropDataUris,
     Help,
     Version,
 }
@@ -493,6 +533,9 @@ impl Flag {
             "filename" | "file" => Flag::Filename,
             "output" => Flag::Output,
             "encoding" => Flag::Encoding,
+            "markdown-links" => Flag::MarkdownLinks,
+            "markdown-images" => Flag::MarkdownImages,
+            "markdown-drop-data-uris" => Flag::MarkdownDropDataUris,
             "help" => Flag::Help,
             "version" => Flag::Version,
             _ => return None,
@@ -531,6 +574,8 @@ impl Flag {
                 | Flag::Filename
                 | Flag::Output
                 | Flag::Encoding
+                | Flag::MarkdownLinks
+                | Flag::MarkdownImages
         )
     }
 }
@@ -553,6 +598,32 @@ fn apply_value(opts: &mut Options, flag: Flag, value: String) -> Result<(), ArgE
         Flag::Filename => opts.input = Some(value),
         Flag::Output => opts.output = Some(value),
         Flag::Encoding => opts.encoding = Some(value),
+        Flag::MarkdownLinks => {
+            let val = value.to_ascii_lowercase();
+            if !matches!(val.as_str(), "inline" | "reference" | "footer") {
+                return Err(ArgError::new(format!(
+                    "invalid --markdown-links: {:?} (expected inline, reference or footer)",
+                    value
+                )));
+            }
+            if opts.mode == Mode::Html {
+                opts.mode = Mode::Markdown;
+            }
+            opts.markdown_links = Some(val);
+        }
+        Flag::MarkdownImages => {
+            let val = value.to_ascii_lowercase();
+            if !matches!(val.as_str(), "keep" | "alt" | "drop") {
+                return Err(ArgError::new(format!(
+                    "invalid --markdown-images: {:?} (expected keep, alt or drop)",
+                    value
+                )));
+            }
+            if opts.mode == Mode::Html {
+                opts.mode = Mode::Markdown;
+            }
+            opts.markdown_images = Some(val);
+        }
         _ => {}
     }
     Ok(())
@@ -567,6 +638,13 @@ fn apply_switch(opts: &mut Options, flag: Flag) -> Result<Option<Command>, ArgEr
         Flag::Jsonl => Mode::Jsonl,
         Flag::Csv => Mode::Csv,
         Flag::Count => Mode::Count,
+        Flag::MarkdownDropDataUris => {
+            if opts.mode == Mode::Html {
+                opts.mode = Mode::Markdown;
+            }
+            opts.markdown_drop_data_uris = true;
+            return Ok(None);
+        }
         Flag::Pretty => {
             opts.pretty = true;
             return Ok(None);

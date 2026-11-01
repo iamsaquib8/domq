@@ -308,7 +308,7 @@ pub use tree::{Descendants, Dom, NodeRef};
 pub use url::{resolve_srcset, resolve_url};
 
 #[cfg(feature = "markdown")]
-pub use serialize::Chunk;
+pub use serialize::{Chunk, ImageStyle, LinkStyle, MarkdownOptions};
 
 #[cfg(feature = "query")]
 pub use query::{AsSelector, Selector, SelectorError};

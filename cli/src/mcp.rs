@@ -491,6 +491,15 @@ macro_rules! base_arg {
         r#""base_url":{"type":"string","description":"The page's URL. Relative links are resolved against it (and against the page's <base href>)."}"#
     };
 }
+macro_rules! markdown_options_args {
+    () => {
+        concat!(
+            r#""links":{"type":"string","enum":["inline","reference","footer"],"default":"inline","description":"Link formatting style: 'inline' ([text](url)), 'reference' ([text][1]), or 'footer' (summary list at end of document)."},"#,
+            r#""images":{"type":"string","enum":["keep","alt","drop"],"default":"keep","description":"Image formatting style: 'keep' (![alt](url)), 'alt' (only alt text), or 'drop' (omit images)."},"#,
+            r#""drop_data_uris":{"type":"boolean","default":false,"description":"Strip data: URIs in links and images to reduce token usage."}"#
+        )
+    };
+}
 
 const TOOLS: &[Tool] = &[
     Tool {
@@ -508,6 +517,8 @@ const TOOLS: &[Tool] = &[
             main_arg!(),
             ",",
             base_arg!(),
+            ",",
+            markdown_options_args!(),
             r#"},"required":["html"],"additionalProperties":false}"#
         ),
         output: None,
@@ -592,6 +603,8 @@ const TOOLS: &[Tool] = &[
             main_arg!(),
             ",",
             base_arg!(),
+            ",",
+            markdown_options_args!(),
             r#"},"required":["html"],"additionalProperties":false}"#
         ),
         output: Some(
@@ -709,12 +722,46 @@ fn join_blocks(parts: impl Iterator<Item = String>) -> String {
         .join("\n\n")
 }
 
+fn parse_markdown_options(args: &Args<'_>) -> Result<domq::MarkdownOptions, String> {
+    let mut opts = domq::MarkdownOptions::default();
+    if let Some(links) = args.str("links")? {
+        opts.link_style = match links.to_ascii_lowercase().as_str() {
+            "inline" => domq::LinkStyle::Inline,
+            "reference" => domq::LinkStyle::Reference,
+            "footer" => domq::LinkStyle::Footer,
+            other => {
+                return Err(format!(
+                    "unknown links style `{other}`; expected inline, reference or footer"
+                ));
+            }
+        };
+    }
+    if let Some(images) = args.str("images")? {
+        opts.image_style = match images.to_ascii_lowercase().as_str() {
+            "keep" => domq::ImageStyle::Keep,
+            "alt" => domq::ImageStyle::AltOnly,
+            "drop" => domq::ImageStyle::Drop,
+            other => {
+                return Err(format!(
+                    "unknown images style `{other}`; expected keep, alt or drop"
+                ));
+            }
+        };
+    }
+    opts.drop_data_uris = args.flag("drop_data_uris")?;
+    if let Some(base) = args.str("base_url")? {
+        opts.base_url = Some(base.to_string());
+    }
+    Ok(opts)
+}
+
 fn markdown(args: &Args<'_>) -> Result<Output, String> {
     let dom = document(args)?;
+    let opts = parse_markdown_options(args)?;
     Ok(match selected(&dom, args)? {
-        None => Output::text(dom.to_markdown()),
+        None => Output::text(dom.to_markdown_with(&opts)),
         Some(m) if m.is_empty() => no_match(),
-        Some(m) => Output::text(join_blocks(m.iter().map(|n| n.to_markdown()))),
+        Some(m) => Output::text(join_blocks(m.iter().map(|n| n.to_markdown_with(&opts)))),
     })
 }
 
@@ -795,11 +842,12 @@ fn extract_fields(args: &Args<'_>) -> Result<Output, String> {
 fn chunks(args: &Args<'_>) -> Result<Output, String> {
     let max_chars = args.int("max_chars", 2000, 1, 1_000_000)?;
     let dom = document(args)?;
+    let opts = parse_markdown_options(args)?;
     let chunks = match selected(&dom, args)? {
-        None => dom.to_markdown_chunks(max_chars),
+        None => dom.to_markdown_chunks_with(max_chars, &opts),
         Some(m) => m
             .iter()
-            .flat_map(|n| n.to_markdown_chunks(max_chars))
+            .flat_map(|n| n.to_markdown_chunks_with(max_chars, &opts))
             .collect(),
     };
     let items = chunks.iter().map(|c| {

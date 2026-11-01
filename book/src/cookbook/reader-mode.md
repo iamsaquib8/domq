@@ -42,6 +42,22 @@ import { toMarkdown } from "domq-wasm";
 toMarkdown(html, "article");   // or toMarkdown(html) for the whole page
 ```
 
+### Configuring Markdown output
+
+Markdown output can be tuned with `MarkdownOptions`:
+
+```rust
+# extern crate domq;
+# let dom = domq::parse("<article><a href=\"/docs\">Docs</a></article>");
+let opts = domq::MarkdownOptions::default()
+    .link_style(domq::LinkStyle::Reference)
+    .image_style(domq::ImageStyle::AltOnly)
+    .drop_data_uris(true);
+let md = dom.to_markdown_with(&opts);
+```
+
+Link styles include `LinkStyle::Inline` (default), `LinkStyle::Reference` (`[text][1]`), and `LinkStyle::Footer` (`### Links` list at document end). Image styles include `ImageStyle::Keep`, `ImageStyle::AltOnly`, and `ImageStyle::Drop`.
+
 ## Chunks for embeddings
 
 ```rust

@@ -25,11 +25,11 @@ The WASI build works too: `"command": "wasmtime", "args": ["domq.wasm", "mcp"]`.
 
 | Tool | Arguments (besides `html`) | Returns |
 |---|---|---|
-| `markdown` | `selector`, `main`, `base_url` | the page, or each match, as Markdown |
+| `markdown` | `selector`, `main`, `base_url`, `links`, `images`, `drop_data_uris` | the page, or each match, as Markdown |
 | `text` | `selector`, `main` | readable text |
 | `select` | `selector`, `limit` (50), `include_html`, `max_chars` (1000) | `{count, truncated, matches: [{tag, attrs, text, html?}]}` |
 | `extract` | `fields` (name → spec, as in `domq -e`), `selector`, `base_url` | `{results: [{…}]}`, one object per match of `selector` |
-| `chunks` | `max_chars` (2000), `selector`, `main`, `base_url` | `{chunks: [{context, heading_path, markdown}]}` |
+| `chunks` | `max_chars` (2000), `selector`, `main`, `base_url`, `links`, `images`, `drop_data_uris` | `{chunks: [{context, heading_path, markdown}]}` |
 | `links` | `selector`, `base_url` | `{count, links: [{url, text}]}` |
 | `metadata` | `base_url` | title, description, canonical, OpenGraph, JSON-LD, feeds, … |
 | `tables` | `selector` (default `table`) | `{tables: [{rows: [[cell, …]]}]}` |

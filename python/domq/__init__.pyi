@@ -4,7 +4,7 @@ Parse messy real-world HTML, query it with CSS selectors, and get readable
 text, Markdown, HTML or JSON back. Powered by the domq Rust crate.
 """
 
-from typing import Any, Callable, Optional, TypeVar, Union, final, overload
+from typing import Any, Callable, Literal, Optional, TypeVar, Union, final, overload
 
 from _typeshed import DataclassInstance
 
@@ -57,9 +57,21 @@ class Document:
         """Readable plain text: no ``<script>``/``<style>``/``<head>``,
         whitespace collapsed, a line per block, a blank line between
         paragraphs."""
-    def to_markdown(self) -> str:
+    def to_markdown(
+        self,
+        links: Optional[Literal["inline", "reference", "footer"]] = None,
+        images: Optional[Literal["keep", "alt", "drop"]] = None,
+        drop_data_uris: bool = False,
+        base_url: Optional[str] = None,
+    ) -> str:
         """CommonMark + GFM Markdown (headings, lists, links, images, code
-        blocks, tables, quotes) — handy for LLM prompts and RAG indexes."""
+        blocks, tables, quotes) — handy for LLM prompts and RAG indexes.
+
+        :param links: Link formatting: ``"inline"`` (default), ``"reference"``, or ``"footer"``.
+        :param images: Image formatting: ``"keep"`` (default), ``"alt"``, or ``"drop"``.
+        :param drop_data_uris: If True, data: URIs in links and images are dropped.
+        :param base_url: Base URL to resolve relative URLs against.
+        """
     def to_html(self) -> str:
         """The document re-serialized as HTML."""
     def to_json(self) -> str:
@@ -135,8 +147,20 @@ class Element:
     @property
     def document(self) -> Document:
         """The :class:`Document` this element belongs to."""
-    def to_markdown(self) -> str:
-        """This element as Markdown."""
+    def to_markdown(
+        self,
+        links: Optional[Literal["inline", "reference", "footer"]] = None,
+        images: Optional[Literal["keep", "alt", "drop"]] = None,
+        drop_data_uris: bool = False,
+        base_url: Optional[str] = None,
+    ) -> str:
+        """This element as Markdown.
+
+        :param links: Link formatting: ``"inline"`` (default), ``"reference"``, or ``"footer"``.
+        :param images: Image formatting: ``"keep"`` (default), ``"alt"``, or ``"drop"``.
+        :param drop_data_uris: If True, data: URIs in links and images are dropped.
+        :param base_url: Base URL to resolve relative URLs against.
+        """
     def to_json(self) -> str:
         """This element's subtree as a JSON string."""
     def __str__(self) -> str: ...

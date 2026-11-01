@@ -33,6 +33,8 @@ mod chunk;
 
 #[cfg(feature = "markdown")]
 pub use chunk::Chunk;
+#[cfg(feature = "markdown")]
+pub use markdown::{ImageStyle, LinkStyle, MarkdownOptions};
 
 #[cfg(feature = "json")]
 mod json;
