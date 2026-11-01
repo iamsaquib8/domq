@@ -171,6 +171,10 @@ impl Dom {
     /// exactly its document: they are appended wholesale, and node ids, string
     /// spans and attribute runs all shift by a constant.
     fn graft(&mut self, frag: &Dom) -> Vec<NodeId> {
+        if frag.has_noscript {
+            self.has_noscript = true;
+            self.noscript_is_content = crate::serialize::noscript_is_content(self);
+        }
         let base = self.nodes.len();
         let shift = |id: Option<NodeId>| id.map(|i| NodeId::from_index(base + i.index()));
         // `as u32` like `intern`: an arena past 4 GiB is out of reach anyway.
@@ -512,6 +516,10 @@ impl Dom {
     fn new_element(&mut self, tag: &str) -> Option<NodeId> {
         if !tags::is_valid_tag_name(tag) {
             return None;
+        }
+        if tag.eq_ignore_ascii_case("noscript") {
+            self.has_noscript = true;
+            self.noscript_is_content = crate::serialize::noscript_is_content(self);
         }
         let name = self.intern_lower(tag);
         // An empty run at the end of the arena: the first `set_attr` appends

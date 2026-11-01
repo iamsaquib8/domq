@@ -65,7 +65,7 @@ impl Dom {
     /// ```
     pub fn to_markdown(&self) -> String {
         let mut md = Markdown {
-            noscript: super::noscript_is_content(self),
+            noscript: self.noscript_is_content,
             ..Markdown::default()
         };
         for root in self.roots() {
@@ -98,7 +98,7 @@ impl NodeRef<'_> {
     pub fn to_markdown(&self) -> String {
         let mut md = Markdown {
             root: Some(self.id()),
-            noscript: super::noscript_is_content(self.dom()),
+            noscript: self.dom().noscript_is_content,
             ..Markdown::default()
         };
         walk(*self, |node, enter| md.visit(node, enter));

@@ -52,6 +52,9 @@ pub(crate) fn parse_document(src: &str) -> Dom {
     let mut dom = builder.sink.dom;
     dom.errors = builder.errors;
     dom.release_spare_capacity();
+    if dom.has_noscript {
+        dom.noscript_is_content = crate::serialize::noscript_is_content(&dom);
+    }
     dom
 }
 
@@ -371,6 +374,9 @@ impl<'a> Sink<'a> for DomSink {
         start: usize,
         end: usize,
     ) -> (NodeId, Span) {
+        if name.eq_ignore_ascii_case("noscript") {
+            self.dom.has_noscript = true;
+        }
         let name = self.dom.intern(&name);
         // The attributes are the last `attrs` pairs of the arena.
         let first = self.dom.attrs.len().saturating_sub(attrs);

@@ -53,6 +53,21 @@ impl Chunk {
     pub fn context(&self) -> String {
         self.heading_path.join(" > ")
     }
+
+    /// Split Markdown into chunks of at most `max_chars` characters, each
+    /// carrying its heading path; see [`Dom::to_markdown_chunks`].
+    ///
+    /// ```
+    /// use domq::Chunk;
+    ///
+    /// let md = "# Guide\n\nWelcome.\n\n## Install\n\nRun it.";
+    /// let chunks = Chunk::from_markdown(md, 1000);
+    /// assert_eq!(chunks[0].context(), "Guide");
+    /// assert_eq!(chunks[1].context(), "Guide > Install");
+    /// ```
+    pub fn from_markdown(markdown: &str, max_chars: usize) -> Vec<Chunk> {
+        chunk_markdown(markdown, max_chars)
+    }
 }
 
 impl Dom {
@@ -532,21 +547,58 @@ fn code_span(body: &str, n: usize) -> Option<(&str, &str)> {
 
 /// Skip a link destination and title, `(…)`, returning what follows.
 fn skip_destination(rest: &str) -> &str {
+    let mut dest_started = false;
     let mut angle = false;
-    let mut quote = false;
+    let mut quote: Option<char> = None;
+    let mut parens = 0u32;
     let mut escaped = false;
     for (i, c) in rest.char_indices().skip(1) {
         if escaped {
             escaped = false;
             continue;
         }
-        match c {
-            '\\' => escaped = true,
-            '<' if !quote && i == 1 => angle = true,
-            '>' if angle => angle = false,
-            '"' if !angle => quote = !quote,
-            ')' if !angle && !quote => return rest.get(i + 1..).unwrap_or(""),
-            _ => {}
+        if c == '\\' {
+            escaped = true;
+            continue;
+        }
+        if !dest_started {
+            if is_space(c) {
+                continue;
+            }
+            dest_started = true;
+            if c == '<' {
+                angle = true;
+                continue;
+            }
+            if c == ')' {
+                return rest.get(i + 1..).unwrap_or("");
+            }
+        }
+        if angle {
+            if c == '>' {
+                angle = false;
+            }
+        } else {
+            match quote {
+                Some(q) if c == q => quote = None,
+                Some(_) => {}
+                None => match c {
+                    '"' | '\'' => quote = Some(c),
+                    '(' => {
+                        if parens < 32 {
+                            parens += 1;
+                        }
+                    }
+                    ')' => {
+                        if parens > 0 {
+                            parens -= 1;
+                        } else {
+                            return rest.get(i + 1..).unwrap_or("");
+                        }
+                    }
+                    _ => {}
+                },
+            }
         }
     }
     ""
@@ -560,5 +612,44 @@ impl serde::Serialize for Chunk {
         st.serialize_field("heading_path", &self.heading_path)?;
         st.serialize_field("markdown", &self.markdown)?;
         st.end()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skip_destination_balanced_parens_and_titles() {
+        assert_eq!(
+            skip_destination("(https://en.wikipedia.org/wiki/Rust_(programming_language)) Guide"),
+            " Guide"
+        );
+        assert_eq!(
+            skip_destination("(https://example.com/a 'Doc (v1)') Section"),
+            " Section"
+        );
+        assert_eq!(
+            skip_destination("(https://example.com/a \"Doc (v1)\") Section"),
+            " Section"
+        );
+        assert_eq!(
+            skip_destination("(<https://en.wikipedia.org/wiki/Rust_(programming_language)>) Guide"),
+            " Guide"
+        );
+    }
+
+    #[test]
+    fn heading_text_strips_links_with_parens_and_quotes() {
+        assert_eq!(
+            heading_text(
+                "# [Rust](https://en.wikipedia.org/wiki/Rust_(programming_language)) Guide"
+            ),
+            "Rust Guide"
+        );
+        assert_eq!(
+            heading_text("# [Link](https://example.com/a 'Doc (v1)') Section"),
+            "Link Section"
+        );
     }
 }

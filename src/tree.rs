@@ -35,6 +35,8 @@ pub struct Dom {
     /// and [`Dom::nodes`] is a plain scan of the arena.
     pub(crate) reordered: bool,
     pub(crate) errors: Vec<ParseError>,
+    pub(crate) has_noscript: bool,
+    pub(crate) noscript_is_content: bool,
 }
 
 impl Dom {
@@ -52,6 +54,8 @@ impl Dom {
             last_root: None,
             reordered: false,
             errors: Vec::new(),
+            has_noscript: false,
+            noscript_is_content: false,
         }
     }
 
