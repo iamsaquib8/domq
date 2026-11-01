@@ -86,7 +86,7 @@ def test_document_to_markdown_options():
     )
     assert doc.to_markdown(images="alt") == "[Guide](/guide) Logo"
     assert doc.to_markdown(images="drop") == "[Guide](/guide)"
-    assert doc.to_markdown(drop_data_uris=True) == "[Guide](/guide)"
+    assert doc.to_markdown(drop_data_uris=True) == "[Guide](/guide) Logo"
     assert doc.to_markdown(base_url="https://example.com/blog/") == (
         "[Guide](https://example.com/guide) ![Logo](data:image/png;base64,abc)"
     )
