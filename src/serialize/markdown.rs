@@ -20,7 +20,7 @@
 //! styling is lost. There is no pure-Markdown spelling of it that keeps the
 //! text unchanged.
 
-use alloc::string::String;
+use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
 use core::fmt::Write as _;
 use core::mem;
@@ -41,7 +41,138 @@ const MAX_PAD: usize = 64;
 /// (`-3.` would read as a bullet), so numbers are clamped to `0..=MAX_NUMBER`.
 const MAX_NUMBER: i64 = 999_999_999;
 
+/// How hyperlinks are formatted in Markdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LinkStyle {
+    /// Standard CommonMark inline links: `[text](url)` or `[text](url "title")`.
+    #[default]
+    Inline,
+    /// CommonMark reference-style links: `[text][1]` inline, with `[1]: url`
+    /// definitions collected at the end of the document.
+    Reference,
+    /// Summary links footer: `[text][1]` inline, with an ordered `### Links`
+    /// summary list at the end of the document.
+    Footer,
+}
+
+impl LinkStyle {
+    /// Alias for [`LinkStyle::Footer`].
+    #[allow(non_upper_case_globals)]
+    pub const Footnote: Self = Self::Footer;
+}
+
+/// How images are formatted in Markdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImageStyle {
+    /// Standard CommonMark images: `![alt](url)` or `![alt](url "title")`.
+    #[default]
+    Keep,
+    /// Only emit the image's `alt` text as plain text.
+    AltOnly,
+    /// Omit images entirely.
+    Drop,
+}
+
+/// Configuration options for Markdown conversion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkdownOptions {
+    /// How hyperlinks are formatted.
+    pub link_style: LinkStyle,
+    /// How images are formatted.
+    pub image_style: ImageStyle,
+    /// Whether to drop `data:` URIs from links and images.
+    pub drop_data_uris: bool,
+    /// Base URL to resolve relative `href` and `src` attributes against.
+    pub base_url: Option<String>,
+    /// Maximum blank lines between blocks (default 1).
+    pub max_blank_lines: usize,
+}
+
+impl Default for MarkdownOptions {
+    fn default() -> Self {
+        Self {
+            link_style: LinkStyle::Inline,
+            image_style: ImageStyle::Keep,
+            drop_data_uris: false,
+            base_url: None,
+            max_blank_lines: 1,
+        }
+    }
+}
+
+impl MarkdownOptions {
+    /// Create default options.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the link style.
+    pub fn link_style(mut self, style: LinkStyle) -> Self {
+        self.link_style = style;
+        self
+    }
+
+    /// Set the image style.
+    pub fn image_style(mut self, style: ImageStyle) -> Self {
+        self.image_style = style;
+        self
+    }
+
+    /// Whether to drop `data:` URIs.
+    pub fn drop_data_uris(mut self, drop: bool) -> Self {
+        self.drop_data_uris = drop;
+        self
+    }
+
+    /// Set the base URL.
+    pub fn base_url(mut self, base: impl Into<String>) -> Self {
+        self.base_url = Some(base.into());
+        self
+    }
+
+    /// Set the maximum blank lines between blocks.
+    pub fn max_blank_lines(mut self, max: usize) -> Self {
+        self.max_blank_lines = max;
+        self
+    }
+}
+
+static DEFAULT_OPTIONS: MarkdownOptions = MarkdownOptions {
+    link_style: LinkStyle::Inline,
+    image_style: ImageStyle::Keep,
+    drop_data_uris: false,
+    base_url: None,
+    max_blank_lines: 1,
+};
+
 impl Dom {
+    /// Convert the document to Markdown with custom options; see [`MarkdownOptions`].
+    /// Convert the document to Markdown with custom options; see [`MarkdownOptions`].
+    ///
+    /// ```
+    /// use domq::{LinkStyle, MarkdownOptions};
+    ///
+    /// let dom = domq::parse("<p><a href='https://example.com'>Link</a></p>");
+    /// let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
+    /// assert_eq!(dom.to_markdown_with(&opts), "[Link][1]\n\n[1]: https://example.com");
+    /// ```
+    pub fn to_markdown_with(&self, options: &MarkdownOptions) -> String {
+        let base = options
+            .base_url
+            .as_deref()
+            .and_then(|b| self.base_url(Some(b)));
+        let mut md = Markdown {
+            options,
+            base,
+            noscript: self.noscript_is_content,
+            ..Markdown::default()
+        };
+        for root in self.roots() {
+            walk(root, |node, enter| md.visit(node, enter));
+        }
+        md.finish()
+    }
+
     /// Convert the document to Markdown (CommonMark + GFM tables and
     /// strikethrough) — handy for LLM prompts, RAG indexes and notes.
     ///
@@ -64,18 +195,37 @@ impl Dom {
     /// );
     /// ```
     pub fn to_markdown(&self) -> String {
-        let mut md = Markdown {
-            noscript: self.noscript_is_content,
-            ..Markdown::default()
-        };
-        for root in self.roots() {
-            walk(root, |node, enter| md.visit(node, enter));
-        }
-        md.finish()
+        self.to_markdown_with(&DEFAULT_OPTIONS)
     }
 }
 
 impl NodeRef<'_> {
+    /// This node's subtree as Markdown with custom options; see [`MarkdownOptions`].
+    ///
+    /// ```
+    /// use domq::{LinkStyle, MarkdownOptions};
+    ///
+    /// let dom = domq::parse("<div><p><a href='https://example.com'>Link</a></p></div>");
+    /// let p = dom.find_by_tag("p").next().unwrap();
+    /// let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
+    /// assert_eq!(p.to_markdown_with(&opts), "[Link][1]\n\n[1]: https://example.com");
+    /// ```
+    pub fn to_markdown_with(&self, options: &MarkdownOptions) -> String {
+        let base = options
+            .base_url
+            .as_deref()
+            .and_then(|b| self.dom().base_url(Some(b)));
+        let mut md = Markdown {
+            options,
+            base,
+            root: Some(self.id()),
+            noscript: self.dom().noscript_is_content,
+            ..Markdown::default()
+        };
+        walk(*self, |node, enter| md.visit(node, enter));
+        md.finish()
+    }
+
     /// This node's subtree as Markdown; see [`Dom::to_markdown`].
     ///
     /// ```
@@ -96,13 +246,7 @@ impl NodeRef<'_> {
     /// assert_eq!(dom.find_by_tag("head").next().unwrap().to_markdown(), "");
     /// ```
     pub fn to_markdown(&self) -> String {
-        let mut md = Markdown {
-            root: Some(self.id()),
-            noscript: self.dom().noscript_is_content,
-            ..Markdown::default()
-        };
-        walk(*self, |node, enter| md.visit(node, enter));
-        md.finish()
+        self.to_markdown_with(&DEFAULT_OPTIONS)
     }
 }
 
@@ -197,7 +341,14 @@ enum Role {
     Cell,
 }
 
-#[derive(Default)]
+#[derive(Clone)]
+struct RefDef {
+    id: usize,
+    url: String,
+    title: Option<String>,
+    text: String,
+}
+
 struct Markdown<'a> {
     out: String,
     /// Separation owed before the next block: 1 = new line, 2 = blank line.
@@ -229,6 +380,37 @@ struct Markdown<'a> {
     /// `<noscript>` holds the document's content (see
     /// [`super::noscript_is_content`]): show it as a block.
     noscript: bool,
+    options: &'a MarkdownOptions,
+    base: Option<String>,
+    references: Vec<RefDef>,
+}
+
+impl<'a> Default for Markdown<'a> {
+    fn default() -> Self {
+        Self {
+            out: String::new(),
+            sep: 0,
+            prefixes: Vec::new(),
+            lists: Vec::new(),
+            last_list: None,
+            frames: Vec::new(),
+            line: String::new(),
+            space: false,
+            breaks: 0,
+            wraps: Vec::new(),
+            closing: Vec::new(),
+            code_run: String::new(),
+            heading: 0,
+            inline_only: 0,
+            code: None,
+            table: None,
+            root: None,
+            noscript: false,
+            options: &DEFAULT_OPTIONS,
+            base: None,
+            references: Vec::new(),
+        }
+    }
 }
 
 impl<'a> Markdown<'a> {
@@ -294,7 +476,10 @@ impl<'a> Markdown<'a> {
             "em" | "i" => f.mark = self.push_mark(Mark::Emphasis),
             "del" | "s" | "strike" => f.mark = self.push_mark(Mark::Strike),
             "a" if node.attr("href").is_some_and(|h| !h.trim().is_empty()) => {
-                f.mark = self.push_mark(Mark::Link(node));
+                let href = node.attr("href").unwrap_or("").trim();
+                if !(self.options.drop_data_uris && is_data_uri(href)) {
+                    f.mark = self.push_mark(Mark::Link(node));
+                }
             }
             "dt" => {
                 self.block(&mut f);
@@ -531,8 +716,15 @@ impl<'a> Markdown<'a> {
             push_code_span(&mut self.line, &self.code_run);
             self.code_run.clear();
         }
-        for mark in self.closing.drain(..) {
-            push_close(&mut self.line, mark);
+        let marks = core::mem::take(&mut self.closing);
+        for mark in marks {
+            push_close(
+                &mut self.line,
+                mark,
+                self.options,
+                self.base.as_deref(),
+                &mut self.references,
+            );
         }
     }
 
@@ -578,7 +770,12 @@ impl<'a> Markdown<'a> {
             // A link with no visible text: use its URL as the text. Whitespace
             // that was inside it goes after it.
             let after = !spaced && mem::take(&mut self.space);
-            self.text(a.attr("href").unwrap_or("").trim());
+            let raw_href = a.attr("href").unwrap_or("").trim();
+            let url = match &self.base {
+                Some(base) => crate::url::resolve_url(base, raw_href),
+                None => raw_href.to_string(),
+            };
+            self.text(&url);
             self.space |= after;
         }
         if let Some(w) = self.wraps.pop()
@@ -589,12 +786,29 @@ impl<'a> Markdown<'a> {
     }
 
     fn image(&mut self, img: NodeRef<'_>) {
+        match self.options.image_style {
+            ImageStyle::Drop => return,
+            ImageStyle::AltOnly => {
+                let alt = img.attr("alt").unwrap_or("");
+                self.text(alt);
+                return;
+            }
+            ImageStyle::Keep => {}
+        }
         let alt = img.attr("alt").unwrap_or("");
-        let src = img.attr("src").unwrap_or("").trim();
-        if src.is_empty() {
+        let raw_src = img.attr("src").unwrap_or("").trim();
+        if raw_src.is_empty() {
             self.text(alt);
             return;
         }
+        if self.options.drop_data_uris && is_data_uri(raw_src) {
+            self.text(alt);
+            return;
+        }
+        let src = match &self.base {
+            Some(base) => crate::url::resolve_url(base, raw_src),
+            None => raw_src.to_string(),
+        };
         self.inline();
         self.line.push_str("![");
         for (i, word) in alt.split(is_space).filter(|w| !w.is_empty()).enumerate() {
@@ -604,7 +818,7 @@ impl<'a> Markdown<'a> {
             escape(&mut self.line, word, false);
         }
         self.line.push_str("](");
-        push_destination(&mut self.line, src);
+        push_destination(&mut self.line, &src);
         push_title(&mut self.line, img.attr("title"));
         self.line.push(')');
     }
@@ -680,9 +894,18 @@ impl<'a> Markdown<'a> {
     /// element continues into the next block) and drop pending whitespace.
     fn finish_line(&mut self) {
         self.settle();
-        for w in self.wraps.iter_mut().rev().filter(|w| w.open) {
-            w.open = false;
-            push_close(&mut self.line, w.mark);
+        for i in (0..self.wraps.len()).rev() {
+            if self.wraps[i].open {
+                self.wraps[i].open = false;
+                let mark = self.wraps[i].mark;
+                push_close(
+                    &mut self.line,
+                    mark,
+                    self.options,
+                    self.base.as_deref(),
+                    &mut self.references,
+                );
+            }
         }
         self.space = false;
         self.breaks = 0;
@@ -691,8 +914,12 @@ impl<'a> Markdown<'a> {
     /// Start a block's first line: the owed separation, then the prefixes.
     fn begin_block(&mut self) {
         if !self.out.is_empty() {
-            if self.sep >= 2 {
-                self.next_line(true);
+            if self.sep >= 2 && self.options.max_blank_lines > 0 {
+                let blanks =
+                    usize::from(self.sep.saturating_sub(1)).min(self.options.max_blank_lines);
+                for _ in 0..blanks {
+                    self.next_line(true);
+                }
             }
             self.out.push('\n');
         }
@@ -830,6 +1057,48 @@ impl<'a> Markdown<'a> {
         self.flush();
         let end = self.out.trim_end().len();
         self.out.truncate(end);
+        if !self.references.is_empty() {
+            match self.options.link_style {
+                LinkStyle::Inline => {}
+                LinkStyle::Reference => {
+                    if !self.out.is_empty() {
+                        self.out.push_str("\n\n");
+                    }
+                    for (i, r) in self.references.iter().enumerate() {
+                        if i > 0 {
+                            self.out.push('\n');
+                        }
+                        let _ = write!(self.out, "[{}]: ", r.id);
+                        push_destination(&mut self.out, &r.url);
+                        push_title(&mut self.out, r.title.as_deref());
+                    }
+                }
+                LinkStyle::Footer => {
+                    if !self.out.is_empty() {
+                        self.out.push_str("\n\n");
+                    }
+                    self.out.push_str("### Links\n\n");
+                    for (i, r) in self.references.iter().enumerate() {
+                        if i > 0 {
+                            self.out.push('\n');
+                        }
+                        let _ = write!(self.out, "{}. [", r.id);
+                        for c in r.text.chars() {
+                            if matches!(c, '[' | ']' | '\\') {
+                                self.out.push('\\');
+                            }
+                            self.out.push(c);
+                        }
+                        self.out.push_str("](");
+                        push_destination(&mut self.out, &r.url);
+                        push_title(&mut self.out, r.title.as_deref());
+                        self.out.push(')');
+                    }
+                }
+            }
+        }
+        let end = self.out.trim_end().len();
+        self.out.truncate(end);
         self.out
     }
 }
@@ -953,16 +1222,80 @@ fn escape(out: &mut String, word: &str, line_start: bool) {
     }
 }
 
-fn push_close(out: &mut String, mark: Mark<'_>) {
+fn is_data_uri(url: &str) -> bool {
+    let trimmed = url.trim_start();
+    trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("data:")
+}
+
+fn record_reference(
+    references: &mut Vec<RefDef>,
+    url: &str,
+    title: Option<&str>,
+    text: &str,
+) -> usize {
+    if let Some(existing) = references
+        .iter()
+        .find(|r| r.url == url && r.title.as_deref() == title)
+    {
+        return existing.id;
+    }
+    let id = references.len() + 1;
+    let mut clean_text = String::new();
+    for word in text.split(is_space).filter(|w| !w.is_empty()) {
+        if !clean_text.is_empty() {
+            clean_text.push(' ');
+        }
+        clean_text.push_str(word);
+    }
+    let text = if clean_text.is_empty() {
+        url.to_string()
+    } else {
+        clean_text
+    };
+    references.push(RefDef {
+        id,
+        url: url.to_string(),
+        title: title.map(String::from),
+        text,
+    });
+    id
+}
+
+fn push_close(
+    out: &mut String,
+    mark: Mark<'_>,
+    options: &MarkdownOptions,
+    base: Option<&str>,
+    references: &mut Vec<RefDef>,
+) {
     match mark {
         Mark::Strong => out.push_str("**"),
         Mark::Emphasis => out.push('*'),
         Mark::Strike => out.push_str("~~"),
         Mark::Link(a) => {
-            out.push_str("](");
-            push_destination(out, a.attr("href").unwrap_or("").trim());
-            push_title(out, a.attr("title"));
-            out.push(')');
+            let raw_href = a.attr("href").unwrap_or("").trim();
+            let url = match base {
+                Some(b) => crate::url::resolve_url(b, raw_href),
+                None => raw_href.to_string(),
+            };
+            let title = a.attr("title").map(str::trim).filter(|t| !t.is_empty());
+            match options.link_style {
+                LinkStyle::Inline => {
+                    out.push_str("](");
+                    push_destination(out, &url);
+                    push_title(out, title);
+                    out.push(')');
+                }
+                LinkStyle::Reference => {
+                    let id = record_reference(references, &url, title, "");
+                    let _ = write!(out, "][{id}]");
+                }
+                LinkStyle::Footer => {
+                    let text = a.text_content();
+                    let id = record_reference(references, &url, title, &text);
+                    let _ = write!(out, "][{id}]");
+                }
+            }
         }
     }
 }

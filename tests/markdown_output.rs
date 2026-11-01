@@ -605,3 +605,127 @@ macro_rules! page_snapshot {
 page_snapshot!(page_blog, "blog.html");
 page_snapshot!(page_docs, "docs.html");
 page_snapshot!(page_messy, "messy.html");
+
+// --- MarkdownOptions tests ----------------------------------------------------
+
+use domq::{ImageStyle, LinkStyle, MarkdownOptions};
+
+#[test]
+fn markdown_options_link_style_reference() {
+    let html = "<p>Visit <a href='https://example.com' title='Home'>Example</a> and \
+                <a href='https://example.com' title='Home'>again</a>, then \
+                <a href='/about'>About</a>.</p>";
+    let dom = parse(html);
+    let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
+    assert_eq!(
+        dom.to_markdown_with(&opts),
+        "Visit [Example][1] and [again][1], then [About][2].\n\n\
+         [1]: https://example.com \"Home\"\n\
+         [2]: /about"
+    );
+}
+
+#[test]
+fn markdown_options_link_style_footer() {
+    let html = "<p>Visit <a href='https://example.com' title='Home'>Example</a> and \
+                <a href='https://example.com' title='Home'>again</a>, then \
+                <a href='https://rust-lang.org'>Rust</a>.</p>";
+    let dom = parse(html);
+    let opts = MarkdownOptions::default().link_style(LinkStyle::Footer);
+    assert_eq!(
+        dom.to_markdown_with(&opts),
+        "Visit [Example][1] and [again][1], then [Rust][2].\n\n\
+         ### Links\n\n\
+         1. [Example](https://example.com \"Home\")\n\
+         2. [Rust](https://rust-lang.org)"
+    );
+}
+
+#[test]
+fn markdown_options_image_styles() {
+    let html = "<p>Photo: <img src='photo.jpg' alt='A cat' title='Cute cat'> end</p>";
+    let dom = parse(html);
+
+    // Keep (default)
+    let opts_keep = MarkdownOptions::default().image_style(ImageStyle::Keep);
+    assert_eq!(
+        dom.to_markdown_with(&opts_keep),
+        "Photo: ![A cat](photo.jpg \"Cute cat\") end"
+    );
+
+    // AltOnly
+    let opts_alt = MarkdownOptions::default().image_style(ImageStyle::AltOnly);
+    assert_eq!(dom.to_markdown_with(&opts_alt), "Photo: A cat end");
+
+    // Drop
+    let opts_drop = MarkdownOptions::default().image_style(ImageStyle::Drop);
+    assert_eq!(dom.to_markdown_with(&opts_drop), "Photo: end");
+}
+
+#[test]
+fn markdown_options_drop_data_uris() {
+    let html = "<p>An <img src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' alt='Red dot'> \
+                and a <a href='data:text/plain;charset=utf-8,hello'>data link</a>.</p>";
+    let dom = parse(html);
+
+    // Default retains data: URIs
+    let md_default = dom.to_markdown();
+    assert!(md_default.contains("![Red dot](data:image/png;base64,"));
+    assert!(md_default.contains("[data link](data:text/plain;charset=utf-8,hello)"));
+
+    // drop_data_uris = true strips them
+    let opts = MarkdownOptions::default().drop_data_uris(true);
+    assert_eq!(dom.to_markdown_with(&opts), "An Red dot and a data link.");
+}
+
+#[test]
+fn markdown_options_base_url() {
+    let html =
+        "<p>Read <a href='post.html'>post</a> and see <img src='../img/logo.png' alt='Logo'>.</p>";
+    let dom = parse(html);
+
+    let opts = MarkdownOptions::default().base_url("https://example.com/blog/2026/");
+    assert_eq!(
+        dom.to_markdown_with(&opts),
+        "Read [post](https://example.com/blog/2026/post.html) and see ![Logo](https://example.com/blog/img/logo.png)."
+    );
+
+    // Combined with LinkStyle::Reference
+    let opts_ref = MarkdownOptions::default()
+        .base_url("https://example.com/blog/2026/")
+        .link_style(LinkStyle::Reference);
+    assert_eq!(
+        dom.to_markdown_with(&opts_ref),
+        "Read [post][1] and see ![Logo](https://example.com/blog/img/logo.png).\n\n\
+         [1]: https://example.com/blog/2026/post.html"
+    );
+}
+
+#[test]
+fn markdown_options_max_blank_lines() {
+    let html = "<p>Para 1</p><p>Para 2</p><p>Para 3</p>";
+    let dom = parse(html);
+
+    // Default: 1 blank line (2 newlines)
+    assert_eq!(dom.to_markdown(), "Para 1\n\nPara 2\n\nPara 3");
+
+    // max_blank_lines = 0: no blank line (single newline)
+    let opts_tight = MarkdownOptions::default().max_blank_lines(0);
+    assert_eq!(dom.to_markdown_with(&opts_tight), "Para 1\nPara 2\nPara 3");
+}
+
+#[test]
+fn markdown_options_chunks() {
+    let html = "<h1>Title</h1><p>Visit <a href='/page'>Page</a>.</p>";
+    let dom = parse(html);
+
+    let opts = MarkdownOptions::default()
+        .base_url("https://example.com/")
+        .link_style(LinkStyle::Reference);
+    let chunks = dom.to_markdown_chunks_with(1000, &opts);
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(
+        chunks[0].markdown,
+        "# Title\n\nVisit [Page][1].\n\n[1]: https://example.com/page"
+    );
+}

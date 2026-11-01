@@ -59,6 +59,14 @@ OUTPUT (default: matching elements as HTML, one per line; -t, -m, -j, --jsonl,
     -w, --ignore-whitespace     Skip matches whose output is empty or whitespace
                                 (with --links, links without text)
         --exit-status           Exit 1 when nothing matches
+        --markdown-links <STYLE>
+                                Link style for -m/--markdown: inline (default),
+                                reference or footer
+        --markdown-images <STYLE>
+                                Image style for -m/--markdown: keep (default),
+                                alt or drop
+        --markdown-drop-data-uris
+                                Strip data: URIs in Markdown links and images
 
 EXTRACT:
     -e, --extract <NAME=SPEC>   Print a JSON object with a NAME key (repeat it);

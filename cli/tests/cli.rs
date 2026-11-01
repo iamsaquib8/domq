@@ -210,6 +210,36 @@ fn markdown_output() {
 }
 
 #[test]
+fn markdown_options_cli_flags() {
+    let html = "<article><p>See <a href='https://example.com' title='Home'>Example</a> and <img src='logo.png' alt='Logo'>.</p></article>";
+
+    // --markdown-links reference
+    let md_ref = ok(&["-m", "--markdown-links", "reference"], html);
+    assert!(md_ref.contains("[Example][1]"));
+    assert!(md_ref.contains("[1]: https://example.com \"Home\""));
+
+    // --markdown-links footer
+    let md_footer = ok(&["-m", "--markdown-links", "footer"], html);
+    assert!(md_footer.contains("[Example][1]"));
+    assert!(md_footer.contains("### Links\n\n1. [Example](https://example.com \"Home\")"));
+
+    // --markdown-images alt
+    let md_alt = ok(&["-m", "--markdown-images", "alt"], html);
+    assert!(md_alt.contains("Logo"));
+    assert!(!md_alt.contains("![Logo]"));
+
+    // --markdown-images drop
+    let md_drop = ok(&["-m", "--markdown-images", "drop"], html);
+    assert!(!md_drop.contains("Logo"));
+    assert!(!md_drop.contains("logo.png"));
+
+    // --markdown-drop-data-uris
+    let data_html = "<p><img src='data:image/png;base64,abc' alt='Dot'> <a href='data:text/plain,hi'>link</a></p>";
+    let md_data = ok(&["-m", "--markdown-drop-data-uris"], data_html);
+    assert_eq!(md_data, "Dot link\n");
+}
+
+#[test]
 fn count_and_first() {
     assert_eq!(ok(&["-c", "a"], PAGE), "3\n");
     assert_eq!(ok(&["-1", "-t", "li"], PAGE), "one\n");
@@ -976,11 +1006,13 @@ fn mcp_server_over_stdio() {
         r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
         r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"markdown","arguments":{"html":"<h1>Hi</h1><p>A <a href=x>link</a>"}}}"#,
         r#"{"jsonrpc":"2.0","id":2,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#,
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"markdown","arguments":{"html":"<p>A <a href=x>link</a> and <img src=y.png alt=cat></p>","links":"reference","images":"alt"}}}"#,
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"chunks","arguments":{"html":"<h1>Guide</h1><p><a href=/page>Link</a></p>","base_url":"https://example.com/","links":"footer"}}}"#,
     ];
     let (out, err, code) = domq(&["mcp"], &(requests.join("\n") + "\n"));
     assert_eq!(code, 0, "stderr: {err}");
     let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines.len(), 3, "{out}");
+    assert_eq!(lines.len(), 5, "{out}");
     assert!(
         lines[0].starts_with(r#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-11-25""#),
         "{}",
@@ -995,6 +1027,16 @@ fn mcp_server_over_stdio() {
         lines[2].contains(r#""resultType":"complete","supportedVersions":["2026-07-28""#),
         "{}",
         lines[2]
+    );
+    assert!(
+        lines[3].contains(r##""text":"A [link][1] and cat\n\n[1]: x""##),
+        "{}",
+        lines[3]
+    );
+    assert!(
+        lines[4].contains(r##"[Link][1]"##) && lines[4].contains(r##"https://example.com/page"##),
+        "{}",
+        lines[4]
     );
 }
 
