@@ -224,6 +224,10 @@ fn check_elements(dom: &Dom, order: &[NodeRef<'_>], out: &mut Vec<Raw>) {
                 "img-alt",
                 "<img> has no alt attribute (use alt=\"\" for a decorative image)".to_string(),
             )),
+            "input" if input_type(*node) == "image" && !has_name => Some((
+                "img-alt",
+                "<input type=image> has no alt text or accessible name".to_string(),
+            )),
             "a" | "area" if node.has_attr("href") && !has_name => Some((
                 "empty-link",
                 format!("<{tag}> link has no text or accessible name"),
@@ -288,10 +292,11 @@ fn names_itself(node: NodeRef<'_>) -> bool {
         .any(|a| non_blank(node.attr(a)))
         || match tag {
             "img" | "area" => non_blank(node.attr("alt")),
-            "input" => {
-                matches!(input_type(node).as_str(), "submit" | "reset")
-                    || non_blank(node.attr("value"))
-            }
+            "input" => match input_type(node).as_str() {
+                "image" => non_blank(node.attr("alt")),
+                "submit" | "reset" => true,
+                _ => non_blank(node.attr("value")),
+            },
             _ => false,
         }
 }
@@ -693,6 +698,28 @@ mod tests {
             "<img role=presentation>",
         ] {
             assert_eq!(rules(ok), [], "{ok}");
+        }
+    }
+
+    #[test]
+    fn image_inputs_need_a_name_and_name_their_parent() {
+        for html in [
+            "<input type=image src=button.png>",
+            "<input type=image alt=''>",
+            "<input type=image alt='  '>",
+            "<input type=image value=Submit>",
+        ] {
+            assert_eq!(rules(html), [(1, 1, "img-alt")], "{html}");
+        }
+        for html in [
+            "<input type=image alt=Search>",
+            "<input type=IMAGE alt=Search>",
+            "<input type=image aria-label=Search>",
+            "<input type=image title=Search>",
+            "<a href=/><input type=image alt=Search></a>",
+            "<button><input type=image alt=Search></button>",
+        ] {
+            assert_eq!(rules(html), [], "{html}");
         }
     }
 
