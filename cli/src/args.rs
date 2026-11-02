@@ -69,6 +69,8 @@ EXTRACT:
                                 links inside its matches
         --meta                  Print the page metadata (title, description,
                                 canonical, OpenGraph, JSON-LD, ...) as JSON
+        --outline               Print a semantic outline of landmarks, headings,
+                                controls and forms (with --json / --jsonl)
 
 DOCUMENT:
     -r, --remove-nodes <SEL>    Remove nodes matching SEL before selecting
@@ -218,6 +220,7 @@ pub struct Options {
     pub extract: Vec<Field>,
     pub links: bool,
     pub meta: bool,
+    pub outline: bool,
     pub remove: Vec<String>,
     pub main: bool,
     pub base: Option<String>,
@@ -443,6 +446,7 @@ fn validate(opts: &Options) -> Result<(), ArgError> {
         (!opts.extract.is_empty(), "--extract"),
         (opts.links, "--links"),
         (opts.meta, "--meta"),
+        (opts.outline, "--outline"),
     ]
     .into_iter()
     .filter_map(|(on, name)| on.then_some(name))
@@ -456,8 +460,8 @@ fn validate(opts: &Options) -> Result<(), ArgError> {
         }
         let fits = match opts.mode {
             Mode::Html | Mode::Json | Mode::Jsonl => true,
-            // Links are text lines (`-t` is the default) and countable.
-            Mode::Text | Mode::Count => opts.links,
+            // Links and outline are text lines (`-t` is the default) and countable.
+            Mode::Text | Mode::Count => opts.links || opts.outline,
             Mode::Markdown | Mode::Csv => false,
         };
         if !fits {
@@ -495,6 +499,7 @@ enum Flag {
     Extract,
     Links,
     Meta,
+    Outline,
     Remove,
     Main,
     Base,
@@ -526,6 +531,7 @@ impl Flag {
             "extract" => Flag::Extract,
             "links" => Flag::Links,
             "meta" => Flag::Meta,
+            "outline" => Flag::Outline,
             "remove-nodes" | "remove" => Flag::Remove,
             "main" => Flag::Main,
             "base" => Flag::Base,
@@ -667,6 +673,10 @@ fn apply_switch(opts: &mut Options, flag: Flag) -> Result<Option<Command>, ArgEr
         }
         Flag::Meta => {
             opts.meta = true;
+            return Ok(None);
+        }
+        Flag::Outline => {
+            opts.outline = true;
             return Ok(None);
         }
         Flag::Main => {

@@ -81,6 +81,8 @@ EXTRACT:
                                 links inside its matches
         --meta                  Print the page metadata (title, description,
                                 canonical, OpenGraph, JSON-LD, ...) as JSON
+        --outline               Print a semantic outline of landmarks, headings,
+                                controls and forms (with --json / --jsonl)
 
 DOCUMENT:
     -r, --remove-nodes <SEL>    Remove nodes matching SEL before selecting
