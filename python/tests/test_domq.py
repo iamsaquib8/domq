@@ -54,6 +54,18 @@ def test_classes_are_not_constructible():
         domq.Element()
     with pytest.raises(TypeError):
         domq.Document()
+    with pytest.raises(TypeError):
+        domq.Metadata()
+    with pytest.raises(TypeError):
+        domq.Link()
+    with pytest.raises(TypeError):
+        domq.Resource()
+    with pytest.raises(TypeError):
+        domq.Chunk()
+    with pytest.raises(TypeError):
+        domq.OutlineNode()
+    with pytest.raises(TypeError):
+        domq.PageOutline()
 
 
 def test_parse_requires_str():
@@ -409,3 +421,349 @@ def test_readme_markdown_example():
         "| OS | Status |\n| --- | --- |\n| Linux | ok |"
     )
     assert "analytics" not in doc.to_markdown()
+
+
+# --- precompiled selectors ----------------------------------------------------
+
+
+def test_precompiled_selector(page):
+    sel = domq.Selector("div.card")
+    assert sel.query == "div.card"
+    assert str(sel) == "div.card"
+    assert repr(sel) == 'Selector("div.card")'
+
+    cards = page.select(sel)
+    assert len(cards) == 2
+    assert page.select_first(sel) == cards[0]
+
+    first_card = cards[0]
+    assert sel.matches(first_card)
+    assert first_card.matches(sel)
+
+    title = first_card.select_first("h2.title")
+    assert sel.closest(title) == first_card
+    assert title.closest(sel) == first_card
+
+    # Invalid selector string in constructor raises ValueError with details
+    with pytest.raises(ValueError, match="invalid selector"):
+        domq.Selector("div >")
+
+    # Wrong type for selector argument raises TypeError
+    with pytest.raises(TypeError, match="selector must be str or domq.Selector"):
+        page.select(12345)
+    with pytest.raises(TypeError, match="selector must be str or domq.Selector"):
+        first_card.matches(None)
+
+
+# --- URL resolution -----------------------------------------------------------
+
+
+def test_url_resolution():
+    base = "https://example.com/blog/post.html?x=1"
+    assert domq.resolve_url(base, "../img/a.png") == "https://example.com/img/a.png"
+    assert domq.resolve_url(base, "/about") == "https://example.com/about"
+    assert domq.resolve_url(base, "#top") == "https://example.com/blog/post.html?x=1#top"
+    assert domq.resolve_url(base, "//cdn.example.com/x.js") == "https://cdn.example.com/x.js"
+    assert domq.resolve_url(base, "mailto:hi@example.com") == "mailto:hi@example.com"
+    assert domq.resolve_url("/docs/", "a.html") == "a.html"
+
+    srcset = "a.png 1x, /b.png 2x"
+    resolved = domq.resolve_srcset("https://example.com/p/", srcset)
+    assert resolved == "https://example.com/p/a.png 1x, https://example.com/b.png 2x"
+
+
+# --- reader mode (main_content) -----------------------------------------------
+
+
+def test_main_content():
+    html = """
+    <html>
+    <head><title>Blog</title></head>
+    <body>
+      <nav><a href="/">Home</a> <a href="/blog">Blog</a></nav>
+      <div class="post">
+        <h1>Understanding PyO3</h1>
+        <p>PyO3 provides Rust bindings for Python, allowing you to write native extensions with ease.</p>
+        <p>It provides memory safety, fearless concurrency without the GIL, and seamless integration.</p>
+      </div>
+      <div id="comments"><p>First comment here!</p></div>
+      <footer>Copyright 2026</footer>
+    </body>
+    </html>
+    """
+    doc = domq.parse(html)
+    main = doc.main_content()
+    assert main is not None
+    assert main.attr("class") == "post"
+    assert "Understanding PyO3" in main.to_text()
+    assert "First comment" not in main.to_text()
+
+    empty = domq.parse("<nav><a href='/'>Only Nav</a></nav>")
+    assert empty.main_content() is None
+
+
+# --- metadata -----------------------------------------------------------------
+
+
+def test_metadata():
+    html = """
+    <html lang="en">
+    <head>
+      <title>Article Title</title>
+      <meta name="description" content="Article summary here.">
+      <link rel="canonical" href="/canonical-post">
+      <meta property="og:site_name" content="My Site">
+      <meta property="og:image" content="/images/og.png">
+      <meta name="author" content="Jane Doe">
+      <meta property="article:published_time" content="2026-11-01T12:00:00Z">
+      <meta name="keywords" content="rust, python, bindings">
+      <meta property="og:title" content="OG Title">
+      <meta name="twitter:card" content="summary_large_image">
+      <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle"}</script>
+      <link rel="alternate" type="application/rss+xml" href="/rss.xml">
+    </head>
+    <body><p>Content</p></body>
+    </html>
+    """
+    doc = domq.parse(html)
+    meta = doc.metadata(base_url="https://example.com/posts/")
+    assert meta.title == "Article Title"
+    assert meta.description == "Article summary here."
+    assert meta.canonical == "https://example.com/canonical-post"
+    assert meta.lang == "en"
+    assert meta.language == "en"
+    assert meta.site_name == "My Site"
+    assert meta.image == "https://example.com/images/og.png"
+    assert meta.author == "Jane Doe"
+    assert meta.published == "2026-11-01T12:00:00Z"
+    assert meta.keywords == ["rust", "python", "bindings"]
+    assert any(k == "og:title" and v == "OG Title" for k, v in meta.og)
+    assert any(k == "twitter:card" and v == "summary_large_image" for k, v in meta.twitter)
+    assert len(meta.json_ld) == 1
+    assert "NewsArticle" in meta.json_ld[0]
+    assert meta.feeds == ["https://example.com/rss.xml"]
+
+    d = meta.to_dict()
+    assert d["title"] == "Article Title"
+    assert d["canonical"] == "https://example.com/canonical-post"
+    assert d["lang"] == "en"
+    assert d["language"] == "en"
+    assert "Article Title" in repr(meta)
+
+
+# --- links & resources --------------------------------------------------------
+
+
+def test_links_and_resources():
+    html = """
+    <div id="wrapper">
+      <nav>
+        <a href="/home">Home</a>
+        <a href="../about">About Us</a>
+      </nav>
+      <main>
+        <p>Check the <a href="docs.html"><img src="/logo.png" alt="Docs Logo"></a>.</p>
+        <link rel="stylesheet" href="/assets/style.css">
+        <script src="/app.js"></script>
+      </main>
+    </div>
+    """
+    doc = domq.parse(html)
+    base = "https://example.com/sub/"
+    links = doc.links(base)
+    assert len(links) == 3
+    assert links[0].url == "https://example.com/home"
+    assert links[0].text == "Home"
+    assert links[0].href == "/home"
+    assert links[0].element.tag == "a"
+    assert links[1].url == "https://example.com/about"
+    assert links[1].text == "About Us"
+    assert links[2].url == "https://example.com/sub/docs.html"
+    assert links[2].text == "Docs Logo"
+    assert str(links[0]) == "https://example.com/home"
+    assert "<Link" in repr(links[0])
+
+    resources = doc.resources(base)
+    assert len(resources) == 3
+    urls = [r.url for r in resources]
+    assert "https://example.com/assets/style.css" in urls
+    assert "https://example.com/logo.png" in urls
+    assert "https://example.com/app.js" in urls
+    img_res = next(r for r in resources if r.attr == "src" and "logo" in r.url)
+    assert img_res.tag == "img"
+    assert img_res.value == "/logo.png"
+    assert img_res.element.tag == "img"
+    assert str(img_res) == "https://example.com/logo.png"
+    assert "<Resource" in repr(img_res)
+
+    # Scoped to element
+    nav = doc.select_first("nav")
+    nav_links = nav.links(base)
+    assert len(nav_links) == 2
+    assert [l.text for l in nav_links] == ["Home", "About Us"]
+    assert nav.resources(base) == []
+
+    main = doc.select_first("main")
+    assert len(main.links(base)) == 1
+    assert len(main.resources(base)) == 3
+
+
+# --- tables & CSV -------------------------------------------------------------
+
+
+def test_tables_and_csv():
+    html = """
+    <div>
+      <table id="t1">
+        <thead>
+          <tr><th>Item</th><th>Qty</th><th>Price</th></tr>
+        </thead>
+        <tbody>
+          <tr><td rowspan="2">Apples</td><td>10</td><td>$1.50</td></tr>
+          <tr><td>5</td><td>$1.40</td></tr>
+          <tr><td colspan="2">Total</td><td>$2.90</td></tr>
+        </tbody>
+      </table>
+      <table id="t2">
+        <tr><th>User</th><th>Status</th></tr>
+        <tr><td>Alice</td><td>Active</td></tr>
+      </table>
+    </div>
+    """
+    doc = domq.parse(html)
+    t1 = doc.select_first("#t1")
+    rows = t1.table_rows()
+    assert rows == [
+        ["Item", "Qty", "Price"],
+        ["Apples", "10", "$1.50"],
+        ["Apples", "5", "$1.40"],
+        ["Total", "Total", "$2.90"],
+    ]
+    csv = t1.to_csv()
+    assert csv == (
+        "Item,Qty,Price\r\n"
+        "Apples,10,$1.50\r\n"
+        "Apples,5,$1.40\r\n"
+        "Total,Total,$2.90\r\n"
+    )
+
+    # Non-table elements return empty
+    assert doc.select_first("div").table_rows() == []
+    assert doc.select_first("div").to_csv() == ""
+
+    # Document-level tables and CSV
+    all_tables = doc.tables()
+    assert len(all_tables) == 2
+    assert all_tables[0] == rows
+    assert all_tables[1] == [["User", "Status"], ["Alice", "Active"]]
+
+    doc_csv = doc.to_csv()
+    assert "Apples" in doc_csv
+    assert "Alice,Active" in doc_csv
+
+
+# --- RAG markdown chunking ----------------------------------------------------
+
+
+def test_markdown_chunks():
+    html = """
+    <h1>Chapter 1: Getting Started</h1>
+    <p>Introduction to domq parser and fast HTML manipulation.</p>
+    <h2>Installation</h2>
+    <p>Run pip install domq to get the wheel.</p>
+    <h2>Quickstart</h2>
+    <p>Import domq and parse your HTML documents.</p>
+    <h1>Chapter 2: Advanced Usage</h1>
+    <p>Details about reader mode and metadata extraction.</p>
+    """
+    doc = domq.parse(html)
+    chunks = doc.to_markdown_chunks(max_chars=120)
+    assert len(chunks) >= 3
+    assert chunks[0].heading_path == ["Chapter 1: Getting Started"]
+    assert chunks[0].context == "Chapter 1: Getting Started"
+    assert chunks[0].byte_size == len(chunks[0].markdown.encode("utf-8"))
+    assert len(chunks[0]) == len(chunks[0].markdown)
+    assert str(chunks[0]) == chunks[0].markdown
+    assert "<Chunk" in repr(chunks[0])
+
+    # Element level chunking
+    h1 = doc.select_first("h1")
+    h1_chunks = h1.to_markdown_chunks(max_chars=100)
+    assert len(h1_chunks) == 1
+    assert "Chapter 1" in h1_chunks[0].markdown
+
+    # Supports max_bytes alias
+    bytes_chunks = doc.to_markdown_chunks(max_bytes=120)
+    assert len(bytes_chunks) == len(chunks)
+
+
+# --- page outline -------------------------------------------------------------
+
+
+def test_page_outline():
+    html = """
+    <!doctype html>
+    <html>
+    <head><title>Test Outline</title></head>
+    <body>
+      <header role="banner">
+        <h1>Site Header</h1>
+      </header>
+      <nav role="navigation">
+        <a href="/home">Home</a>
+        <button id="btn-menu">Menu</button>
+      </nav>
+      <main id="main-content">
+        <h2>Article Heading</h2>
+        <form id="contact-form">
+          <input type="text" name="username" aria-label="Username">
+          <button type="submit">Send</button>
+        </form>
+      </main>
+    </body>
+    </html>
+    """
+    doc = domq.parse(html)
+    outline = doc.outline()
+    assert len(outline) > 0
+    assert len(outline.nodes) == len(outline)
+
+    # Sequence protocol & indexing
+    first = outline[0]
+    assert first.ref_id == 1
+    assert first.role in ("banner", "heading")
+    assert outline[-1].ref_id == len(outline)
+    with pytest.raises(IndexError):
+        _ = outline[9999]
+
+    # Iteration
+    nodes = list(outline)
+    assert len(nodes) == len(outline)
+
+    # Outline node properties
+    button_node = next(n for n in nodes if n.role == "button" and n.name == "Menu")
+    assert button_node.tag == "button"
+    assert button_node.selector == "#btn-menu"
+    assert button_node.depth >= 1
+    assert "button" in button_node.to_json()
+    assert "Menu" in repr(button_node)
+    assert str(button_node) == button_node.to_json()
+
+    # PageOutline formatting
+    text = outline.to_text()
+    assert "Site Header" in text
+    assert "Menu" in text
+    assert str(outline) == text
+    assert "<PageOutline" in repr(outline)
+
+    json_str = outline.to_json()
+    parsed_json = json.loads(json_str)
+    assert isinstance(parsed_json, list)
+    assert len(parsed_json) == len(outline)
+
+    # Element outline
+    main_el = doc.select_first("main")
+    main_outline = main_el.outline()
+    assert len(main_outline) < len(outline)
+    assert any(n.role == "heading" and n.name == "Article Heading" for n in main_outline)
+
