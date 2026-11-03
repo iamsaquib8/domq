@@ -182,7 +182,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: mdbook
+          tool: mdbook@0.5.4
       # The book's Rust examples link against the library alone, built into
       # its own target dir so exactly one `domq` rlib is on the path.
       - name: Test the book's Rust examples

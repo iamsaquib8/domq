@@ -6,7 +6,7 @@
 </picture>
 
 A tiny, zero-dependency, never-panicking HTML parser with CSS selectors —
-for Rust, your shell, JavaScript (a ~41 KB gzipped WebAssembly module) and Python.
+for Rust, your shell, JavaScript (a ~65 KB gzipped WebAssembly module) and Python.
 
 [![crates.io](https://img.shields.io/crates/v/domq.svg?logo=rust)](https://crates.io/crates/domq)
 [![npm](https://img.shields.io/npm/v/domq-wasm.svg?logo=npm)](https://www.npmjs.com/package/domq-wasm)
@@ -61,7 +61,7 @@ assert_eq!(md, "## Notes\n\nSome **bold** text");
 
 ```toml
 [dependencies]
-domq = "0.5"
+domq = "0.6"
 ```
 
 ```rust
@@ -117,7 +117,7 @@ Also: 🤖 **AI agents** — `domq mcp` ([setup](#ai-agents-mcp)) · 🐍 **Pyth
   favourite, `:contains("text")`.
 - **Content out, not just a tree.** Readable text (`to_text`), CommonMark/GFM
   Markdown (`to_markdown`) for LLM prompts and RAG pipelines, JSON, and HTML.
-- **Runs everywhere.** `no_std + alloc`, `#![forbid(unsafe_code)]`, a ~43 KB
+- **Runs everywhere.** `no_std + alloc`, `#![forbid(unsafe_code)]`, a ~65 KB
   gzipped wasm module for browsers, Cloudflare Workers, Deno, Bun and Node, and a
   single static binary for your shell.
 - **Fast for an owned tree.** 5–6× faster than `scraper` on real pages, with
@@ -200,6 +200,42 @@ for chunk in &chunks {
     println!("[{}]\n{}", chunk.context(), chunk.markdown); // e.g. "[Guide > Install]"
 }
 ```
+</details>
+
+<details>
+<summary><b>Shape the Markdown: reference links, no images, absolute URLs</b></summary>
+
+```rust
+use domq::{ImageStyle, LinkStyle, MarkdownOptions};
+
+let opts = MarkdownOptions::new()
+    .link_style(LinkStyle::Reference)    // [text][1] … [1]: url (or Footer: a "### Links" list)
+    .image_style(ImageStyle::AltOnly)    // keep the alt text, drop the image
+    .drop_data_uris(true)                // no base64 blobs in the prompt
+    .base_url("https://example.com/blog/");
+let md = domq::parse(html).to_markdown_with(&opts);
+```
+
+Same options in the CLI (`--markdown-links reference --markdown-images alt`),
+MCP (`links`, `images`, `drop_data_uris`) and Python (`to_markdown(links="reference")`).
+</details>
+
+<details>
+<summary><b>A page outline an agent can act on</b></summary>
+
+```rust
+let outline = domq::parse(html).outline();
+print!("{}", outline.to_text());
+// [1] navigation
+// [2]   link "Docs" -> nav > a
+// [3] main
+// [4]   heading 1 "Pricing"
+// [5]   button "Start free trial" -> #trial
+```
+
+Landmarks, headings, links, buttons and form controls with their ARIA roles,
+accessible names and a selector to act on. Also `domq --outline`, the MCP
+`outline` tool and `doc.outline()` in Python.
 </details>
 
 <details>
@@ -331,6 +367,7 @@ gets back what it needs, instead of reading raw markup:
 | `select` | elements matching a CSS selector: tag, attributes, text (and HTML) |
 | `extract` | named fields as JSON, one object per item: `{"name": "h2", "url": "a@href"}` |
 | `chunks` | Markdown chunks with their heading paths, for RAG |
+| `outline` | landmarks, headings and controls with roles, names and selectors to act on |
 | `links`, `metadata`, `tables` | links with resolved URLs; title, OpenGraph, JSON-LD…; tables as rows |
 | `lint` | accessibility and markup problems, with line and column |
 
@@ -352,18 +389,20 @@ MCP config:
 
 ## JavaScript & WebAssembly
 
-The same parser — selectors, text, Markdown and all — in a ~41 KB (gzipped) wasm
+The same parser — selectors, text, Markdown and all — in a ~65 KB (gzipped) wasm
 module with zero JS dependencies and full TypeScript types. Works in the browser,
 Cloudflare Workers, Deno, Bun, and Node (no setup needed in Node).
 [Package docs →](./wasm) · [**Playground →**](https://iamsaquib8.github.io/domq/)
 
 ```js
-import init, { parse, select, toMarkdown, Document } from "domq-wasm";
+import init, { parse, select, toMarkdown, mainContent, toMarkdownChunks, Document } from "domq-wasm";
 await init(); // browsers and Workers; harmless in Node
 
 const tree = parse("<ul><li>a<li>b</ul>");   // typed tree: { type: "document", children: [...] }
 const links = select(html, "a[href]");       // [{ tag, attrs, text, html, nodeIndex }, ...]
 const md = toMarkdown(html, "article");      // just the article, as Markdown
+const article = mainContent(html)?.markdown; // reader mode: drops nav, ads, comments…
+const chunks = toMarkdownChunks(html, 1500); // [{ markdown, headingPath, context }, ...]
 
 const page = new Document(html);             // parse once, query many times
 const headings = page.select("h2").map((h) => h.text);
@@ -382,6 +421,9 @@ doc = domq.parse(html)
 links = [a.attr("href") for a in doc.select("a[href]")]
 price = doc.select_first(".product:has(.in-stock) .price").text
 markdown = doc.select_first("article").to_markdown()   # ready for an LLM prompt
+article = doc.main_content()                           # reader mode, or None
+chunks = doc.to_markdown_chunks(1500)                  # [Chunk(markdown, heading_path, context)]
+meta = doc.metadata()                                  # title, OpenGraph, JSON-LD…
 
 # Declarative extraction into dataclasses (mirrors Rust's #[derive(FromHtml)])
 from dataclasses import dataclass

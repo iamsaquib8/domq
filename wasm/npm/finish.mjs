@@ -13,6 +13,8 @@ const manifestPath = resolve(pkgDir, "package.json");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 
 copyFileSync(new URL("node.js", here), resolve(pkgDir, "node.js"));
+// npm always packs a file named LICENSE, but not wasm-pack's LICENSE_MIT copy.
+copyFileSync(new URL("../LICENSE_MIT", here), resolve(pkgDir, "LICENSE"));
 
 const types = "./domq_wasm.d.ts";
 const ordered = {};
@@ -34,7 +36,7 @@ for (const [key, value] of Object.entries(manifest)) {
     };
   }
 }
-ordered.files = [...new Set([...(manifest.files ?? []), "node.js"])];
+ordered.files = [...new Set([...(manifest.files ?? []), "node.js", "LICENSE"])];
 // node.js instantiates the module when imported: never tree-shake it away.
 ordered.sideEffects = [...new Set([...(manifest.sideEffects ?? []), "./node.js"])];
 

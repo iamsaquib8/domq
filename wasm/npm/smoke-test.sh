@@ -9,6 +9,11 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 (cd "$crate/pkg" && npm pack --silent --pack-destination "$work" >/dev/null)
+# The license must ship in the tarball.
+tar -tzf "$work"/domq-wasm-*.tgz | grep -qx 'package/LICENSE' || {
+  echo "smoke-test: LICENSE missing from the npm package" >&2
+  exit 1
+}
 cd "$work"
 npm init -y >/dev/null
 npm install --silent --no-audit --no-fund ./domq-wasm-*.tgz

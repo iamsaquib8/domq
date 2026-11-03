@@ -737,6 +737,14 @@ fn outline_output() {
         ok(&["--outline", "main"], html),
         "[1] main\n[2]   heading 1 \"Title\"\n[3]   button \"Send\" -> button[type=\"submit\"]\n"
     );
+    // Nested matches list each control once.
+    assert_eq!(
+        ok(
+            &["--outline", "div"],
+            "<div><div><button>X</button></div></div>"
+        ),
+        "[1] button \"X\" -> div > div > button\n"
+    );
 
     // Conflicting flags
     assert!(usage_error(&["--outline", "--links"], html).contains("cannot be combined"));

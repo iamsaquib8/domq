@@ -2,7 +2,7 @@
 
 [`scraper`](https://crates.io/crates/scraper) builds on html5ever, a fully
 spec-compliant parser. domq trades that compliance for zero dependencies, a
-0.6 s build (scraper: 42 crates, 5.3 s), `no_std`, a 42 KB wasm module, and
+0.6 s build (scraper: 42 crates, 5.3 s), `no_std`, a 65 KB wasm module, and
 content output (text, Markdown, chunks, metadata). If you need a browser's
 exact tree, keep scraper; if you scrape content, domq is usually a drop-in.
 

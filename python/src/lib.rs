@@ -131,7 +131,7 @@ impl Selector {
     }
 
     fn __repr__(&self) -> String {
-        format!("Selector({:?})", self.query)
+        format!("Selector({})", py_repr(&self.query))
     }
 }
 
@@ -250,8 +250,10 @@ impl Metadata {
 
     fn __repr__(&self) -> String {
         format!(
-            "<Metadata title={:?} canonical={:?} lang={:?}>",
-            self.inner.title, self.inner.canonical, self.inner.lang
+            "<Metadata title={} canonical={} lang={}>",
+            py_opt_repr(self.inner.title.as_deref()),
+            py_opt_repr(self.inner.canonical.as_deref()),
+            py_opt_repr(self.inner.lang.as_deref())
         )
     }
 }
@@ -292,7 +294,11 @@ impl Link {
     }
 
     fn __repr__(&self) -> String {
-        format!("<Link url={:?} text={:?}>", self.url, self.text)
+        format!(
+            "<Link url={} text={}>",
+            py_repr(&self.url),
+            py_repr(&self.text)
+        )
     }
 
     fn __str__(&self) -> &str {
@@ -344,8 +350,10 @@ impl Resource {
 
     fn __repr__(&self) -> String {
         format!(
-            "<Resource tag={:?} attr={:?} url={:?}>",
-            self.tag, self.attr, self.url
+            "<Resource tag={} attr={} url={}>",
+            py_repr(&self.tag),
+            py_repr(self.attr),
+            py_repr(&self.url)
         )
     }
 
@@ -400,7 +408,11 @@ impl Chunk {
         if ctx.is_empty() {
             format!("<Chunk len={}>", self.markdown.len())
         } else {
-            format!("<Chunk context={ctx:?} len={}>", self.markdown.len())
+            format!(
+                "<Chunk context={} len={}>",
+                py_repr(&ctx),
+                self.markdown.len()
+            )
         }
     }
 }
@@ -474,8 +486,11 @@ impl OutlineNode {
 
     fn __repr__(&self) -> String {
         format!(
-            "<OutlineNode ref={} role={:?} name={:?} selector={:?}>",
-            self.inner.ref_id, self.inner.role, self.inner.name, self.inner.selector
+            "<OutlineNode ref={} role={} name={} selector={}>",
+            self.inner.ref_id,
+            py_repr(&self.inner.role),
+            py_opt_repr(self.inner.name.as_deref()),
+            py_repr(&self.inner.selector)
         )
     }
 
@@ -597,6 +612,40 @@ fn parse_py_markdown_options(
     opts.drop_data_uris = drop_data_uris;
     opts.base_url = base_url;
     Ok(opts)
+}
+
+/// `s` as Python's `repr()` writes a `str`: single-quoted (double-quoted when
+/// it holds a `'` and no `"`), with backslashes, the quote and control
+/// characters escaped.
+fn py_repr(s: &str) -> String {
+    let quote = if s.contains('\'') && !s.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push(quote);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c == quote => {
+                out.push('\\');
+                out.push(c);
+            }
+            c if c.is_control() => out.push_str(&format!("\\x{:02x}", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out.push(quote);
+    out
+}
+
+/// [`py_repr`] of an optional string, `None` when absent.
+fn py_opt_repr(s: Option<&str>) -> String {
+    s.map_or_else(|| String::from("None"), py_repr)
 }
 
 #[pymethods]
@@ -727,7 +776,7 @@ impl Document {
 
     /// CommonMark + GFM Markdown (headings, lists, links, images, code
     /// blocks, tables, quotes) — handy for LLM prompts and RAG indexes.
-    #[pyo3(signature = (links = None, images = None, drop_data_uris = false, base_url = None))]
+    #[pyo3(signature = (*, links = None, images = None, drop_data_uris = false, base_url = None))]
     fn to_markdown(
         &self,
         py: Python<'_>,
@@ -744,18 +793,17 @@ impl Document {
 
     /// CommonMark + GFM Markdown split at headings into chunks under `max_chars`.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (max_chars = None, max_bytes = None, links = None, images = None, drop_data_uris = false, base_url = None))]
+    #[pyo3(signature = (max_chars = None, *, links = None, images = None, drop_data_uris = false, base_url = None))]
     fn to_markdown_chunks(
         &self,
         py: Python<'_>,
         max_chars: Option<usize>,
-        max_bytes: Option<usize>,
         links: Option<&str>,
         images: Option<&str>,
         drop_data_uris: bool,
         base_url: Option<String>,
     ) -> PyResult<Vec<Chunk>> {
-        let budget = max_chars.or(max_bytes).unwrap_or(1500);
+        let budget = max_chars.unwrap_or(1500);
         let opts = parse_py_markdown_options(links, images, drop_data_uris, base_url)?;
         let chunks = maybe_detach(py, self.large(), || {
             self.dom.to_markdown_chunks_with(budget, &opts)
@@ -1121,7 +1169,7 @@ impl Element {
     }
 
     /// This element as Markdown.
-    #[pyo3(signature = (links = None, images = None, drop_data_uris = false, base_url = None))]
+    #[pyo3(signature = (*, links = None, images = None, drop_data_uris = false, base_url = None))]
     fn to_markdown(
         &self,
         links: Option<&str>,
@@ -1134,17 +1182,16 @@ impl Element {
     }
 
     /// CommonMark + GFM Markdown chunks for this element's subtree.
-    #[pyo3(signature = (max_chars = None, max_bytes = None, links = None, images = None, drop_data_uris = false, base_url = None))]
+    #[pyo3(signature = (max_chars = None, *, links = None, images = None, drop_data_uris = false, base_url = None))]
     fn to_markdown_chunks(
         &self,
         max_chars: Option<usize>,
-        max_bytes: Option<usize>,
         links: Option<&str>,
         images: Option<&str>,
         drop_data_uris: bool,
         base_url: Option<String>,
     ) -> PyResult<Vec<Chunk>> {
-        let budget = max_chars.or(max_bytes).unwrap_or(1500);
+        let budget = max_chars.unwrap_or(1500);
         let opts = parse_py_markdown_options(links, images, drop_data_uris, base_url)?;
         let chunks = self.node()?.to_markdown_chunks_with(budget, &opts);
         Ok(chunks

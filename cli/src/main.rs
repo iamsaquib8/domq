@@ -285,18 +285,45 @@ fn links_output(dom: &Dom, scope: Option<&Selector>, base: Option<&str>, opts: &
     Output { text, matched }
 }
 
+/// The outline of every match of `sel`, renumbered from 1. Matches inside
+/// another match are skipped, so nested matches (`div` on nested `<div>`s)
+/// list each control once instead of once per enclosing match.
+pub(crate) fn scoped_outline(dom: &Dom, sel: &Selector) -> domq::PageOutline {
+    let mut marks = vec![false; dom.len()];
+    let matches: Vec<_> = dom.select(sel).collect();
+    for m in &matches {
+        if let Some(mark) = marks.get_mut(m.id().index()) {
+            *mark = true;
+        }
+    }
+    // Parents come before their children in `nodes()`, so one pass marks
+    // everything inside a match.
+    for node in dom.nodes() {
+        let parent_inside = node
+            .parent()
+            .is_some_and(|p| marks.get(p.id().index()).copied().unwrap_or(false));
+        if let Some(mark) = marks.get_mut(node.id().index()) {
+            *mark |= parent_inside;
+        }
+    }
+    let mut combined = domq::PageOutline::default();
+    for m in matches {
+        let nested = m
+            .parent()
+            .is_some_and(|p| marks.get(p.id().index()).copied().unwrap_or(false));
+        if !nested {
+            combined.nodes.extend(m.outline().nodes);
+        }
+    }
+    for (i, node) in combined.nodes.iter_mut().enumerate() {
+        node.ref_id = i + 1;
+    }
+    combined
+}
+
 fn outline_output(dom: &Dom, scope: Option<&Selector>, opts: &Options) -> Output {
     let mut outline = match scope {
-        Some(sel) => {
-            let mut combined = domq::PageOutline::default();
-            for m in dom.select(sel) {
-                combined.nodes.extend(m.outline().nodes);
-            }
-            for (i, node) in combined.nodes.iter_mut().enumerate() {
-                node.ref_id = i + 1;
-            }
-            combined
-        }
+        Some(sel) => scoped_outline(dom, sel),
         None => dom.outline(),
     };
     if opts.first {

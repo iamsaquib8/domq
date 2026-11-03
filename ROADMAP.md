@@ -5,8 +5,11 @@ actually report and ask for. It is organised around **the people who reach for
 a tiny HTML parser** and the job each of them is trying to finish, not around
 parser internals. Issues and PRs that fit the principles below are very welcome.
 
-**Where we are:** 0.5.0 shipped on 2026-10-25 on crates.io, npm, PyPI,
-Homebrew and the release page. It added `domq mcp` (an MCP server for agents),
+**Where we are:** 0.6.0 shipped on 2026-11-03 on crates.io, npm, PyPI,
+Homebrew and the release page. It brought reader mode, metadata, links, chunks
+and tables to Python and JavaScript, configurable Markdown (`MarkdownOptions`:
+link style, images, `data:` URIs, base URL) and a page outline for agents
+(`Dom::outline`, `domq --outline`, MCP `outline`). 0.5.0 added `domq mcp`,
 browser-style recovery for the common mis-nesting cases, and published numbers:
 **61.8%** of the 1,959 html5lib tree-construction tests match a browser's tree
 structure (0 panics), and reader mode scores **0.898 F1 on the AEB article
@@ -30,7 +33,7 @@ The [guide](https://iamsaquib8.github.io/domq/docs/) covers every surface. See
    chunks for a prompt or an index, at the edge, on a server or as an agent's
    MCP tool, without a headless browser.
 4. **JavaScript on the edge** `js` — Workers, Deno, Bun, the browser: no DOM
-   needed, and a ~43 KB gzipped wasm module.
+   needed, and a ~65 KB gzipped wasm module.
 5. **Python scraping and data code** `py` — where most scraping and RAG code
    lives; a fast, never-panicking parser with selectors and Markdown.
 6. **People who ship HTML** `ship` — docs sites, static-site generators, email
@@ -50,16 +53,17 @@ gap (— means no plan yet).
 |---|---|---|---|---|---|
 | CSS selectors | ✅ | ✅ | ✅ | ✅ | ✅ |
 | readable text, Markdown | ✅ | ✅ `-t` `-m` | ✅ | ✅ | ✅ |
-| Markdown / text options (link style, images, frontmatter, LLM preset) | 0.7 | 0.7 | 0.7 | 0.7 | 0.7 |
-| reader mode (main content) | ✅ | ✅ `--main` | ✅ | 0.6 | 0.6 |
+| Markdown options (link style, images, `data:` URIs, base URL) | ✅ | ✅ `--markdown-*` | ✅ | 0.7 | ✅ |
+| more Markdown / text options (frontmatter, LLM preset, styles) | 0.7 | 0.7 | 0.7 | 0.7 | 0.7 |
+| reader mode (main content) | ✅ | ✅ `--main` | ✅ | ✅ | ✅ |
 | article metadata and a confidence score | 0.7 | 0.7 | 0.7 | 0.7 | 0.7 |
-| RAG chunks | ✅ | 0.7 `--chunks` | ✅ | 0.6 | 0.6 |
-| metadata (OpenGraph, JSON-LD, …) | ✅ | ✅ `--meta` | ✅ | 0.6 | 0.6 |
-| links and resources | ✅ | ✅ `--links` | ✅ | 0.6 | 0.6 |
-| tables, CSV | ✅ | ✅ `--csv` | ✅ | 0.6 | 0.6 |
-| declarative extraction | ✅ derive | ✅ `-e` | ✅ | 0.6 | ✅ dataclasses |
-| bytes in, encoding detection | 0.6 | ✅ | — | 0.6 | 0.6 |
-| page outline for agents (roles, names, refs) | 0.8 | 0.8 | 0.8 | 0.8 | 0.8 |
+| RAG chunks | ✅ | 0.7 `--chunks` | ✅ | ✅ | ✅ |
+| metadata (OpenGraph, JSON-LD, …) | ✅ | ✅ `--meta` | ✅ | ✅ | ✅ |
+| links and resources | ✅ | ✅ `--links` | ✅ | ✅ | ✅ |
+| tables, CSV | ✅ | ✅ `--csv` | ✅ | ✅ | ✅ |
+| declarative extraction | ✅ derive | ✅ `-e` | ✅ | 0.7 | ✅ dataclasses |
+| bytes in, encoding detection | 0.7 | ✅ | — | 0.7 | 0.7 |
+| page outline for agents (roles, names, refs) | ✅ | ✅ `--outline` | ✅ | 0.7 | ✅ |
 | editing | ✅ | `-r` only | — | 0.11 | 0.11 |
 | streaming events | ✅ | 0.11 `--stream` | — | 0.11 | 0.11 |
 | accessibility and markup lint | 0.10 | ✅ | ✅ | 0.10 | 0.10 |
@@ -86,7 +90,7 @@ Numbers we hold ourselves to (✅ = enforced in CI):
 | budget | limit | today |
 |---|---|---|
 | runtime dependencies, default build | **0** ✅ | 0 |
-| gzipped wasm, all bindings | **< 45 KiB** ✅ | ~42.9 KB (0.5.0: +1.5 KB browser-style recovery, +0.4 KB reader tuning) |
+| gzipped wasm, all bindings | **< 65 KiB** ✅ (was 45 KiB; see below) | ~64.5 KB (0.6.0: +21.4 KB for reader mode, metadata, links, chunks, tables and Markdown options) |
 | panics or hangs on any input (HTML, selectors, edits) | **none** ✅ proptest + fuzz | none known |
 | stack use on deeply nested input | **bounded** ✅ 100k-deep tests | bounded |
 | super-linear time on adversarial input | **none** — every fix gets a timing test | none known |
@@ -96,9 +100,11 @@ Numbers we hold ourselves to (✅ = enforced in CI):
 | HTML → Markdown time | to be published (0.9), against mdream and htmd on the same pages | not measured |
 | CLI binary size, wheel size | to be set (0.9) | ~0.9 MB CLI (Apple Silicon) |
 
-The wasm budget leaves little room for bringing reader mode, chunks and the
-data helpers to JavaScript (0.6). Rather than raise it, those may ship as a
-second, optional wasm module, so the core stays small for people who only
+Bringing reader mode, chunks and the data helpers to JavaScript (0.6) took the
+module from 43.1 KB to 64.5 KB, so the CI gate was raised to 65 KiB. The plan
+is to win it back ([#111](https://github.com/iamsaquib8/domq/issues/111)):
+find where the bytes go, and ship the extraction helpers as a second,
+optional wasm module, so the core is back under 45 KiB for people who only
 select and convert.
 
 ## Non-goals
@@ -137,7 +143,7 @@ In short:
 
 - **Where domq leads:** one zero-dependency, never-panicking core that does
   selectors, reader mode, Markdown, chunks, metadata, links, tables, lint and
-  MCP, on every surface, in ~43 KB of gzipped wasm; the only forgiving parser
+  MCP, on every surface, in ~65 KB of gzipped wasm; the only forgiving parser
   with a published conformance report; an MCP server with no network or file
   access; the maintained successor to htmlq and pup.
 - **Where it's behind:** reader-mode quality is measured only as agreement
@@ -252,17 +258,18 @@ today they exist only in Rust, the CLI and MCP. In Python, turbohtml and
 justhtml now pitch the same "replace readability + markdownify" story; in JS,
 defuddle and mdream. Bring everything to the bindings before anything else.
 
-- [ ] **M** `py` Python: `main_content()`, `metadata()`, `links()` /
+- [x] **M** `py` Python: `main_content()`, `metadata()`, `links()` /
       `resources()`, `to_markdown_chunks()`, `table_rows()` and CSV,
-      `resolve_url`, and reusable `Selector` objects.
+      `resolve_url`, and reusable `Selector` objects. *Shipped in 0.6.0.*
 - [ ] **S** `py` `js` `rust` Bytes in, everywhere: `domq::decode(&[u8])` in
       the library (the CLI's sniffing: BOM, `<meta charset>`, UTF-8,
       Windows-1252, reporting which rule decided), `domq.parse(bytes)` in
       Python (`requests`' `r.content`, Scrapy's `response.body`) and
       `Uint8Array` in JS (cheerio's `loadBuffer`).
-- [ ] **M** `js` JavaScript: `mainContent()`, `metadata()`, `links()`,
-      `toMarkdownChunks()` and `tables()`, inside the size budget, as a
-      second, optional wasm module if the core can't hold them.
+- [x] **M** `js` JavaScript: `mainContent()`, `metadata()`, `links()`,
+      `toMarkdownChunks()` and `tables()`. *Shipped in 0.6.0*, in the one
+      module for now; splitting them into a second, optional module is
+      [#111](https://github.com/iamsaquib8/domq/issues/111).
 - [ ] **S** `js` `extract(html, spec)`: cheerio's `extract()` descriptor maps
       (a selector string, `[selector]` for all matches, `{selector, value}`,
       nested maps), so cheerio code ports one-to-one.
@@ -292,12 +299,14 @@ LLM and RAG pipelines are the fastest-growing group, and every converter they
 compare us with lets them shape the output. One options type, exposed the same
 way in every surface (library, CLI flags, MCP arguments, JS, Python).
 
-- [ ] **M** `ai` `MarkdownOptions` / `to_markdown_with()`: link style (inline,
+- [x] **M** `ai` `MarkdownOptions` / `to_markdown_with()`: link style (inline,
       reference, or a links footer like Jina's `X-With-Links-Summary`),
-      images (keep, alt text only, drop; drop `data:` URIs), heading, bullet,
-      emphasis and fence style, tags to skip or keep as HTML, absolute URLs
-      from a base, wrap width, maximum blank lines. Folds in the old "links
-      as footnotes" item. (turndown, htmd, markdownify, html2text.)
+      images (keep, alt text only, drop; drop `data:` URIs), absolute URLs
+      from a base. *Shipped in 0.6.0* in Rust, the CLI (`--markdown-*`), MCP
+      and Python.
+- [ ] **M** `ai` More `MarkdownOptions`: heading, bullet, emphasis and fence
+      style, tags to skip or keep as HTML, wrap width, and the options in
+      JavaScript. (turndown, htmd, markdownify, html2text.)
 - [ ] **S** `ai` An LLM preset and a token estimate: `--llm` drops empty and
       redundant links, self-link headings, fragment-only links, tracking
       parameters (utm_*, fbclid, gclid), SVG and data URIs, and keeps image
@@ -348,13 +357,16 @@ Browser-free agents still need to *find* things: the login form, the price,
 the "next page" link. Give them the page's structure the way an accessibility
 tree does, and selectors they can reuse.
 
-- [ ] **L** `ai` `ship` A page outline: `Dom::outline()`, `domq --outline`
+- [x] **L** `ai` `ship` A page outline: `Dom::outline()`, `domq --outline`
       and an MCP `outline` tool listing landmarks, headings, links, buttons
       and form controls with their implicit ARIA roles and accessible names,
       each with a short ref that resolves to a unique selector and a source
       span. URLs are returned by ref, so a model never writes one it could
       hallucinate (Stagehand's approach). Static semantics only: no CSS, no
-      script, said plainly.
+      script, said plainly. *Shipped in 0.6.0* (Rust, CLI, MCP, Python);
+      unique selectors and linear time are
+      [#89](https://github.com/iamsaquib8/domq/issues/89) and
+      [#90](https://github.com/iamsaquib8/domq/issues/90).
 - [ ] **S** `ai` `rust` `shell` `NodeRef::unique_selector()` (preferring `id`,
       `data-testid` and stable classes over `:nth-child`), `find_text("Add to
       cart")`, and `domq --selector-for TEXT`; MCP results carry selectors.
@@ -592,6 +604,22 @@ Ideas we like but haven't committed to. Prototypes and use-cases welcome.
 ---
 
 ## Shipped
+
+### 0.6.0 — 2026-11-03 · "Where people are"
+
+Details in the [changelog](./CHANGELOG.md#060--2026-11-03).
+
+- [x] Python and JavaScript: reader mode, metadata, links and resources,
+      RAG chunks, tables and CSV, `resolve_url`; reusable `Selector` objects
+      and a page outline in Python.
+- [x] `MarkdownOptions` / `to_markdown_with()`: link style (inline,
+      reference, links footer), images (keep, alt, drop), dropping `data:`
+      URIs and a base URL, in Rust, the CLI, MCP and Python.
+- [x] A page outline for agents: `Dom::outline()`, `domq --outline` and an
+      MCP `outline` tool, with roles, accessible names, refs and selectors.
+- [x] Reader mode on human-labelled benchmarks (AEB, WCXB) and a real-page
+      parsing benchmark next to astral-html, `tl` and `scraper`.
+- [x] `<noscript>` content shown when it holds the page; `--exit-status`.
 
 ### 0.5.0 — 2026-10-25 · "Trust, measured"
 

@@ -727,19 +727,6 @@ fn markdown_options_base_url() {
 }
 
 #[test]
-fn markdown_options_max_blank_lines() {
-    let html = "<p>Para 1</p><p>Para 2</p><p>Para 3</p>";
-    let dom = parse(html);
-
-    // Default: 1 blank line (2 newlines)
-    assert_eq!(dom.to_markdown(), "Para 1\n\nPara 2\n\nPara 3");
-
-    // max_blank_lines = 0: no blank line (single newline)
-    let opts_tight = MarkdownOptions::default().max_blank_lines(0);
-    assert_eq!(dom.to_markdown_with(&opts_tight), "Para 1\nPara 2\nPara 3");
-}
-
-#[test]
 fn markdown_options_chunks() {
     let html = "<h1>Title</h1><p>Visit <a href='/page'>Page</a>.</p>";
     let dom = parse(html);

@@ -17,8 +17,7 @@ doc = domq.parse("<ul><li class='x'>a</li><li>b</li></ul>")
 doc.select_first("li.x").html          # '<li class="x">a</li>'
 ```
 
-The distribution is called `domq` (the name `domq` was taken on
-PyPI); the import name is `domq`. Wheels are `abi3`: one wheel per platform
+Install with `pip install domq`; the import name is `domq` too. Wheels are `abi3`: one wheel per platform
 works on every CPython ≥ 3.11 (Linux x86_64/aarch64, macOS Intel/Apple Silicon,
 Windows).
 
@@ -211,6 +210,36 @@ prompt = f"Summarize this page:\n\n{markdown}"
 instead (a line per block, a blank line between paragraphs) use `.text` /
 `to_text()`.
 
+Shape the Markdown with keyword arguments: `links="reference"` (`[text][1]`
+with the URLs at the end) or `"footer"` (a `### Links` list), `images="alt"`
+or `"drop"`, `drop_data_uris=True` and `base_url=` to make links absolute.
+
+## Reader mode, chunks, metadata, links, tables, outline
+
+```python
+doc = domq.parse(html)
+
+article = doc.main_content()               # the article without nav, ads, comments… (or None)
+for chunk in (article or doc).to_markdown_chunks(1500):
+    print(chunk.context, len(chunk.markdown))   # "Guide > Install" 812
+
+meta = doc.metadata()                      # .title, .description, .canonical, .og, .json_ld, …
+meta.to_dict()
+
+for link in doc.links(base_url="https://example.com/blog/"):
+    print(link.url, link.text)             # resolved, honours <base href>
+
+rows = doc.tables("table#prices")          # [[[cell, …], …]] per table, spans expanded
+csv = doc.to_csv("table#prices")
+
+print(doc.outline().to_text())             # landmarks, headings, controls + selectors
+# [1] navigation
+# [2]   link "Docs" -> nav > a
+
+sel = domq.Selector("li:nth-child(odd) > a")   # compile once, reuse
+hits = [doc.select(sel) for doc in docs]
+```
+
 ## API
 
 ```python
@@ -227,6 +256,13 @@ recovered from in `Document.errors`.
 | `select_first(selector) -> Element \| None` | the first match |
 | `to_text()` / `to_markdown()` / `to_html()` | the whole document as text, Markdown or HTML |
 | `to_json() -> str` | the tree as JSON (`json.loads` it) |
+| `to_markdown(*, links=, images=, drop_data_uris=, base_url=)` | Markdown with [options](#html--markdown-for-llms-and-rag) |
+| `to_markdown_chunks(max_chars=1500, *, …)` | `list[Chunk]`: `.markdown`, `.heading_path`, `.context` |
+| `main_content() -> Element \| None` | reader mode: the article's element |
+| `metadata(base_url=None) -> Metadata` | title, description, canonical, lang, OpenGraph, Twitter, JSON-LD, feeds (`to_dict()`) |
+| `links(base_url=None)`, `resources(base_url=None)` | `list[Link]` (`.url`, `.text`, `.element`) / `list[Resource]` |
+| `tables(selector="table")`, `to_csv(selector="table")` | tables as rows of cells / as CSV |
+| `outline() -> PageOutline` | landmarks, headings and controls (`.nodes`, `to_text()`, `to_json()`) |
 | `errors -> list[tuple[int, str]]` | `(byte_offset, message)` recovery diagnostics |
 | `root -> Element \| None`, `roots -> list[Element]` | the first / all top-level elements |
 
@@ -240,7 +276,14 @@ recovered from in `Document.errors`.
 | `select(sel)`, `select_first(sel)` | matching descendants |
 | `closest(sel)`, `matches(sel)` | nearest matching ancestor-or-self / does it match |
 | `parent`, `children`, `document` | navigation |
-| `to_markdown()`, `to_json()` | this subtree as Markdown / JSON |
+| `to_markdown(…)`, `to_markdown_chunks(…)`, `to_json()` | this subtree as Markdown, chunks or JSON |
+| `links()`, `resources()`, `outline()` | the same as on `Document`, for this subtree |
+| `table_rows()`, `to_csv()` | this `<table>`'s rows / CSV |
+
+| Functions and types | |
+|---|---|
+| `Selector(query)` | a compiled selector, accepted wherever a selector string is |
+| `resolve_url(base, relative)`, `resolve_srcset(base, srcset)` | URL resolution as browsers do it |
 
 | Extraction ([above](#declarative-extraction)) | |
 |---|---|

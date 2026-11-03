@@ -17,7 +17,16 @@ use crate::tags::{self, Display};
 use crate::tree::{Dom, NodeRef};
 
 /// An element in the semantic page outline.
+///
+/// ```
+/// let dom = domq::parse("<nav><a href='/'>Home</a></nav>");
+/// let outline = dom.outline();
+/// let link = &outline.nodes()[1];
+/// assert_eq!((link.role.as_str(), link.name.as_deref()), ("link", Some("Home")));
+/// assert_eq!(link.href.as_deref(), Some("/"));
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct OutlineNode {
     /// 1-based index reference assigned in document outline order.
     pub ref_id: usize,
@@ -85,7 +94,20 @@ impl OutlineNode {
 }
 
 /// The semantic page outline of landmarks, headings, interactive controls, and forms.
+///
+/// ```
+/// let dom = domq::parse("<main><h1>Title</h1><button>Send</button></main>");
+/// let outline = dom.outline();
+/// assert_eq!(outline.len(), 3);
+/// assert!(!outline.is_empty());
+/// assert_eq!(
+///     outline.to_text(),
+///     "[1] main\n[2]   heading 1 \"Title\"\n[3]   button \"Send\" -> main > button",
+/// );
+/// assert!(outline.to_json().starts_with("[{\"ref\":1,\"role\":\"main\""));
+/// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PageOutline {
     /// Outline items in document order.
     pub nodes: Vec<OutlineNode>,

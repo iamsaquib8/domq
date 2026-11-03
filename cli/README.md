@@ -56,6 +56,9 @@ domq -j 'table tr:nth-child(3)' -f report.html
 | `-a, --attribute <NAME>` | print this attribute of each match (no selector = all elements) |
 | `-t, --text` | readable text of each match (block elements → line breaks, scripts dropped) |
 | `-m, --markdown` | each match as Markdown (CommonMark + GFM tables) |
+| `--markdown-links <STYLE>` | Markdown link style: `inline` (default), `reference` (`[text][1]` plus definitions at the end) or `footer` (a `### Links` list) |
+| `--markdown-images <STYLE>` | Markdown image style: `keep` (default), `alt` (the alt text only) or `drop` |
+| `--markdown-drop-data-uris` | leave `data:` URIs out of Markdown links and images (their text stays) |
 | `-j, --json` | matches as a JSON array (whole document as JSON with no selector) |
 | `--jsonl` | one JSON value per line ([JSON Lines](https://jsonlines.org)): elements, `-a` values, `-e` objects or `--links` |
 | `--csv` | matched `<table>`s as RFC 4180 CSV (default selector `table`), separated by a blank line |
@@ -233,14 +236,15 @@ clients). The WASI build works too: `"command": "wasmtime", "args":
 
 | Tool | Arguments (besides `html`) | Returns |
 |---|---|---|
-| `markdown` | `selector`, `main`, `base_url` | Markdown of the page, or of each match |
+| `markdown` | `selector`, `main`, `base_url`, `links`, `images`, `drop_data_uris` | Markdown of the page, or of each match |
 | `text` | `selector`, `main` | readable text |
 | `select` | `selector`, `limit` (50), `include_html`, `max_chars` (1000) | `{count, truncated, matches: [{tag, attrs, text, html?}]}` |
 | `extract` | `fields` (name → spec, as in `-e`), `selector`, `base_url` | `{results: [{…}]}`, one object per match of `selector` |
-| `chunks` | `max_chars` (2000), `selector`, `main`, `base_url` | `{chunks: [{context, heading_path, markdown}]}` |
+| `chunks` | `max_chars` (2000), `selector`, `main`, `base_url`, `links`, `images`, `drop_data_uris` | `{chunks: [{context, heading_path, markdown}]}` |
 | `links` | `selector`, `base_url` | `{count, links: [{url, text}]}` |
 | `metadata` | `base_url` | the `--meta` object |
 | `tables` | `selector` (`table`) | `{tables: [{rows: [[cell, …]]}]}` |
+| `outline` | `selector` | `{count, outline: [{ref, role, name, level, selector, href, tag, depth, source_range}]}`, plus the indented text outline |
 | `lint` | `include_notes` | `{errors, warnings, notes, findings: [{line, column, level, rule, message}]}` |
 
 All tools are read-only (`readOnlyHint`) and closed-world: they work on the

@@ -9,7 +9,7 @@ crate with zero dependencies, and the same engine ships as:
   panics on any input);
 - a **command-line tool**, `domq`, a drop-in replacement for `htmlq` with
   Markdown, JSON, CSV, extraction, reader mode and a linter on top;
-- a **~42 KB (gzipped) WebAssembly module** for browsers, Node, Deno, Bun and
+- a **~65 KB (gzipped) WebAssembly module** for browsers, Node, Deno, Bun and
   edge workers (`npm install domq-wasm`);
 - a **Python package** (`pip install domq`);
 - an **MCP server** (`domq mcp`), so AI agents can turn the HTML they have into
@@ -31,7 +31,7 @@ curl -sL https://blog.rust-lang.org | domq --main --markdown
   attributes: repaired the way browsers repair the common cases, with every
   repair recorded as a diagnostic.
 - **Being small and boring to depend on.** One crate in your `cargo tree`, a
-  0.6 s clean build, a static binary, a 42 KB wasm module.
+  0.6 s clean build, a static binary, a 65 KB wasm module.
 
 ## What it is not
 
