@@ -557,7 +557,7 @@ const TOOLS: &[Tool] = &[
             r#"},"required":["html"],"additionalProperties":false}"#
         ),
         output: Some(
-            r#"{"type":"object","properties":{"count":{"type":"integer"},"outline":{"type":"array","items":{"type":"object","properties":{"ref":{"type":"integer"},"role":{"type":"string"},"name":{"type":["string","null"]},"level":{"type":["integer","null"]},"selector":{"type":"string"},"href":{"type":["string","null"]},"tag":{"type":"string"},"depth":{"type":"integer"},"source_range":{"type":["array","null"],"items":{"type":"integer"}}},"required":["ref","role","selector","tag","depth"]}},"nodes":{"type":"array","items":{"type":"object"}}},"required":["count","outline"]}"#,
+            r#"{"type":"object","properties":{"count":{"type":"integer"},"outline":{"type":"array","items":{"type":"object","properties":{"ref":{"type":"integer"},"role":{"type":"string"},"name":{"type":["string","null"]},"level":{"type":["integer","null"]},"selector":{"type":"string"},"href":{"type":["string","null"]},"tag":{"type":"string"},"depth":{"type":"integer"},"source_range":{"type":["array","null"],"items":{"type":"integer"}}},"required":["ref","role","selector","tag","depth"]}}},"required":["count","outline"]}"#,
         ),
         run: outline,
     },
@@ -795,44 +795,16 @@ fn text(args: &Args<'_>) -> Result<Output, String> {
 
 fn outline(args: &Args<'_>) -> Result<Output, String> {
     let dom = domq::parse(args.required_str("html")?);
-    let (text, count, json_array) = match args.selector("selector")? {
-        None => {
-            let outline = dom.outline();
-            let text = outline.to_text();
-            let count = outline.len();
-            let json_array = outline.to_json();
-            (text, count, json_array)
-        }
-        Some(s) => {
-            let selector = crate::compile(s)?;
-            let matches: Vec<NodeRef<'_>> = dom.select(&selector).collect();
-            let mut combined_nodes = Vec::new();
-            let mut text_parts = Vec::new();
-            for m in &matches {
-                let sub = m.outline();
-                if !sub.is_empty() {
-                    text_parts.push(sub.to_text());
-                    combined_nodes.extend(sub.nodes);
-                }
-            }
-            for (i, node) in combined_nodes.iter_mut().enumerate() {
-                node.ref_id = i + 1;
-            }
-            let mut json_arr = String::from("[");
-            for (i, node) in combined_nodes.iter().enumerate() {
-                if i > 0 {
-                    json_arr.push(',');
-                }
-                json_arr.push_str(&node.to_json());
-            }
-            json_arr.push(']');
-            (text_parts.join("\n\n"), combined_nodes.len(), json_arr)
-        }
+    // Render the text from the renumbered nodes, so the refs the model reads
+    // are the refs in `structuredContent`.
+    let outline = match args.selector("selector")? {
+        None => dom.outline(),
+        Some(s) => crate::scoped_outline(&dom, &crate::compile(s)?),
     };
     let mut out = json::Object::default();
-    out.field("count", &count.to_string())
-        .field("outline", &json_array)
-        .field("nodes", &json_array);
+    out.field("count", &outline.len().to_string())
+        .field("outline", &outline.to_json());
+    let text = outline.to_text();
     Ok(Output {
         text,
         structured: Some(out.finish()),
@@ -1334,6 +1306,20 @@ mod tests {
         assert!(!s_text.contains("Gadgets"));
         let s_structured = scoped.get("structuredContent").unwrap();
         assert_eq!(s_structured.get("count"), Some(&Value::Number("2".into())));
+        assert_eq!(s_structured.get("nodes"), None);
+
+        // Nested matches: each control once, and the text refs are the
+        // structured refs.
+        let nested = call(
+            "outline",
+            r#"{"html":"<nav><a href=/>Home</a><a href=/b>B</a></nav>","selector":"nav, nav a"}"#,
+        );
+        assert_eq!(
+            text_of(&nested),
+            "[1] navigation\n[2]   link \"Home\" -> nav > a:nth-of-type(1)\n[3]   link \"B\" -> nav > a:nth-of-type(2)"
+        );
+        let n_structured = nested.get("structuredContent").unwrap();
+        assert_eq!(n_structured.get("count"), Some(&Value::Number("3".into())));
 
         // Invalid selector
         let bad = call("outline", &page_args(r#","selector":"a:hover""#));
