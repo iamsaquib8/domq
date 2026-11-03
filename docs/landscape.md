@@ -13,7 +13,7 @@ unless a benchmark is named. Corrections welcome.
 - **One small core for every surface.** Selectors, reader mode, Markdown, RAG
   chunks, metadata, links, tables, lint and an MCP server in one
   zero-dependency, `no_std`, `forbid(unsafe)`, never-panicking crate, shipped
-  to Rust, a CLI, a ~43 KB gzipped wasm module, Python and WASI. The closest
+  to Rust, a CLI, a ~65 KB gzipped wasm module, Python and WASI. The closest
   bundles are narrower (mdream: Markdown-centric, no selectors or lint;
   defuddle: JS-only, needs a DOM implementation) or heavier (the Rust stack
   `dom_query` + `dom_smoothie` + `htmd` is three crates on html5ever;

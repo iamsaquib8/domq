@@ -5,7 +5,7 @@ that name the selector that failed.
 
 ## Rust: `#[derive(FromHtml)]`
 
-Enable the `derive` feature (`domq = { version = "0.5", features = ["derive"] }`).
+Enable the `derive` feature (`domq = { version = "0.6", features = ["derive"] }`).
 
 ```rust,ignore
 use domq::FromHtml;

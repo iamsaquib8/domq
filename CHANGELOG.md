@@ -11,7 +11,49 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-03
+
+"Where people are": reader mode, metadata, links, chunks and tables in Python
+and JavaScript, Markdown shaped for models, and a page outline for agents.
+
+**Upgrading from 0.5:** no API was removed. The JavaScript module grows from
+~43 KB to ~65 KB gzipped because it now carries the extraction helpers
+([#111](https://github.com/iamsaquib8/domq/issues/111) tracks moving them into
+a second, optional module). Text and Markdown change for pages whose content
+sits in `<noscript>`, and chunk heading paths for some headings with links
+(see "Output changes"); re-embed if exact text matters. The new
+`MarkdownOptions`, `LinkStyle`, `ImageStyle`, `OutlineNode` and `PageOutline`
+are `#[non_exhaustive]`, so they can grow without breaking you: build
+`MarkdownOptions` with `MarkdownOptions::new()` and its setters, and give a
+`match` on `LinkStyle` or `ImageStyle` a `_` arm.
+
 ### Added
+- **Python: reader mode and the data helpers.** `Document.main_content()`,
+  `metadata()` (a `Metadata` object with `to_dict()`), `links()` and
+  `resources()` (with `base_url`), `to_markdown_chunks(max_chars)` (each
+  `Chunk` with its `heading_path` and `context`), `tables()` and `to_csv()`,
+  and `outline()`; the same on `Element` for its subtree; `domq.resolve_url`,
+  `domq.resolve_srcset`; and reusable, compiled `domq.Selector` objects. All
+  typed in the stubs (stubtest and `mypy --strict` clean).
+- **JavaScript: reader mode and the data helpers.** `mainContent()`,
+  `metadata()`, `links()`, `resources()`, `toMarkdownChunks()`, `tables()`,
+  `toCsv()`, `resolveUrl()` and `resolveSrcset()`, as functions and as
+  `Document` methods, with TypeScript types.
+- **Markdown options.** `MarkdownOptions` with `to_markdown_with()` and
+  `to_markdown_chunks_with()` on `Dom` and `NodeRef`: link style
+  (`LinkStyle::Inline`; `Reference`, `[text][1]` with `[1]: url` definitions
+  at the end; or `Footer`, a `### Links` list), images (`ImageStyle::Keep`,
+  `AltOnly`, `Drop`), dropping `data:` URIs, and a base URL for relative
+  links. In the CLI as `--markdown-links`, `--markdown-images` and
+  `--markdown-drop-data-uris`; in the MCP `markdown` and `chunks` tools as
+  `links`, `images` and `drop_data_uris`; in Python as keyword-only
+  arguments of `to_markdown()` and `to_markdown_chunks()`.
+  `Chunk::from_markdown` chunks Markdown you already have.
+- **A page outline for agents.** `Dom::outline()` and `NodeRef::outline()`
+  list landmarks, headings, links, buttons and form controls with their ARIA
+  roles, accessible names, a ref, a selector and a source span. Also
+  `domq --outline [SELECTOR]` (text, `-j`, `--jsonl`, `-c`), an MCP `outline`
+  tool, and `outline()` in Python. Static semantics only: no CSS, no script.
 - **Reader mode on human-labelled benchmarks.** `conformance/` gains a
   `quality` binary that scores `main_content()` on the Zyte/ScrapingHub
   article extraction benchmark (AEB, 181 articles) and WCXB (2,008 pages in
@@ -28,7 +70,8 @@ when to re-embed. See [Output stability](./README.md#output-stability).
   (the "ahead of `tl`" claim held only for generated inputs).
 - **Output stability policy:** output changes only in minor releases, listed
   under "Output changes" ([README](README.md#output-stability)).
-- CLI `--exit-status` to exit 1 when no results match; without it, no matches still exit 0.
+- CLI `--exit-status` to exit 1 when no results match; without it, no matches
+  still exit 0.
 
 ### Output changes
 - **`<noscript>` that holds the page is shown.** When a document has more
@@ -38,6 +81,23 @@ when to re-embed. See [Output stability](./README.md#output-stability).
   as a browser with scripting off does. An "enable JavaScript" notice next to
   real content stays hidden. WCXB forums 0.365 → 0.498, WCXB dev 0.738 →
   0.747.
+- **Chunk heading paths keep the whole heading** when it holds a link whose
+  URL has balanced parentheses (`/wiki/Rust_(language)`) or whose title is
+  single-quoted; both used to cut the heading short.
+
+### Fixed
+- **The guide is online.** The Pages deploy wrote the mdBook guide outside
+  the uploaded site (mdBook 0.5 resolves `--dest-dir` against the current
+  directory), so <https://iamsaquib8.github.io/domq/docs/> was a 404 since
+  0.5.0. The deploy now fails when the guide or the playground is missing.
+- **Image-input accessibility lint.** Flag unnamed `<input type="image">`
+  controls and recognize their `alt` text as a name for enclosing links and
+  buttons. A submission `value` alone does not name an image button.
+- The npm package ships its `LICENSE` file.
+
+### Performance
+- Serializing or querying many subtrees no longer walks the whole document
+  each time to decide whether `<noscript>` holds the page.
 
 ## [0.5.0] — 2026-10-25
 
@@ -136,7 +196,6 @@ content indexed with 0.4 if exact text matters.
     `<image>` is an `<img>` (outside SVG and MathML).
 
 ### Fixed
-- **Image-input accessibility lint.** Flag unnamed `<input type="image">` controls and recognize their `alt` text as a name for enclosing links and buttons. A submission `value` alone does not name an image button.
 - Docs: the README's Cargo snippet asked for `domq = "0.3"`, which does not
   exist under the new name, and the npm README's CDN URL pointed at the wrong
   package.

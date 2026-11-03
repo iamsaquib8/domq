@@ -9,7 +9,7 @@ implements (like `serde` and `serde_derive`):
 
 ```toml
 [dependencies]
-domq = { version = "0.5", features = ["derive"] }
+domq = { version = "0.6", features = ["derive"] }
 ```
 
 ```rust
