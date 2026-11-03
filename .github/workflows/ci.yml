@@ -123,18 +123,19 @@ jobs:
       - name: Smoke-test the packed npm package in Node
         working-directory: wasm
         run: sh npm/smoke-test.sh
-      - name: Gzipped size gate (< 50 KiB)
+      - name: Gzipped size gate (< 65 KiB)
         working-directory: wasm
         run: |
           # Measured ~40,800-41,000 bytes (gzip -9) after the review hardening
           # (raw-text escaping, name validation, bounded selector memo),
           # ~42,450 after the 0.5 spec-aligned recovery (legacy entities,
-          # scoped implicit closes), and ~46,900 after configurable
-          # MarkdownOptions; the budget is rounded up to the next 5 KiB.
-          # Raise it on purpose, never by accident.
+          # scoped implicit closes), ~46,900 after configurable
+          # MarkdownOptions, and ~64,860 after full extraction bindings
+          # parity (reader mode, metadata, links, chunks, tables); the budget
+          # is rounded up to the next 5 KiB. Raise it on purpose, never by accident.
           SIZE=$(gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c)
-          echo "gzipped wasm: $SIZE bytes (budget 51200)"
-          test "$SIZE" -lt 51200
+          echo "gzipped wasm: $SIZE bytes (budget 66560)"
+          test "$SIZE" -lt 66560
 
   conformance:
     name: conformance (html5lib tests, Readability, AEB, WCXB)
