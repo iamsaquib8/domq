@@ -94,16 +94,14 @@ are `#[non_exhaustive]`, so they can grow without breaking you: build
   controls and recognize their `alt` text as a name for enclosing links and
   buttons. A submission `value` alone does not name an image button.
 - The npm package ships its `LICENSE` file.
-
-### Performance
-- Serializing or querying many subtrees no longer walks the whole document
-  each time to decide whether `<noscript>` holds the page.
-
-### Fixed
 - **`drop_data_uris` no longer panics on non-ASCII URLs.** `is_data_uri`
   checked `trimmed[..5]`, which panics when byte 5 falls inside a multi-byte
   character (for example `href="ééé"`). It now uses a byte-prefix check, so
   the CLI, MCP server and Python bindings stay up on such input.
+
+### Performance
+- Serializing or querying many subtrees no longer walks the whole document
+  each time to decide whether `<noscript>` holds the page.
 
 ## [0.5.0] — 2026-10-25
 
