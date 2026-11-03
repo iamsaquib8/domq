@@ -41,7 +41,16 @@ const MAX_PAD: usize = 64;
 const MAX_NUMBER: i64 = 999_999_999;
 
 /// How hyperlinks are formatted in Markdown.
+///
+/// ```
+/// use domq::{LinkStyle, MarkdownOptions};
+///
+/// let dom = domq::parse("<p><a href='/a'>A</a></p>");
+/// let opts = MarkdownOptions::new().link_style(LinkStyle::Footer);
+/// assert_eq!(dom.to_markdown_with(&opts), "[A][1]\n\n### Links\n\n1. [A](/a)");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum LinkStyle {
     /// Standard CommonMark inline links: `[text](url)` or `[text](url "title")`.
     #[default]
@@ -54,14 +63,17 @@ pub enum LinkStyle {
     Footer,
 }
 
-impl LinkStyle {
-    /// Alias for [`LinkStyle::Footer`].
-    #[allow(non_upper_case_globals)]
-    pub const Footnote: Self = Self::Footer;
-}
-
 /// How images are formatted in Markdown.
+///
+/// ```
+/// use domq::{ImageStyle, MarkdownOptions};
+///
+/// let dom = domq::parse("<p>See <img src='/i.png' alt='a chart'></p>");
+/// let opts = MarkdownOptions::new().image_style(ImageStyle::AltOnly);
+/// assert_eq!(dom.to_markdown_with(&opts), "See a chart");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum ImageStyle {
     /// Standard CommonMark images: `![alt](url)` or `![alt](url "title")`.
     #[default]
@@ -72,8 +84,26 @@ pub enum ImageStyle {
     Drop,
 }
 
-/// Configuration options for Markdown conversion.
+/// Configuration options for Markdown conversion, built with
+/// [`MarkdownOptions::new`] and its setters (more options may be added, so the
+/// struct cannot be built with a literal).
+///
+/// ```
+/// use domq::{ImageStyle, LinkStyle, MarkdownOptions};
+///
+/// let opts = MarkdownOptions::new()
+///     .link_style(LinkStyle::Reference)
+///     .image_style(ImageStyle::Drop)
+///     .drop_data_uris(true)
+///     .base_url("https://example.com/docs/");
+/// let dom = domq::parse("<p><a href='intro'>Intro</a><img src='x.png'></p>");
+/// assert_eq!(
+///     dom.to_markdown_with(&opts),
+///     "[Intro][1]\n\n[1]: https://example.com/docs/intro",
+/// );
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct MarkdownOptions {
     /// How hyperlinks are formatted.
     pub link_style: LinkStyle,
@@ -83,8 +113,6 @@ pub struct MarkdownOptions {
     pub drop_data_uris: bool,
     /// Base URL to resolve relative `href` and `src` attributes against.
     pub base_url: Option<String>,
-    /// Maximum blank lines between blocks (default 1).
-    pub max_blank_lines: usize,
 }
 
 impl Default for MarkdownOptions {
@@ -94,13 +122,18 @@ impl Default for MarkdownOptions {
             image_style: ImageStyle::Keep,
             drop_data_uris: false,
             base_url: None,
-            max_blank_lines: 1,
         }
     }
 }
 
 impl MarkdownOptions {
-    /// Create default options.
+    /// Default options: inline links, images kept, `data:` URIs kept, no
+    /// base URL.
+    ///
+    /// ```
+    /// let dom = domq::parse("<p>a</p><p>b</p>");
+    /// assert_eq!(dom.to_markdown_with(&domq::MarkdownOptions::new()), dom.to_markdown());
+    /// ```
     pub fn new() -> Self {
         Self::default()
     }
@@ -117,21 +150,33 @@ impl MarkdownOptions {
         self
     }
 
-    /// Whether to drop `data:` URIs.
+    /// Whether to drop `data:` URIs from links and images (the link text and
+    /// image alt text stay).
+    ///
+    /// ```
+    /// use domq::MarkdownOptions;
+    ///
+    /// let dom = domq::parse("<p><img src='data:image/png;base64,AAAA' alt='dot'></p>");
+    /// let opts = MarkdownOptions::new().drop_data_uris(true);
+    /// assert_eq!(dom.to_markdown_with(&opts), "dot");
+    /// ```
     pub fn drop_data_uris(mut self, drop: bool) -> Self {
         self.drop_data_uris = drop;
         self
     }
 
-    /// Set the base URL.
+    /// Resolve relative `href` and `src` values against this base URL (the
+    /// document's `<base href>` applies on top, as in a browser).
+    ///
+    /// ```
+    /// use domq::MarkdownOptions;
+    ///
+    /// let dom = domq::parse("<a href='b'>B</a>");
+    /// let opts = MarkdownOptions::new().base_url("https://example.com/a/");
+    /// assert_eq!(dom.to_markdown_with(&opts), "[B](https://example.com/a/b)");
+    /// ```
     pub fn base_url(mut self, base: impl Into<String>) -> Self {
         self.base_url = Some(base.into());
-        self
-    }
-
-    /// Set the maximum blank lines between blocks.
-    pub fn max_blank_lines(mut self, max: usize) -> Self {
-        self.max_blank_lines = max;
         self
     }
 }
@@ -141,11 +186,9 @@ static DEFAULT_OPTIONS: MarkdownOptions = MarkdownOptions {
     image_style: ImageStyle::Keep,
     drop_data_uris: false,
     base_url: None,
-    max_blank_lines: 1,
 };
 
 impl Dom {
-    /// Convert the document to Markdown with custom options; see [`MarkdownOptions`].
     /// Convert the document to Markdown with custom options; see [`MarkdownOptions`].
     ///
     /// ```
@@ -913,12 +956,8 @@ impl<'a> Markdown<'a> {
     /// Start a block's first line: the owed separation, then the prefixes.
     fn begin_block(&mut self) {
         if !self.out.is_empty() {
-            if self.sep >= 2 && self.options.max_blank_lines > 0 {
-                let blanks =
-                    usize::from(self.sep.saturating_sub(1)).min(self.options.max_blank_lines);
-                for _ in 0..blanks {
-                    self.next_line(true);
-                }
+            if self.sep >= 2 {
+                self.next_line(true);
             }
             self.out.push('\n');
         }
