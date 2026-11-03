@@ -43,9 +43,11 @@ The WASI build works too: `"command": "wasmtime", "args": ["domq.wasm", "mcp"]`.
 
 - Every tool is **read-only** and **closed-world**: it works on the `html`
   argument alone and never fetches URLs, reads files or runs scripts.
-- Text and Markdown output leave out hidden elements (`hidden`, inline
-  `display: none`), so hidden prompt-injection text on a page does not reach
-  the model through domq.
+- Text and Markdown output leave out content a browser never shows:
+  elements with `hidden`, inline `display: none` or `visibility: hidden`,
+  `<template>`, comments, scripts and styles. Text hidden in other ways
+  (CSS classes, `opacity: 0`, off-screen positioning, a zero font size) is
+  **not** detected, so treat page text as untrusted input either way.
 - Invalid selectors and arguments come back as tool errors whose message
   points at the problem, so the model can correct itself.
 

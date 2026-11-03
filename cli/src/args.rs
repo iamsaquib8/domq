@@ -122,7 +122,11 @@ TOOLS (all read-only):
     links       links with resolved URLs and text
     metadata    title, description, OpenGraph, JSON-LD, feeds, ...
     tables      tables as rows of cells
+    outline     landmarks, headings and controls, with selectors to act on
     lint        accessibility and markup problems, with positions
+
+    markdown and chunks also take links (inline, reference, footer), images
+    (keep, alt, drop) and drop_data_uris, like the --markdown-* flags.
 
 SETUP:
     Claude Code:   claude mcp add domq -- domq mcp
