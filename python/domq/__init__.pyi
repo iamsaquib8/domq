@@ -263,6 +263,7 @@ class Document:
         paragraphs."""
     def to_markdown(
         self,
+        *,
         links: Optional[Literal["inline", "reference", "footer"]] = None,
         images: Optional[Literal["keep", "alt", "drop"]] = None,
         drop_data_uris: bool = False,
@@ -279,7 +280,7 @@ class Document:
     def to_markdown_chunks(
         self,
         max_chars: Optional[int] = None,
-        max_bytes: Optional[int] = None,
+        *,
         links: Optional[Literal["inline", "reference", "footer"]] = None,
         images: Optional[Literal["keep", "alt", "drop"]] = None,
         drop_data_uris: bool = False,
@@ -379,6 +380,7 @@ class Element:
         """The :class:`Document` this element belongs to."""
     def to_markdown(
         self,
+        *,
         links: Optional[Literal["inline", "reference", "footer"]] = None,
         images: Optional[Literal["keep", "alt", "drop"]] = None,
         drop_data_uris: bool = False,
@@ -394,7 +396,7 @@ class Element:
     def to_markdown_chunks(
         self,
         max_chars: Optional[int] = None,
-        max_bytes: Optional[int] = None,
+        *,
         links: Optional[Literal["inline", "reference", "footer"]] = None,
         images: Optional[Literal["keep", "alt", "drop"]] = None,
         drop_data_uris: bool = False,

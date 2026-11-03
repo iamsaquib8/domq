@@ -430,7 +430,7 @@ def test_precompiled_selector(page):
     sel = domq.Selector("div.card")
     assert sel.query == "div.card"
     assert str(sel) == "div.card"
-    assert repr(sel) == 'Selector("div.card")'
+    assert repr(sel) == "Selector('div.card')"
 
     cards = page.select(sel)
     assert len(cards) == 2
@@ -692,9 +692,20 @@ def test_markdown_chunks():
     assert len(h1_chunks) == 1
     assert "Chapter 1" in h1_chunks[0].markdown
 
-    # Supports max_bytes alias
-    bytes_chunks = doc.to_markdown_chunks(max_bytes=120)
-    assert len(bytes_chunks) == len(chunks)
+    # Markdown options are keyword-only.
+    with pytest.raises(TypeError):
+        doc.to_markdown_chunks(120, "reference")  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        doc.to_markdown("reference")  # type: ignore[misc]
+
+
+def test_value_reprs_use_python_syntax():
+    doc = domq.parse(
+        '<title>It\'s</title><link rel=canonical href="c"><a href="/x">a "b"</a>'
+    )
+    assert repr(doc.metadata()) == """<Metadata title="It's" canonical='c' lang=None>"""
+    assert repr(doc.links()[0]) == """<Link url='/x' text='a "b"'>"""
+    assert "Some(" not in repr(doc.metadata())
 
 
 # --- page outline -------------------------------------------------------------
