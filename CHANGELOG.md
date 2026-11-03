@@ -11,6 +11,11 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ## [Unreleased]
 
+### Fixed
+- `attr` / `has_attr` match attribute names ASCII case-insensitively, like
+  `set_attr`, `remove_attr`, and selectors
+  ([#74](https://github.com/iamsaquib8/domq/issues/74)).
+
 ### Added
 - **Reader mode on human-labelled benchmarks.** `conformance/` gains a
   `quality` binary that scores `main_content()` on the Zyte/ScrapingHub

@@ -176,6 +176,18 @@ fn set_and_remove_attributes() {
 }
 
 #[test]
+fn attr_and_has_attr_are_ascii_case_insensitive() {
+    let dom = parse("<a HREF=/x Data-Id=7>x</a>");
+    let a = dom.root().unwrap();
+    assert_eq!(a.attr("HREF"), Some("/x"));
+    assert_eq!(a.attr("href"), Some("/x"));
+    assert!(a.has_attr("Data-Id"));
+    assert!(a.has_attr("data-id"));
+    assert_eq!(a.attr("DATA-ID"), Some("7"));
+    assert!(!a.has_attr("missing"));
+}
+
+#[test]
 fn attribute_edits_ignore_non_elements() {
     let mut dom = parse("text");
     let t = dom.root().unwrap().id();

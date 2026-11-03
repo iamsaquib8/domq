@@ -506,20 +506,30 @@ impl<'a> NodeRef<'a> {
 
     /// The value of attribute `name`, if this is an element with that
     /// attribute. With duplicate attributes, the first one wins.
+    ///
+    /// Names are matched ASCII case-insensitively (stored keys are lower-cased
+    /// at parse time), matching `set_attr`, `remove_attr`, and selectors.
     pub fn attr(&self, name: &str) -> Option<&'a str> {
         let dom = self.dom;
         self.attr_spans()
             .iter()
-            .find(|&&(k, _)| dom.span_str(k) == name)
+            .find(|&&(k, _)| {
+                let key = dom.span_str(k);
+                // Exact match first: callers usually pass lower-case names.
+                key == name || key.eq_ignore_ascii_case(name)
+            })
             .map(|&(_, v)| dom.span_str(v))
     }
 
     /// Whether attribute `name` is present (including valueless boolean attrs).
+    ///
+    /// Names are matched ASCII case-insensitively; see [`Self::attr`].
     pub fn has_attr(&self, name: &str) -> bool {
         let dom = self.dom;
-        self.attr_spans()
-            .iter()
-            .any(|&(k, _)| dom.span_str(k) == name)
+        self.attr_spans().iter().any(|&(k, _)| {
+            let key = dom.span_str(k);
+            key == name || key.eq_ignore_ascii_case(name)
+        })
     }
 
     /// Whether this element hides itself: a `hidden` attribute, or an inline
