@@ -679,6 +679,31 @@ fn markdown_options_drop_data_uris() {
 }
 
 #[test]
+fn drop_data_uris_does_not_panic_on_multibyte_urls() {
+    // Byte index 5 falls inside 'é' for "ééé"; slicing by chars would panic (#88).
+    let html = "<p><a href=\"ééé\">x</a> <img src=\"ééé\" alt=\"y\"></p>";
+    let dom = parse(html);
+    let opts = MarkdownOptions::default().drop_data_uris(true);
+    let md = dom.to_markdown_with(&opts);
+    assert!(md.contains("[x]("), "{md}");
+    assert!(md.contains("![y]("), "{md}");
+    assert!(!md.contains("data:"), "{md}");
+
+    // Every MarkdownOptions combination must stay panic-free on these hrefs.
+    for drop in [false, true] {
+        for link in [LinkStyle::Inline, LinkStyle::Reference, LinkStyle::Footer] {
+            for image in [ImageStyle::Keep, ImageStyle::AltOnly, ImageStyle::Drop] {
+                let o = MarkdownOptions::default()
+                    .drop_data_uris(drop)
+                    .link_style(link)
+                    .image_style(image);
+                let _ = dom.to_markdown_with(&o);
+            }
+        }
+    }
+}
+
+#[test]
 fn markdown_options_base_url() {
     let html =
         "<p>Read <a href='post.html'>post</a> and see <img src='../img/logo.png' alt='Logo'>.</p>";

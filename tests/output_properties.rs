@@ -41,8 +41,12 @@ fn html_soup() -> impl Strategy<Value = String> {
         "<del>",
         "<a href='/x y'>",
         "<a href=u>",
+        "<a href='ééé'>",
+        "<a href='data:text/plain,hi'>",
         "</a>",
         "<img src=i alt='a*'>",
+        "<img src='ééé' alt='m'>",
+        "<img src='data:image/png;base64,xx' alt='d'>",
         "<br>",
         "<hr>",
         "<h1>",
@@ -100,6 +104,23 @@ fn serialize_all(dom: &Dom) -> (String, String) {
         let _ = node.to_text();
         #[cfg(feature = "markdown")]
         let _ = node.to_markdown();
+    }
+    #[cfg(feature = "markdown")]
+    {
+        use domq::{ImageStyle, LinkStyle, MarkdownOptions};
+        // Exercise option combinations, including drop_data_uris on non-ASCII
+        // and data: URLs from the soup generator (#88).
+        for drop in [false, true] {
+            for link in [LinkStyle::Inline, LinkStyle::Reference, LinkStyle::Footer] {
+                for image in [ImageStyle::Keep, ImageStyle::AltOnly, ImageStyle::Drop] {
+                    let opts = MarkdownOptions::default()
+                        .drop_data_uris(drop)
+                        .link_style(link)
+                        .image_style(image);
+                    let _ = dom.to_markdown_with(&opts);
+                }
+            }
+        }
     }
     #[cfg(feature = "markdown")]
     let md = dom.to_markdown();
