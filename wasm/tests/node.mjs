@@ -12,12 +12,21 @@ import { pathToFileURL } from "node:url";
 import init, {
   Document,
   errors,
+  links,
+  mainContent,
+  metadata,
   parse,
   parseJson,
+  resolveSrcset,
+  resolveUrl,
+  resources,
   select,
   selectFirst,
+  tables,
+  toCsv,
   toHtml,
   toMarkdown,
+  toMarkdownChunks,
   toText,
 } from "domq-wasm";
 
@@ -51,7 +60,54 @@ assert.deepEqual(errors("<b><i>x</b></i>")[0], {
   message: "end tag closed mis-nested elements",
 });
 
-// 2. Invalid selectors throw a real Error with a position.
+// 2. Data extraction parity: reader mode, metadata, links, chunks, tables, and URL helpers
+const articleHtml = `<html><head><title>Blog</title></head><body>
+  <nav><a href="/">Home</a></nav>
+  <div class="post">
+    <h1>Understanding domq</h1>
+    <p>domq provides Rust bindings for WebAssembly, allowing you to write native extensions with ease.</p>
+    <p>It provides memory safety, zero JS dependencies, and fast HTML extraction at the edge.</p>
+  </div>
+  <div id="comments"><p>First comment here!</p></div>
+  <footer>Copyright 2026</footer>
+</body></html>`;
+const mc = mainContent(articleHtml);
+assert.ok(mc);
+assert.ok(mc.text.includes("Understanding domq"));
+assert.ok(mc.markdown.includes("# Understanding domq"));
+assert.ok(mc.html.includes("class=\"post\""));
+assert.equal(mainContent("<nav><a href='/'>Only Nav</a></nav>"), undefined);
+
+const metaHtml = `<html lang="en"><head><title>Title</title><meta name="description" content="Desc"><link rel="canonical" href="sub/doc"><script type="application/ld+json">{"@type":"Blog"}</script></head></html>`;
+const meta = metadata(metaHtml, "https://example.com/base/");
+assert.equal(meta.title, "Title");
+assert.equal(meta.description, "Desc");
+assert.equal(meta.canonical, "https://example.com/base/sub/doc");
+assert.equal(meta.lang, "en");
+assert.equal(meta.language, "en");
+assert.deepEqual(meta.jsonLd, ['{"@type":"Blog"}']);
+
+const linkHtml = `<a href="page.html">Link text</a><img src="pic.jpg">`;
+const linkList = links(linkHtml, "https://example.com/");
+assert.deepEqual(linkList, [{ url: "https://example.com/page.html", text: "Link text", href: "page.html" }]);
+const resList = resources(linkHtml, "https://example.com/");
+assert.deepEqual(resList, [{ url: "https://example.com/pic.jpg", attr: "src", value: "pic.jpg", tag: "img" }]);
+
+const chunkHtml = `<h1>Section A</h1><p>Text A</p><h2>Section B</h2><p>Text B</p>`;
+const chunkList = toMarkdownChunks(chunkHtml, 30);
+assert.ok(chunkList.length >= 2);
+assert.ok(chunkList[0].markdown);
+assert.ok(chunkList[0].headingPath);
+assert.equal(typeof chunkList[0].byteSize, "number");
+
+const tableHtml = `<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>`;
+assert.deepEqual(tables(tableHtml), [[["A", "B"], ["1", "2"]]]);
+assert.equal(toCsv(tableHtml), "A,B\r\n1,2\r\n");
+
+assert.equal(resolveUrl("https://example.com/a/", "b"), "https://example.com/a/b");
+assert.equal(resolveSrcset("https://example.com/", "x.png 1x"), "https://example.com/x.png 1x");
+
+// 3. Invalid selectors throw a real Error with a position.
 assert.throws(() => select(html, "li:hover"), (e) => {
   assert.ok(e instanceof Error);
   assert.equal(e.name, "SelectorError");
@@ -61,7 +117,7 @@ assert.throws(() => select(html, "li:hover"), (e) => {
 });
 assert.throws(() => toText(html, "ul >"), { name: "SelectorError", position: 4 });
 
-// 3. The Document class: parse once, query many times.
+// 4. The Document class: parse once, query many times.
 const doc = new Document(html);
 assert.equal(doc.select("li").length, 2);
 assert.equal(doc.selectFirst("b").text, "more");
@@ -71,6 +127,17 @@ assert.equal(doc.toHtml(), toHtml(html));
 assert.deepEqual(doc.tree(), parse(html));
 assert.equal(JSON.stringify(doc), parseJson(html)); // toJSON()
 assert.deepEqual(doc.errors(), errors(html));
+
+const richDoc = new Document(articleHtml + metaHtml + linkHtml + tableHtml);
+assert.ok(richDoc.mainContent());
+assert.equal(richDoc.metadata("https://example.com/base/").title, "Blog");
+assert.equal(richDoc.links("https://example.com/").length, 2);
+assert.ok(richDoc.resources("https://example.com/").length >= 1);
+assert.ok(richDoc.toMarkdownChunks(30).length >= 1);
+assert.deepEqual(richDoc.tables(), [[["A", "B"], ["1", "2"]]]);
+assert.equal(richDoc.toCsv(), "A,B\r\n1,2\r\n");
+richDoc.free();
+
 doc.free();
 const doc2 = Document.parse(html);
 assert.equal(doc2.select("#list > li").length, 2);

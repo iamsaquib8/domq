@@ -134,6 +134,15 @@ throw a `SelectorError` if it is invalid; nothing else throws.
 | `toMarkdown(html, selector?)` | `string`: Markdown of the document, or of every match separated by a blank line |
 | `toHtml(html)` | `string`: the repaired HTML (every element closed and properly nested) |
 | `errors(html)` | `ParseError[]`: what the parser had to repair, and where |
+| `mainContent(html)` | `MainContent \| undefined`: reader mode article body (`text`, `markdown`, `html`) |
+| `metadata(html, baseUrl?)` | `Metadata`: title, description, canonical, language, OpenGraph, Twitter Cards, JSON-LD, feeds |
+| `links(html, baseUrl?)` | `Link[]`: resolved links (`url`, `text`, `href`) |
+| `resources(html, baseUrl?)` | `Resource[]`: embedded URLs (`url`, `attr`, `value`, `tag`) |
+| `toMarkdownChunks(html, maxChars?)` | `Chunk[]`: Markdown chunks with heading path and byte sizes for RAG |
+| `tables(html, selector?)` | `Table[]`: rectangularized 2D arrays of cell strings |
+| `toCsv(html, selector?)` | `string`: RFC 4180 CSV representation of tables |
+| `resolveUrl(base, relative)` | `string`: resolved URL (RFC 3986 §5.2) |
+| `resolveSrcset(base, srcset)` | `string`: resolved URLs in `srcset` |
 | `init(input?)`, `initSync({ module })` | load the `.wasm` (browsers and Workers only; see above) |
 
 ### Parse once, query many times
@@ -153,7 +162,9 @@ doc.free(); // release its wasm memory now instead of waiting for the GC
 
 `Document` has the same operations as methods: `select(selector)`,
 `selectFirst(selector)`, `toText(selector?)`, `toMarkdown(selector?)`,
-`toHtml()`, `tree()`, `errors()` and `free()`. `toJSON()` returns the same as
+`toHtml()`, `tree()`, `errors()`, `mainContent()`, `metadata(baseUrl?)`,
+`links(baseUrl?)`, `resources(baseUrl?)`, `toMarkdownChunks(maxChars?)`,
+`tables(selector?)`, `toCsv(selector?)`, and `free()`. `toJSON()` returns the same as
 `tree()`, so `JSON.stringify(doc)` gives the JSON tree. Where explicit resource
 management is available, `using doc = new Document(html)` frees it
 automatically.
@@ -221,8 +232,9 @@ pseudo-elements, `:hover` and other interactive states, namespaces, and
 | `domq_wasm_bg.wasm` | ~88 KB | ~41 KB |
 | `domq_wasm.js` (glue) | ~22 KB | ~4 KB |
 
-The module contains the parser, the selector engine, and the text, Markdown,
-JSON and HTML serializers. CI fails if the gzipped `.wasm` grows past 45 KiB.
+The module contains the parser, the selector engine, data extraction (reader
+mode, metadata, links, chunks, tables), and the text, Markdown, JSON and HTML
+serializers. CI fails if the gzipped `.wasm` grows past 65 KiB.
 
 ## Upgrading from 0.1 or 0.2
 
