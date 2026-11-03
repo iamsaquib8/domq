@@ -39,6 +39,12 @@ when to re-embed. See [Output stability](./README.md#output-stability).
   real content stays hidden. WCXB forums 0.365 → 0.498, WCXB dev 0.738 →
   0.747.
 
+### Fixed
+- **`drop_data_uris` no longer panics on non-ASCII URLs.** `is_data_uri`
+  checked `trimmed[..5]`, which panics when byte 5 falls inside a multi-byte
+  character (for example `href="ééé"`). It now uses a byte-prefix check, so
+  the CLI, MCP server and Python bindings stay up on such input.
+
 ## [0.5.0] — 2026-10-25
 
 "Trust, measured": an MCP server for agents, and published numbers for how

@@ -1228,7 +1228,12 @@ fn escape(out: &mut String, word: &str, line_start: bool) {
 
 fn is_data_uri(url: &str) -> bool {
     let trimmed = url.trim_start();
-    trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("data:")
+    // Use a byte/prefix check so multi-byte characters never panic on a
+    // mid-char slice boundary (#88).
+    trimmed
+        .as_bytes()
+        .get(..5)
+        .is_some_and(|p| p.eq_ignore_ascii_case(b"data:"))
 }
 
 fn record_reference(
