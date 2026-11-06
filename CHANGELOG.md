@@ -11,6 +11,10 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ## [Unreleased]
 
+### Fixed
+
+- Reject Markdown options combined with another output format, regardless of flag order.
+
 ## [0.6.0] — 2026-11-03
 
 "Where people are": reader mode, metadata, links, chunks and tables in Python

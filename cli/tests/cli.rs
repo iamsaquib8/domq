@@ -240,6 +240,54 @@ fn markdown_options_cli_flags() {
 }
 
 #[test]
+fn markdown_options_reject_other_modes_in_either_order() {
+    let options: &[&[&str]] = &[
+        &["--markdown-links", "reference"],
+        &["--markdown-images", "drop"],
+        &["--markdown-drop-data-uris"],
+    ];
+    for option in options {
+        for (mode, name) in [
+            ("-t", "--text"),
+            ("-j", "--json"),
+            ("--jsonl", "--jsonl"),
+            ("--csv", "--csv"),
+            ("-c", "--count"),
+        ] {
+            let mut before = option.to_vec();
+            before.extend([mode, "article"]);
+            let mut after = vec![mode];
+            after.extend_from_slice(option);
+            after.push("article");
+
+            let expected = format!("{} needs -m/--markdown (got {name})", option[0]);
+            for args in [before, after] {
+                let (out, err, code) = domq(&args, PAGE);
+                assert_eq!(code, 2, "{args:?}: {err}");
+                assert!(out.is_empty(), "{args:?}: {out}");
+                assert!(err.contains(&expected), "{args:?}: {err}");
+            }
+        }
+    }
+}
+
+#[test]
+fn markdown_options_still_imply_markdown() {
+    let options: &[&[&str]] = &[
+        &["--markdown-links", "reference"],
+        &["--markdown-images", "drop"],
+        &["--markdown-drop-data-uris"],
+    ];
+    for option in options {
+        let implied = ok(option, PAGE);
+        let mut explicit = option.to_vec();
+        explicit.push("-m");
+        assert_eq!(implied, ok(&explicit, PAGE), "{option:?}");
+        assert_ne!(implied, ok(&[], PAGE), "{option:?}");
+    }
+}
+
+#[test]
 fn count_and_first() {
     assert_eq!(ok(&["-c", "a"], PAGE), "3\n");
     assert_eq!(ok(&["-1", "-t", "li"], PAGE), "one\n");
