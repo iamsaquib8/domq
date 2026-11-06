@@ -20,6 +20,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use domq::{Dom, NodeRef, Selector};
+use js_sys::Uint8Array;
+use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 /// The same allocator Rust's `std` uses on `wasm32-unknown-unknown`.
@@ -180,6 +182,16 @@ export interface Chunk {
 
 /** A table represented as rows of rectangularized cell strings. */
 export type Table = string[][];
+
+/** The result of `decode()`. */
+export interface Decoded {
+  /** The decoded text. */
+  text: string;
+  /** The encoding detected or chosen, e.g. "utf-8", "windows-1252". */
+  encoding: string;
+  /** Any warning produced during decoding. */
+  warning: string | null;
+}
 "#;
 
 // --- the Document class ----------------------------------------------------
@@ -195,20 +207,46 @@ pub struct Document {
     errors: Vec<(usize, &'static str)>,
 }
 
-#[wasm_bindgen]
 impl Document {
-    /// Parse `html` (a full page or a fragment). Never throws: broken markup is
-    /// repaired and the repairs are listed by `errors()`.
-    #[wasm_bindgen(constructor)]
-    pub fn new(html: &str) -> Document {
+    fn from_str(html: &str) -> Document {
         let dom = domq::parse(html);
         let errors = js_positions(html, &dom);
         Document { dom, errors }
     }
 
-    /// Same as `new Document(html)`.
-    pub fn parse(html: &str) -> Document {
-        Document::new(html)
+    fn from_bytes(bytes: &[u8]) -> Document {
+        let decoded = domq::decode(bytes);
+        let dom = domq::parse(&decoded.text);
+        let errors = js_positions(&decoded.text, &dom);
+        Document { dom, errors }
+    }
+}
+
+#[wasm_bindgen]
+impl Document {
+    /// Parse `input` (a string or `Uint8Array`, full page or fragment). Never throws
+    /// on markup errors: broken markup is repaired and the repairs are listed by `errors()`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(input: &JsValue) -> Result<Document, JsValue> {
+        if let Some(html) = input.as_string() {
+            Ok(Document::from_str(&html))
+        } else if let Some(arr) = input.dyn_ref::<Uint8Array>() {
+            let bytes = arr.to_vec();
+            Ok(Document::from_bytes(&bytes))
+        } else {
+            Err(JsValue::from_str("expected string or Uint8Array"))
+        }
+    }
+
+    /// Same as `new Document(input)`.
+    pub fn parse(input: &JsValue) -> Result<Document, JsValue> {
+        Document::new(input)
+    }
+
+    /// Parse raw `bytes` (a `Uint8Array`) into a `Document`.
+    #[wasm_bindgen(js_name = parseBytes)]
+    pub fn parse_bytes(bytes: &[u8]) -> Document {
+        Document::from_bytes(bytes)
     }
 
     /// Every element matching a CSS `selector`, in document order. Throws a
@@ -459,10 +497,40 @@ impl Document {
 
 // --- one-shot functions ----------------------------------------------------
 
-/// Parse `html` into a tree of plain JS objects (see `DomDocument`).
+/// Parse `input` (a string or `Uint8Array`) into a tree of plain JS objects (see `DomDocument`).
 #[wasm_bindgen(unchecked_return_type = "DomDocument")]
-pub fn parse(html: &str) -> JsValue {
-    json(&domq::parse(html).to_json())
+pub fn parse(input: &JsValue) -> Result<JsValue, JsValue> {
+    if let Some(html) = input.as_string() {
+        Ok(json(&domq::parse(&html).to_json()))
+    } else if let Some(arr) = input.dyn_ref::<Uint8Array>() {
+        let bytes = arr.to_vec();
+        Ok(json(&domq::parse_bytes(&bytes).to_json()))
+    } else {
+        Err(JsValue::from_str("expected string or Uint8Array"))
+    }
+}
+
+/// Parse raw `bytes` (a `Uint8Array`) into a tree of plain JS objects (see `DomDocument`).
+#[wasm_bindgen(js_name = parseBytes, unchecked_return_type = "DomDocument")]
+pub fn parse_bytes(bytes: &[u8]) -> JsValue {
+    json(&domq::parse_bytes(bytes).to_json())
+}
+
+/// Decode raw HTML bytes into a string, using WHATWG encoding sniffing.
+#[wasm_bindgen(unchecked_return_type = "Decoded")]
+pub fn decode(bytes: &[u8], label: Option<String>) -> JsValue {
+    let res = domq::decode_with(bytes, label.as_deref());
+    let mut out = String::from("{\"text\":");
+    push_str(&mut out, &res.text);
+    out.push_str(",\"encoding\":");
+    push_str(&mut out, res.encoding.name());
+    out.push_str(",\"warning\":");
+    match &res.warning {
+        Some(w) => push_str(&mut out, w),
+        None => out.push_str("null"),
+    }
+    out.push('}');
+    json(&out)
 }
 
 /// Parse `html` and return the tree as a JSON string (the same shape as
@@ -477,7 +545,7 @@ pub fn parse_json(html: &str) -> String {
 #[wasm_bindgen(unchecked_return_type = "Match[]")]
 pub fn select(html: &str, selector: &str) -> Result<JsValue, JsValue> {
     compile(selector)?;
-    Document::new(html).select(selector)
+    Document::from_str(html).select(selector)
 }
 
 /// The first element of `html` matching a CSS `selector`, or `undefined`.
@@ -485,21 +553,21 @@ pub fn select(html: &str, selector: &str) -> Result<JsValue, JsValue> {
 #[wasm_bindgen(js_name = selectFirst, unchecked_return_type = "Match | undefined")]
 pub fn select_first(html: &str, selector: &str) -> Result<JsValue, JsValue> {
     compile(selector)?;
-    Document::new(html).select_first(selector)
+    Document::from_str(html).select_first(selector)
 }
 
 /// `html` as readable plain text — or, with a `selector`, the text of every
 /// match separated by a blank line.
 #[wasm_bindgen(js_name = toText)]
 pub fn to_text(html: &str, selector: Option<String>) -> Result<String, JsValue> {
-    Document::new(html).to_text(selector)
+    Document::from_str(html).to_text(selector)
 }
 
 /// `html` as Markdown — or, with a `selector`, every match converted and
 /// separated by a blank line.
 #[wasm_bindgen(js_name = toMarkdown)]
 pub fn to_markdown(html: &str, selector: Option<String>) -> Result<String, JsValue> {
-    Document::new(html).to_markdown(selector)
+    Document::from_str(html).to_markdown(selector)
 }
 
 /// `html` parsed and re-serialized: the repaired, well-formed version.
@@ -511,50 +579,50 @@ pub fn to_html(html: &str) -> String {
 /// The problems the parser recovered from while parsing `html`.
 #[wasm_bindgen(unchecked_return_type = "ParseError[]")]
 pub fn errors(html: &str) -> JsValue {
-    Document::new(html).errors()
+    Document::from_str(html).errors()
 }
 
 /// The element holding the page's main content ("reader mode"), or `undefined`.
 #[wasm_bindgen(js_name = mainContent, unchecked_return_type = "MainContent | undefined")]
 pub fn main_content(html: &str) -> JsValue {
-    Document::new(html).main_content()
+    Document::from_str(html).main_content()
 }
 
 /// Page metadata: title, description, canonical URL, language, OpenGraph,
 /// Twitter Cards, feeds, and JSON-LD blocks.
 #[wasm_bindgen(unchecked_return_type = "Metadata")]
 pub fn metadata(html: &str, base_url: Option<String>) -> JsValue {
-    Document::new(html).metadata(base_url)
+    Document::from_str(html).metadata(base_url)
 }
 
 /// Every hyperlink (`<a href>` and `<area href>`) in document order.
 #[wasm_bindgen(unchecked_return_type = "Link[]")]
 pub fn links(html: &str, base_url: Option<String>) -> JsValue {
-    Document::new(html).links(base_url)
+    Document::from_str(html).links(base_url)
 }
 
 /// Every embedded resource URL in document order.
 #[wasm_bindgen(unchecked_return_type = "Resource[]")]
 pub fn resources(html: &str, base_url: Option<String>) -> JsValue {
-    Document::new(html).resources(base_url)
+    Document::from_str(html).resources(base_url)
 }
 
 /// CommonMark + GFM Markdown split at headings into chunks under `max_chars`.
 #[wasm_bindgen(js_name = toMarkdownChunks, unchecked_return_type = "Chunk[]")]
 pub fn to_markdown_chunks(html: &str, max_chars: Option<usize>) -> JsValue {
-    Document::new(html).to_markdown_chunks(max_chars)
+    Document::from_str(html).to_markdown_chunks(max_chars)
 }
 
 /// Extract rows of cell text for tables matching `selector` (default `"table"`).
 #[wasm_bindgen(unchecked_return_type = "Table[]")]
 pub fn tables(html: &str, selector: Option<String>) -> Result<JsValue, JsValue> {
-    Document::new(html).tables(selector)
+    Document::from_str(html).tables(selector)
 }
 
 /// Format matched tables as RFC 4180 CSV, separated by `\r\n`.
 #[wasm_bindgen(js_name = toCsv)]
 pub fn to_csv(html: &str, selector: Option<String>) -> Result<String, JsValue> {
-    Document::new(html).to_csv(selector)
+    Document::from_str(html).to_csv(selector)
 }
 
 /// Resolve `relative` against `base`, following RFC 3986 §5.2.

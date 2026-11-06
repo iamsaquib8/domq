@@ -19,8 +19,8 @@ use domq::{
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::marker::Ungil;
 use pyo3::prelude::*;
-use pyo3::pybacked::PyBackedStr;
-use pyo3::types::{PyDict, PyIterator, PyList, PyString};
+use pyo3::pybacked::{PyBackedBytes, PyBackedStr};
+use pyo3::types::{PyBytes, PyDict, PyIterator, PyList, PyString};
 
 /// Inputs at least this many bytes long are parsed with the GIL released.
 const DETACH_BYTES: usize = 16 * 1024;
@@ -68,12 +68,84 @@ fn to_selector<'a>(obj: &'a Bound<'_, PyAny>) -> PyResult<SelectorInput<'a>> {
 
 /// Parse an HTML document (or fragment) into a `Document`.
 ///
+/// Accepts a `str` or raw `bytes`. When `bytes` are passed, character encoding
+/// is detected automatically via the WHATWG encoding-sniffing algorithm (or
+/// overridden with `encoding`).
+///
 /// Never raises on malformed HTML: anything the parser had to recover from is
 /// listed in `Document.errors`. Large inputs are parsed with the GIL released.
 #[pyfunction]
-fn parse(py: Python<'_>, html: PyBackedStr) -> Document {
-    let dom = maybe_detach(py, html.len() >= DETACH_BYTES, || domq::parse(&html));
-    Document { dom }
+#[pyo3(signature = (source, encoding = None))]
+fn parse(py: Python<'_>, source: &Bound<'_, PyAny>, encoding: Option<&str>) -> PyResult<Document> {
+    if source.is_instance_of::<PyString>() {
+        let s = source.extract::<PyBackedStr>()?;
+        let dom = maybe_detach(py, s.len() >= DETACH_BYTES, move || domq::parse(&s));
+        Ok(Document { dom })
+    } else if source.is_instance_of::<PyBytes>() {
+        let b = source.extract::<PyBackedBytes>()?;
+        let encoding_owned = encoding.map(str::to_owned);
+        let dom = maybe_detach(py, b.len() >= DETACH_BYTES, move || {
+            domq::parse_bytes_with(&b, encoding_owned.as_deref())
+        });
+        Ok(Document { dom })
+    } else {
+        Err(PyTypeError::new_err("source must be str or bytes"))
+    }
+}
+
+/// The result of [`decode`].
+#[pyclass(frozen, module = "domq")]
+struct Decoded {
+    text: String,
+    encoding: String,
+    warning: Option<String>,
+}
+
+#[pymethods]
+impl Decoded {
+    /// The decoded text.
+    #[getter]
+    fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The encoding detected or chosen.
+    #[getter]
+    fn encoding(&self) -> &str {
+        &self.encoding
+    }
+
+    /// Any warning produced during decoding (e.g. unknown or unsupported charset).
+    #[getter]
+    fn warning(&self) -> Option<&str> {
+        self.warning.as_deref()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<Decoded encoding={:?} warning={:?}>",
+            self.encoding, self.warning
+        )
+    }
+
+    fn __str__(&self) -> &str {
+        &self.text
+    }
+}
+
+/// Decode raw HTML bytes into a string, using WHATWG encoding sniffing.
+#[pyfunction]
+#[pyo3(signature = (bytes, encoding = None))]
+fn decode(py: Python<'_>, bytes: PyBackedBytes, encoding: Option<&str>) -> Decoded {
+    let encoding_owned = encoding.map(str::to_owned);
+    let decoded = maybe_detach(py, bytes.len() >= DETACH_BYTES, move || {
+        domq::decode_with(&bytes, encoding_owned.as_deref())
+    });
+    Decoded {
+        text: decoded.text,
+        encoding: decoded.encoding.name().to_string(),
+        warning: decoded.warning,
+    }
 }
 
 /// Resolve `relative` against `base`, following RFC 3986 §5.2.
@@ -1256,8 +1328,8 @@ impl Element {
 mod py_domq {
     #[pymodule_export]
     use super::{
-        Chunk, Document, Element, Link, Metadata, OutlineNode, PageOutline, Resource, Selector,
-        parse, resolve_srcset, resolve_url,
+        Chunk, Decoded, Document, Element, Link, Metadata, OutlineNode, PageOutline, Resource,
+        Selector, decode, parse, resolve_srcset, resolve_url,
     };
 
     /// The package version.

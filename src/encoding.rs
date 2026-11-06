@@ -1,60 +1,113 @@
-//! Input decoding: the bytes of a page → a `String`.
+//! Input decoding: bytes of an HTML page → a `String`.
 //!
-//! The steps follow the WHATWG encoding-sniffing algorithm, simplified for a
-//! tool that reads files and pipes (there is no HTTP `Content-Type` here):
+//! Follows the WHATWG encoding-sniffing algorithm:
 //!
-//! 1. a byte-order mark (UTF-8, UTF-16LE, UTF-16BE) — it always wins, as in
-//!    browsers;
-//! 2. `--encoding LABEL`;
-//! 3. `<meta charset=…>` or `<meta http-equiv=content-type content="…;
-//!    charset=…">` in the first 1024 bytes (the WHATWG *prescan*);
-//! 4. UTF-8, if the bytes are valid UTF-8 — a sequence cut off at the very end
-//!    (`head -c`) still counts;
-//! 5. otherwise Windows-1252, which maps every byte to a character.
+//! 1. A byte-order mark (UTF-8, UTF-16LE, UTF-16BE) — always wins;
+//! 2. An explicit encoding label override if provided;
+//! 3. `<meta charset=…>` or `<meta http-equiv=content-type content="…; charset=…">`
+//!    in the first 1024 bytes (the WHATWG prescan);
+//! 4. UTF-8, if the bytes are valid UTF-8 (including an incomplete sequence cut off
+//!    at the very end of the stream);
+//! 5. Otherwise Windows-1252, which maps every byte to a character.
 //!
-//! Supported encodings: UTF-8, UTF-16LE, UTF-16BE and Windows-1252, under
-//! their WHATWG labels — so `iso-8859-1`, `latin1` and `ascii` mean
-//! Windows-1252, as they do in browsers. Decoding never fails: anything that
-//! cannot be decoded becomes U+FFFD.
+//! Supported encodings: UTF-8, UTF-16LE, UTF-16BE, and Windows-1252, under their
+//! WHATWG labels — so `iso-8859-1`, `latin1`, and `ascii` map to Windows-1252,
+//! as in browsers. Decoding never fails: unmapped or invalid sequences become
+//! replacement characters (U+FFFD).
 
-/// An encoding the CLI can decode.
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::ops::Deref;
+
+/// An encoding detected or supported by [`decode`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Encoding {
+    /// UTF-8 (the default for the web).
     Utf8,
+    /// UTF-16 little-endian.
     Utf16Le,
+    /// UTF-16 big-endian.
     Utf16Be,
+    /// Windows-1252 (the WHATWG fallback for legacy single-byte encodings).
     Windows1252,
 }
 
-/// The result of [`decode`].
-#[derive(Debug)]
+impl Encoding {
+    /// The canonical WHATWG name of this encoding (`"utf-8"`, `"utf-16le"`, `"utf-16be"`, or `"windows-1252"`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Encoding::Utf8 => "utf-8",
+            Encoding::Utf16Le => "utf-16le",
+            Encoding::Utf16Be => "utf-16be",
+            Encoding::Windows1252 => "windows-1252",
+        }
+    }
+}
+
+/// The result of [`decode`] or [`decode_with`].
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Decoded {
+    /// The decoded HTML text.
     pub text: String,
-    /// The encoding used (only the tests look at it).
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The character encoding used to decode the bytes.
     pub encoding: Encoding,
-    /// Something worth telling the user on stderr.
+    /// A diagnostic warning if the declared encoding was unknown or unsupported.
     pub warning: Option<String>,
+}
+
+impl Decoded {
+    /// The decoded text as a string slice.
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    /// Consume the decoded result and return the owned string.
+    pub fn into_text(self) -> String {
+        self.text
+    }
+}
+
+impl Deref for Decoded {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.text
+    }
+}
+
+impl AsRef<str> for Decoded {
+    fn as_ref(&self) -> &str {
+        &self.text
+    }
 }
 
 /// How far into the input the `<meta>` prescan looks.
 const PRESCAN_BYTES: usize = 1024;
 
-/// Decode `bytes`, with `label` (from `--encoding`) overriding detection.
-pub fn decode(mut bytes: Vec<u8>, label: Option<&str>) -> Decoded {
+/// Decode `bytes` into a string using the WHATWG encoding-sniffing algorithm.
+///
+/// Sniffs BOM, `<meta charset>`, valid UTF-8, and falls back to Windows-1252.
+/// Decoding never fails: unmapped or invalid sequences become U+FFFD.
+pub fn decode(bytes: &[u8]) -> Decoded {
+    decode_with(bytes, None)
+}
+
+/// Decode `bytes`, with `label` overriding auto-detection when valid.
+pub fn decode_with(bytes: &[u8], label: Option<&str>) -> Decoded {
     let done = |text, encoding, warning| Decoded {
         text,
         encoding,
         warning,
     };
     // 1. A byte-order mark.
-    if let Some((encoding, len)) = bom(&bytes) {
-        bytes.drain(..len);
-        return done(decode_as(bytes, encoding), encoding, None);
+    if let Some((encoding, len)) = bom(bytes) {
+        let body = bytes.get(len..).unwrap_or_default();
+        return done(decode_as(body, encoding), encoding, None);
     }
-    // 2. `--encoding`.
+    // 2. Explicit label override.
     if let Some(label) = label {
-        return match lookup(label) {
+        return match lookup_encoding(label) {
             Some(encoding) => done(decode_as(bytes, encoding), encoding, None),
             None => done(
                 decode_as(bytes, Encoding::Utf8),
@@ -67,14 +120,16 @@ pub fn decode(mut bytes: Vec<u8>, label: Option<&str>) -> Decoded {
         };
     }
     // 3. `<meta charset>`.
-    let declared = prescan(bytes.get(..PRESCAN_BYTES).unwrap_or(&bytes));
+    let head = bytes.get(..PRESCAN_BYTES).unwrap_or(bytes);
+    let declared = prescan(head);
     if let Prescan::Found(encoding) = declared {
         return done(decode_as(bytes, encoding), encoding, None);
     }
-    // 4. UTF-8, 5. Windows-1252.
-    if is_utf8(&bytes) {
+    // 4. UTF-8.
+    if is_utf8(bytes) {
         return done(decode_as(bytes, Encoding::Utf8), Encoding::Utf8, None);
     }
+    // 5. Fallback to Windows-1252.
     let warning = match declared {
         Prescan::Unsupported(label) => Some(format!(
             "the page declares charset '{label}', which is not supported; \
@@ -90,9 +145,8 @@ pub fn decode(mut bytes: Vec<u8>, label: Option<&str>) -> Decoded {
 }
 
 /// The encoding a WHATWG label names, if it is one this module supports.
-/// Labels are matched ASCII case-insensitively, ignoring surrounding
-/// whitespace.
-pub fn lookup(label: &str) -> Option<Encoding> {
+/// Labels are matched ASCII case-insensitively, ignoring surrounding whitespace.
+pub fn lookup_encoding(label: &str) -> Option<Encoding> {
     let label = label
         .trim_matches(|c: char| c.is_ascii_whitespace())
         .to_ascii_lowercase();
@@ -122,20 +176,20 @@ fn bom(bytes: &[u8]) -> Option<(Encoding, usize)> {
 
 /// Valid UTF-8, allowing an incomplete sequence at the very end.
 fn is_utf8(bytes: &[u8]) -> bool {
-    match std::str::from_utf8(bytes) {
+    match core::str::from_utf8(bytes) {
         Ok(_) => true,
         Err(e) => e.error_len().is_none(),
     }
 }
 
-fn decode_as(bytes: Vec<u8>, encoding: Encoding) -> String {
+fn decode_as(bytes: &[u8], encoding: Encoding) -> String {
     match encoding {
-        Encoding::Utf8 => match String::from_utf8(bytes) {
-            Ok(s) => s,
-            Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
+        Encoding::Utf8 => match core::str::from_utf8(bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => String::from_utf8_lossy(bytes).into_owned(),
         },
-        Encoding::Utf16Le => decode_utf16(&bytes, u16::from_le_bytes),
-        Encoding::Utf16Be => decode_utf16(&bytes, u16::from_be_bytes),
+        Encoding::Utf16Le => decode_utf16(bytes, u16::from_le_bytes),
+        Encoding::Utf16Be => decode_utf16(bytes, u16::from_be_bytes),
         Encoding::Windows1252 => bytes.iter().map(|&b| windows_1252(b)).collect(),
     }
 }
@@ -263,7 +317,7 @@ fn meta_charset(head: &[u8], i: &mut usize) -> Option<Result<Encoding, String>> 
         _ => {}
     }
     let label = charset?;
-    Some(match lookup(&label) {
+    Some(match lookup_encoding(&label) {
         // A document whose `<meta>` can be read as ASCII is not UTF-16.
         Some(Encoding::Utf16Le | Encoding::Utf16Be) => Ok(Encoding::Utf8),
         Some(encoding) => Ok(encoding),
@@ -398,9 +452,10 @@ fn find_ignore_case(haystack: &[u8], from: usize, needle: &[u8]) -> Option<usize
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     fn detect(bytes: &[u8]) -> (String, Encoding) {
-        let d = decode(bytes.to_vec(), None);
+        let d = decode(bytes);
         assert_eq!(d.warning, None);
         (d.text, d.encoding)
     }
@@ -556,25 +611,25 @@ mod tests {
 
     #[test]
     fn label_override() {
-        let d = decode(utf16("<p>hi", false), Some("UTF-16LE"));
+        let d = decode_with(&utf16("<p>hi", false), Some("UTF-16LE"));
         assert_eq!((d.text.as_str(), d.encoding), ("<p>hi", Encoding::Utf16Le));
-        let d = decode(utf16("<p>hi", true), Some("utf-16be"));
+        let d = decode_with(&utf16("<p>hi", true), Some("utf-16be"));
         assert_eq!(d.text, "<p>hi");
         // Overrides `<meta>` and UTF-8 validity.
-        let d = decode(b"<meta charset=latin1>\xC3\xA9".to_vec(), Some("utf8"));
+        let d = decode_with(b"<meta charset=latin1>\xC3\xA9", Some("utf8"));
         assert_eq!(d.text, "<meta charset=latin1>é");
         for alias in [" Latin1 ", "iso-8859-1", "ascii", "us-ascii", "cp1252"] {
-            let d = decode(b"caf\xC3\xA9".to_vec(), Some(alias));
+            let d = decode_with(b"caf\xC3\xA9", Some(alias));
             assert_eq!(d.text, "caf\u{C3}\u{A9}", "{alias}");
         }
         // A BOM still wins.
-        let d = decode(b"\xEF\xBB\xBFcaf\xC3\xA9".to_vec(), Some("windows-1252"));
+        let d = decode_with(b"\xEF\xBB\xBFcaf\xC3\xA9", Some("windows-1252"));
         assert_eq!((d.text.as_str(), d.encoding), ("café", Encoding::Utf8));
     }
 
     #[test]
     fn unknown_labels_warn_and_decode_lossy_utf8() {
-        let d = decode(b"caf\xE9".to_vec(), Some("shift_jis"));
+        let d = decode_with(b"caf\xE9", Some("shift_jis"));
         assert_eq!(
             (d.text.as_str(), d.encoding),
             ("caf\u{FFFD}", Encoding::Utf8)
@@ -590,13 +645,10 @@ mod tests {
             Encoding::Utf8
         );
         // Otherwise Windows-1252, with a warning; a later supported `<meta>` wins.
-        let d = decode(b"<meta charset=koi8-r>\xE9!".to_vec(), None);
+        let d = decode_with(b"<meta charset=koi8-r>\xE9!", None);
         assert_eq!(d.encoding, Encoding::Windows1252);
         assert!(d.warning.is_some_and(|w| w.contains("koi8-r")));
-        let d = decode(
-            b"<meta charset=koi8-r><meta charset=utf-8>\xE9".to_vec(),
-            None,
-        );
+        let d = decode_with(b"<meta charset=koi8-r><meta charset=utf-8>\xE9", None);
         assert_eq!((d.encoding, d.warning), (Encoding::Utf8, None));
     }
 
@@ -605,8 +657,17 @@ mod tests {
         let html =
             b"<!--x--><a b='c'd=e f><meta http-equiv=content-type content='a;charset=\"x'>\xFF\xFE";
         for end in 0..=html.len() {
-            let _ = decode(html[..end].to_vec(), None);
+            let _ = decode(&html[..end]);
             let _ = prescan(&html[..end]);
         }
+    }
+
+    #[test]
+    fn parse_bytes_api() {
+        let dom = crate::parse_bytes(b"<article><h1>News</h1><p>Caf\xC3\xA9</p></article>");
+        assert_eq!(dom.to_text(), "News\n\nCafé");
+
+        let dom = crate::parse_bytes_with(b"<h1>News</h1><p>Caf\xe9</p>", Some("latin1"));
+        assert_eq!(dom.to_text(), "News\n\nCafé");
     }
 }

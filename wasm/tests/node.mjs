@@ -11,11 +11,13 @@ import { pathToFileURL } from "node:url";
 // 1. Plain ESM import: ready to use, no init call.
 import init, {
   Document,
+  decode,
   errors,
   links,
   mainContent,
   metadata,
   parse,
+  parseBytes,
   parseJson,
   resolveSrcset,
   resolveUrl,
@@ -142,6 +144,34 @@ doc.free();
 const doc2 = Document.parse(html);
 assert.equal(doc2.select("#list > li").length, 2);
 doc2.free();
+
+// Bytes-in, Uint8Array and decoding
+const utf8Bytes = Buffer.from("<p class='item'>hello bytes</p>");
+assert.equal(parse(utf8Bytes).children[0].children[0].value, "hello bytes");
+assert.equal(parseBytes(utf8Bytes).children[0].children[0].value, "hello bytes");
+
+const latin1Bytes = Buffer.from("<meta charset=latin1><p>caf\xe9</p>", "latin1");
+assert.equal(parse(latin1Bytes).children[1].children[0].value, "café");
+
+const dec = decode(Buffer.from("<p>café</p>", "utf8"));
+assert.equal(dec.text, "<p>café</p>");
+assert.equal(dec.encoding, "utf-8");
+assert.equal(dec.warning, null);
+
+const decWin = decode(Buffer.from("<meta charset=latin1>\xe9", "latin1"));
+assert.equal(decWin.encoding, "windows-1252");
+
+const bytesDoc = new Document(utf8Bytes);
+assert.equal(bytesDoc.toText(), "hello bytes");
+bytesDoc.free();
+
+const bytesDoc2 = Document.parse(utf8Bytes);
+assert.equal(bytesDoc2.toText(), "hello bytes");
+bytesDoc2.free();
+
+const bytesDoc3 = Document.parseBytes(utf8Bytes);
+assert.equal(bytesDoc3.toText(), "hello bytes");
+bytesDoc3.free();
 
 // 4. Browser-style code still works: init() is a no-op here.
 await init();
