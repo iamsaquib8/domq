@@ -202,11 +202,10 @@ fn match_output(matches: &[NodeRef<'_>], opts: &Options) -> Output {
 }
 
 /// `--csv`: each matched `<table>` with rows as RFC 4180 CSV, separated by a
-/// blank line. Other matches and tables without rows are skipped.
+/// blank line. For non-table matches, the outermost tables inside them are used.
 fn csv_output(matches: &[NodeRef<'_>], first: bool) -> Output {
-    let tables: Vec<String> = matches
-        .iter()
-        .filter(|m| m.tag_name() == Some("table"))
+    let tables: Vec<String> = matched_tables(matches)
+        .into_iter()
         .map(|t| t.table_rows())
         .filter(|rows| !rows.is_empty())
         .take(if first { 1 } else { usize::MAX })
@@ -216,6 +215,43 @@ fn csv_output(matches: &[NodeRef<'_>], first: bool) -> Output {
         matched: !tables.is_empty(),
         text: tables.join("\r\n"),
     }
+}
+
+/// The tables to extract from a list of matched elements: for each element,
+/// the element itself if it is a `<table>`, or the outermost `<table>`s
+/// inside it in document order.
+pub(crate) fn matched_tables<'a>(matches: &[NodeRef<'a>]) -> Vec<NodeRef<'a>> {
+    let mut tables = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for &m in matches {
+        for table in outermost_tables(m) {
+            if seen.insert(table.id()) {
+                tables.push(table);
+            }
+        }
+    }
+    tables
+}
+
+/// The element itself if it is a `<table>`, or every outermost `<table>` descendant.
+/// Does not descend into nested `<table>`s.
+fn outermost_tables<'a>(node: NodeRef<'a>) -> Vec<NodeRef<'a>> {
+    if node.tag_name() == Some("table") {
+        return vec![node];
+    }
+    let mut tables = Vec::new();
+    let mut stack: Vec<NodeRef<'a>> = node.child_elements().collect();
+    stack.reverse();
+    while let Some(current) = stack.pop() {
+        if current.tag_name() == Some("table") {
+            tables.push(current);
+        } else {
+            let mut children: Vec<_> = current.child_elements().collect();
+            children.reverse();
+            stack.extend(children);
+        }
+    }
+    tables
 }
 
 /// `-e`: one object, or one per match of the scope selector.
