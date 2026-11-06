@@ -17,6 +17,7 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ### Fixed
 
+- MCP: a request whose `_meta` specifies a handshake-era legacy version is served with legacy semantics rather than modern, allowing `initialize` and omitting modern result fields, and `clientCapabilities` is validated to be an object ([#159](https://github.com/iamsaquib8/domq/issues/159)).
 - CLI: `-1` is applied after attribute (`-a`) and whitespace (`-w`) filtering rather than before, and `-c` honours `-w` to skip blank matches ([#144](https://github.com/iamsaquib8/domq/issues/144)).
 - Reject Markdown options combined with another output format, regardless of flag order.
 
