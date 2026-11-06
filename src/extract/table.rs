@@ -179,6 +179,8 @@ impl NodeRef<'_> {
 ///     "Name,Note\r\nAnn,\"says \"\"hi\"\", twice\"\r\n",
 /// );
 /// assert_eq!(domq::to_csv([["a", "b\nc"]]), "a,\"b\nc\"\r\n");
+/// // A single empty cell in a row is written as `""` so it is not a blank line:
+/// assert_eq!(domq::to_csv([["a"], [""], ["b"]]), "a\r\n\"\"\r\nb\r\n");
 /// ```
 pub fn to_csv<R, C, S>(rows: R) -> String
 where
@@ -188,9 +190,13 @@ where
 {
     let mut out = String::new();
     for row in rows {
+        let mut single_empty = false;
         for (i, field) in row.into_iter().enumerate() {
             if i > 0 {
+                single_empty = false;
                 out.push(',');
+            } else if field.as_ref().is_empty() {
+                single_empty = true;
             }
             let field = field.as_ref();
             if field.contains([',', '"', '\r', '\n']) {
@@ -205,6 +211,9 @@ where
             } else {
                 out.push_str(field);
             }
+        }
+        if single_empty {
+            out.push_str("\"\"");
         }
         out.push_str("\r\n");
     }
