@@ -612,6 +612,18 @@ impl Flag {
     }
 }
 
+/// Whether `url` is an absolute URL with a scheme and authority or path (`scheme://…`).
+pub(crate) fn is_absolute_url(url: &str) -> bool {
+    let url = url.trim();
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let mut chars = scheme.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        && !rest.trim().is_empty()
+}
+
 fn apply_value(opts: &mut Options, flag: Flag, value: String) -> Result<(), ArgError> {
     match flag {
         Flag::Attribute => opts.attribute = Some(value),
@@ -626,7 +638,14 @@ fn apply_value(opts: &mut Options, flag: Flag, value: String) -> Result<(), ArgE
             opts.extract.push(field);
         }
         Flag::Remove => opts.remove.push(value),
-        Flag::Base => opts.base = Some(value),
+        Flag::Base => {
+            if !is_absolute_url(&value) {
+                return Err(ArgError::new(
+                    "--base must be an absolute URL (scheme://…)".into(),
+                ));
+            }
+            opts.base = Some(value);
+        }
         Flag::Filename => opts.input = Some(value),
         Flag::Output => opts.output = Some(value),
         Flag::Encoding => {
@@ -790,6 +809,32 @@ mod tests {
             "unknown or unsupported encoding 'bogus' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
         );
         assert_eq!(err.help, "domq --help");
+        for bad in ["not a url", "/relative/", "htps://", "https://"] {
+            let err = try_run(&["--base", bad]).unwrap_err();
+            assert_eq!(err.message, "--base must be an absolute URL (scheme://…)");
+            assert_eq!(err.help, "domq --help");
+
+            let err = try_run(&["-b", bad]).unwrap_err();
+            assert_eq!(err.message, "--base must be an absolute URL (scheme://…)");
+            assert_eq!(err.help, "domq --help");
+        }
+    }
+
+    #[test]
+    fn absolute_urls() {
+        assert!(is_absolute_url("https://example.com"));
+        assert!(is_absolute_url("https://example.com/foo/bar"));
+        assert!(is_absolute_url("http://localhost:3000"));
+        assert!(is_absolute_url("file:///etc/hosts"));
+        assert!(is_absolute_url("custom+scheme://host"));
+        assert!(!is_absolute_url("/relative/"));
+        assert!(!is_absolute_url("not a url"));
+        assert!(!is_absolute_url("htps://"));
+        assert!(!is_absolute_url("https://"));
+        assert!(!is_absolute_url("https://   "));
+        assert!(!is_absolute_url("://foo"));
+        assert!(!is_absolute_url("1http://foo"));
+        assert!(!is_absolute_url("mailto:user@example.com"));
     }
 
     #[test]
