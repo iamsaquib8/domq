@@ -847,10 +847,23 @@ fn utf16_input() {
 }
 
 #[test]
-fn unknown_encoding_warns() {
+fn unknown_encoding_is_usage_error() {
     let (out, err, code) = domq_bytes(&["--encoding=klingon", "-t"], b"<p>caf\xe9</p>");
-    assert_eq!((out.as_str(), code), ("caf\u{fffd}\n", 0));
-    assert!(err.contains("warning") && err.contains("klingon"), "{err}");
+    assert_eq!(code, 2);
+    assert!(out.is_empty(), "expected empty stdout, got {out:?}");
+    assert!(
+        err.contains("unknown or unsupported encoding 'klingon'") && err.contains("domq --help"),
+        "{err}"
+    );
+
+    let (out, err, code) = domq(&["lint", "--encoding=klingon"], "<p>x</p>");
+    assert_eq!(code, 2);
+    assert!(out.is_empty(), "expected empty stdout, got {out:?}");
+    assert!(
+        err.contains("unknown or unsupported encoding 'klingon'")
+            && err.contains("domq lint --help"),
+        "{err}"
+    );
 }
 
 // --- deep documents ----------------------------------------------------------

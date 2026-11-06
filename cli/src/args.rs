@@ -421,7 +421,15 @@ fn parse_lint(mut args: impl Iterator<Item = String>) -> Result<Command, ArgErro
                     )));
                 }
             },
-            "--encoding" => opts.encoding = Some(value(inline)?),
+            "--encoding" => {
+                let enc = value(inline)?;
+                if domq::lookup_encoding(&enc).is_none() {
+                    return Err(ArgError::lint(format!(
+                        "unknown or unsupported encoding '{enc}' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
+                    )));
+                }
+                opts.encoding = Some(enc);
+            }
             "-" => opts.files.push(arg),
             _ if name.starts_with('-') => {
                 return Err(ArgError::lint(format!("unknown lint option '{arg}'")));
@@ -621,7 +629,14 @@ fn apply_value(opts: &mut Options, flag: Flag, value: String) -> Result<(), ArgE
         Flag::Base => opts.base = Some(value),
         Flag::Filename => opts.input = Some(value),
         Flag::Output => opts.output = Some(value),
-        Flag::Encoding => opts.encoding = Some(value),
+        Flag::Encoding => {
+            if domq::lookup_encoding(&value).is_none() {
+                return Err(ArgError::new(format!(
+                    "unknown or unsupported encoding '{value}' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
+                )));
+            }
+            opts.encoding = Some(value);
+        }
         Flag::MarkdownLinks => {
             let val = value.to_ascii_lowercase();
             if !matches!(val.as_str(), "inline" | "reference" | "footer") {
@@ -769,6 +784,12 @@ mod tests {
         assert!(parse([OsString::from("--nope")]).is_err());
         assert!(parse([OsString::from("-a")]).is_err());
         assert!(parse([OsString::from("--text=1")]).is_err());
+        let err = try_run(&["--encoding", "bogus"]).unwrap_err();
+        assert_eq!(
+            err.message,
+            "unknown or unsupported encoding 'bogus' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
+        );
+        assert_eq!(err.help, "domq --help");
     }
 
     #[test]
@@ -825,12 +846,19 @@ mod tests {
             &["lint", "--format", "xml"][..],
             &["lint", "-x"],
             &["lint", "--encoding"],
+            &["lint", "--encoding", "bogus"],
         ] {
             assert_eq!(
                 try_run(bad).map(|_| ()).map_err(|e| e.help),
                 Err("domq lint --help")
             );
         }
+        let err = try_run(&["lint", "--encoding", "bogus"]).unwrap_err();
+        assert_eq!(
+            err.message,
+            "unknown or unsupported encoding 'bogus' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
+        );
+        assert_eq!(err.help, "domq lint --help");
         // Only the first argument names the subcommand.
         assert_eq!(run(&["-c", "lint"]).selector, "lint");
     }
