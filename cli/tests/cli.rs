@@ -993,6 +993,53 @@ fn closed_stdout_pipe_is_not_an_error() {
     assert_eq!(String::from_utf8_lossy(&out.stderr), "");
 }
 
+#[test]
+fn closed_stderr_pipe_does_not_panic_on_warning() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_domq"))
+        .args(["-t", "p"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    drop(child.stderr.take());
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"<p>hello \xff world</p>")
+        .expect("write");
+    let out = child.wait_with_output().expect("wait");
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("world"));
+}
+
+fn closed_stderr() -> Stdio {
+    let (reader, writer) = std::io::pipe().expect("pipe");
+    drop(reader);
+    Stdio::from(writer)
+}
+
+#[test]
+fn closed_stderr_pipe_does_not_panic_on_error() {
+    let out = Command::new(env!("CARGO_BIN_EXE_domq"))
+        .args(["lint", "nonexist.html"])
+        .stderr(closed_stderr())
+        .output()
+        .expect("output");
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn closed_stderr_pipe_does_not_panic_on_usage_error() {
+    let out = Command::new(env!("CARGO_BIN_EXE_domq"))
+        .args(["--encoding", "bogus", "-t", "p"])
+        .stderr(closed_stderr())
+        .output()
+        .expect("output");
+    assert_eq!(out.status.code(), Some(2));
+}
+
 // --- lint --------------------------------------------------------------------
 
 const LINTED: &str = "<h1 id=top>Shop</h1>

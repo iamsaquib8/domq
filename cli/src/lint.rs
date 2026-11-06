@@ -94,7 +94,7 @@ pub fn run(opts: &LintOptions) -> (String, u8) {
         let html = match crate::read_input(Some(file), opts.encoding.as_deref()) {
             Ok(html) => html,
             Err(e) => {
-                eprintln!("domq: {e}");
+                warn!("domq: {e}");
                 unreadable = true;
                 continue;
             }
