@@ -324,6 +324,8 @@ fn csv_rows() {
     assert_eq!(to_csv(&rows), "a,b\r\n\r\nc\r\n");
     assert_eq!(to_csv(rows), "a,b\r\n\r\nc\r\n");
     assert_eq!(to_csv(Vec::<Vec<&str>>::new()), "");
+    let single_empty: Vec<Vec<&str>> = vec![vec!["a"], vec![""], vec!["b"]];
+    assert_eq!(to_csv(single_empty), "a\r\n\"\"\r\nb\r\n");
 }
 
 #[test]

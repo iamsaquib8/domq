@@ -644,6 +644,10 @@ fn csv_output() {
     assert_eq!(ok(&["--csv", "p, #empty"], TABLES), "");
     assert_eq!(ok(&["--csv"], PAGE), "");
     assert!(usage_error(&["--csv", "-a", "href"], TABLES).contains("--csv"));
+
+    let single_empty_cell =
+        "<table><tr><td>a</td></tr><tr><td></td></tr><tr><td>b</td></tr></table>";
+    assert_eq!(ok(&["--csv"], single_empty_cell), "a\r\n\"\"\r\nb\r\n");
 }
 
 // --- --main ------------------------------------------------------------------
