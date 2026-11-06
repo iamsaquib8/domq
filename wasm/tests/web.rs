@@ -466,4 +466,23 @@ fn decode_returns_js_object() {
         get(&res_win, "encoding").as_string().unwrap(),
         "windows-1252"
     );
+
+    let res_stray = decode(b"<p>caf\xc3\xa9</p>\xa0", None);
+    assert_eq!(get(&res_stray, "encoding").as_string().unwrap(), "utf-8");
+    assert_eq!(
+        get(&res_stray, "warning").as_string().unwrap(),
+        "1 invalid UTF-8 sequence replaced with U+FFFD"
+    );
+
+    let res_latin1 = decode(b"<p>caf\xe9</p>", None);
+    assert_eq!(
+        get(&res_latin1, "encoding").as_string().unwrap(),
+        "windows-1252"
+    );
+    assert!(
+        get(&res_latin1, "warning")
+            .as_string()
+            .unwrap()
+            .contains("windows-1252")
+    );
 }

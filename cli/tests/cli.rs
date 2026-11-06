@@ -756,8 +756,28 @@ fn outline_output() {
 
 #[test]
 fn non_utf8_input_falls_back_to_windows_1252() {
-    let (out, _, code) = domq_bytes(&["-t", "p"], b"<p>caf\xe9 \x93q\x94</p>");
+    let (out, err, code) = domq_bytes(&["-t", "p"], b"<p>caf\xe9 \x93q\x94</p>");
     assert_eq!((out.as_str(), code), ("caf\u{e9} \u{201c}q\u{201d}\n", 0));
+    assert!(
+        err.contains("warning: <stdin>: no charset declared") && err.contains("--encoding"),
+        "{err}"
+    );
+}
+
+#[test]
+fn stray_invalid_byte_recovers_utf8_repro() {
+    let mut input = Vec::new();
+    for _ in 0..50 {
+        input.extend_from_slice("<p>café naïve — “quotes” 日本語</p>".as_bytes());
+    }
+    input.extend_from_slice(b"<p>stray \xa0 byte</p>");
+    let (out, err, code) = domq_bytes(&["-t", "-1", "p"], &input);
+    assert_eq!(code, 0);
+    assert_eq!(out, "café naïve — “quotes” 日本語\n");
+    assert!(
+        err.contains("warning: <stdin>: 1 invalid UTF-8 sequence replaced with U+FFFD"),
+        "{err}"
+    );
 }
 
 #[test]
