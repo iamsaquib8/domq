@@ -388,7 +388,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, ArgEr
     }
 
     opts.selector = selector.join(" ").trim().to_string();
-    validate(&opts)?;
+    validate(&mut opts)?;
     Ok(Command::Run(opts))
 }
 
@@ -444,8 +444,22 @@ fn parse_mcp(mut args: impl Iterator<Item = String>) -> Result<Command, ArgError
 }
 
 /// Reject flag combinations that have no sensible meaning.
-fn validate(opts: &Options) -> Result<(), ArgError> {
+fn validate(opts: &mut Options) -> Result<(), ArgError> {
     let err = |msg: String| Err(ArgError::new(msg));
+    let markdown_option = [
+        (opts.markdown_links.is_some(), "--markdown-links"),
+        (opts.markdown_images.is_some(), "--markdown-images"),
+        (opts.markdown_drop_data_uris, "--markdown-drop-data-uris"),
+    ]
+    .into_iter()
+    .find_map(|(set, flag)| set.then_some(flag));
+    if let Some(flag) = markdown_option {
+        match opts.mode {
+            Mode::Html => opts.mode = Mode::Markdown,
+            Mode::Markdown => {}
+            mode => return err(format!("{flag} needs -m/--markdown (got {})", mode.flag())),
+        }
+    }
     let tasks: Vec<&str> = [
         (!opts.extract.is_empty(), "--extract"),
         (opts.links, "--links"),
@@ -616,9 +630,6 @@ fn apply_value(opts: &mut Options, flag: Flag, value: String) -> Result<(), ArgE
                     value
                 )));
             }
-            if opts.mode == Mode::Html {
-                opts.mode = Mode::Markdown;
-            }
             opts.markdown_links = Some(val);
         }
         Flag::MarkdownImages => {
@@ -628,9 +639,6 @@ fn apply_value(opts: &mut Options, flag: Flag, value: String) -> Result<(), ArgE
                     "invalid --markdown-images: {:?} (expected keep, alt or drop)",
                     value
                 )));
-            }
-            if opts.mode == Mode::Html {
-                opts.mode = Mode::Markdown;
             }
             opts.markdown_images = Some(val);
         }
@@ -649,9 +657,6 @@ fn apply_switch(opts: &mut Options, flag: Flag) -> Result<Option<Command>, ArgEr
         Flag::Csv => Mode::Csv,
         Flag::Count => Mode::Count,
         Flag::MarkdownDropDataUris => {
-            if opts.mode == Mode::Html {
-                opts.mode = Mode::Markdown;
-            }
             opts.markdown_drop_data_uris = true;
             return Ok(None);
         }
