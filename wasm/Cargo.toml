@@ -26,6 +26,7 @@ crate-type = ["cdylib"]
 [dependencies]
 # `no_std`: drops std's panic/formatting machinery from the module.
 wasm-bindgen = { version = "0.2.100", default-features = false }
+js-sys = { version = "0.3", default-features = false }
 # The allocator std itself uses on wasm32-unknown-unknown.
 dlmalloc = { version = "0.2", features = ["global"] }
 # The core parser with exactly the features the JS API exposes — no serde,

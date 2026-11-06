@@ -4,7 +4,6 @@
 //! `htmlq` where they overlap; see `domq --help`.
 
 mod args;
-mod encoding;
 mod extract;
 mod json;
 mod lint;
@@ -488,7 +487,7 @@ fn read_input(path: Option<&str>, encoding: Option<&str>) -> Result<String, Stri
         }
         Some(p) => fs::read(p).map_err(|e| format!("reading {p}: {e}"))?,
     };
-    let decoded = encoding::decode(bytes, encoding);
+    let decoded = domq::decode_with(&bytes, encoding);
     if let Some(warning) = &decoded.warning {
         let name = match path {
             None | Some("-") => "<stdin>",

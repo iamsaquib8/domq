@@ -21,6 +21,7 @@ Item(name='a')
 
 from ._domq import (
     Chunk,
+    Decoded,
     Document,
     Element,
     Link,
@@ -30,6 +31,7 @@ from ._domq import (
     Resource,
     Selector,
     __version__,
+    decode,
     parse,
     resolve_srcset,
     resolve_url,
@@ -39,6 +41,7 @@ from ._extract import Attr, ExtractError, Html, Markdown, OuterHtml, Select, ext
 __all__ = [
     "Attr",
     "Chunk",
+    "Decoded",
     "Document",
     "Element",
     "ExtractError",
@@ -53,6 +56,7 @@ __all__ = [
     "Select",
     "Selector",
     "__version__",
+    "decode",
     "extract",
     "extract_all",
     "parse",

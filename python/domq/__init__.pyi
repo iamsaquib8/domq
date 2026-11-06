@@ -11,6 +11,7 @@ from _typeshed import DataclassInstance
 __all__ = [
     "Attr",
     "Chunk",
+    "Decoded",
     "Document",
     "Element",
     "ExtractError",
@@ -25,6 +26,7 @@ __all__ = [
     "Select",
     "Selector",
     "__version__",
+    "decode",
     "extract",
     "extract_all",
     "parse",
@@ -37,13 +39,36 @@ __version__: str
 _T = TypeVar("_T")
 _D = TypeVar("_D", bound=DataclassInstance)
 
-def parse(html: str) -> Document:
+def parse(source: str | bytes, encoding: Optional[str] = None) -> Document:
     """Parse an HTML document (or fragment) into a :class:`Document`.
+
+    Accepts a ``str`` or raw ``bytes``. When ``bytes`` are passed, character
+    encoding is detected automatically via the WHATWG encoding-sniffing
+    algorithm (or overridden with ``encoding``).
 
     Never raises on malformed HTML: anything the parser had to recover from is
     listed in :attr:`Document.errors`. Large inputs are parsed with the GIL
     released.
     """
+
+def decode(bytes: bytes, encoding: Optional[str] = None) -> Decoded:
+    """Decode raw HTML bytes into a string, using WHATWG encoding sniffing."""
+
+@final
+class Decoded:
+    """The result of :func:`domq.decode`."""
+
+    @property
+    def text(self) -> str:
+        """The decoded text."""
+    @property
+    def encoding(self) -> str:
+        """The encoding detected or chosen."""
+    @property
+    def warning(self) -> Optional[str]:
+        """Any warning produced during decoding."""
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
 
 def resolve_url(base: str, relative: str) -> str:
     """Resolve ``relative`` against ``base``, following RFC 3986 §5.2."""

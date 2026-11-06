@@ -274,6 +274,7 @@ extern crate std;
 
 mod builder;
 mod edit;
+mod encoding;
 mod entities;
 #[cfg(feature = "entities-full")]
 mod entities_full;
@@ -297,6 +298,7 @@ mod query;
 #[cfg(feature = "query")]
 mod from_html;
 
+pub use encoding::{Decoded, Encoding, decode, decode_with, lookup_encoding};
 pub use error::{ErrorKind, ParseError};
 pub use events::{Event, Events};
 pub use extract::{Link, Metadata, OutlineNode, PageOutline, Resource, to_csv};
@@ -379,6 +381,25 @@ pub fn parse(html: &str) -> Dom {
 /// fragment commonly has several top-level nodes).
 pub fn parse_fragment(html: &str) -> Dom {
     builder::parse_document(html)
+}
+
+/// Parse a full HTML document from raw bytes, auto-detecting character encoding.
+///
+/// Sniffs BOM, `<meta charset>`, valid UTF-8, and falls back to Windows-1252
+/// following the WHATWG encoding-sniffing algorithm.
+///
+/// ```
+/// let dom = domq::parse_bytes(b"<p>hello</p>");
+/// assert_eq!(dom.to_text(), "hello");
+/// ```
+pub fn parse_bytes(bytes: &[u8]) -> Dom {
+    parse(&decode(bytes).text)
+}
+
+/// Parse a full HTML document from raw bytes, overriding encoding detection
+/// with `label` if provided and supported.
+pub fn parse_bytes_with(bytes: &[u8], label: Option<&str>) -> Dom {
+    parse(&decode_with(bytes, label).text)
 }
 
 /// Create a streaming [`Tokenizer`] over `html` without building a tree.

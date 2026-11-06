@@ -767,3 +767,49 @@ def test_page_outline():
     assert len(main_outline) < len(outline)
     assert any(n.role == "heading" and n.name == "Article Heading" for n in main_outline)
 
+
+# --- bytes input and decoding ------------------------------------------------
+
+
+def test_parse_bytes():
+    # UTF-8 bytes
+    doc = domq.parse(b"<p class='test'>hello world</p>")
+    assert doc.select_first("p").text == "hello world"
+
+    # Prescan meta charset (Windows-1252 / latin1)
+    doc = domq.parse(b"<meta charset='latin1'><p>caf\xe9</p>")
+    assert doc.select_first("p").text == "café"
+
+    # Explicit encoding parameter
+    doc = domq.parse(b"<p>caf\xe9</p>", encoding="windows-1252")
+    assert doc.select_first("p").text == "café"
+
+    # BOM detection (UTF-16LE)
+    doc = domq.parse(b"\xff\xfe<\x00p\x00>\x00h\x00i\x00")
+    assert doc.select_first("p").text == "hi"
+
+    # TypeError on invalid source type
+    with pytest.raises(TypeError, match="source must be str or bytes"):
+        domq.parse(12345)
+
+
+def test_decode():
+    res = domq.decode(b"<p>caf\xc3\xa9</p>")
+    assert res.text == "<p>café</p>"
+    assert res.encoding == "utf-8"
+    assert res.warning is None
+    assert str(res) == "<p>café</p>"
+    assert "utf-8" in repr(res)
+
+    # Windows-1252 fallback
+    res = domq.decode(b"caf\xe9 \x80\x81\x9f\xff")
+    assert res.encoding == "windows-1252"
+    assert "café" in res.text
+
+    # Unknown encoding warning
+    res = domq.decode(b"<p>test</p>", encoding="non-existent-encoding")
+    assert res.encoding == "utf-8"
+    assert res.warning is not None
+    assert "non-existent-encoding" in res.warning
+
+

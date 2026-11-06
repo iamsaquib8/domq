@@ -38,5 +38,13 @@ ordered.files = [...new Set([...(manifest.files ?? []), "node.js"])];
 // node.js instantiates the module when imported: never tree-shake it away.
 ordered.sideEffects = [...new Set([...(manifest.sideEffects ?? []), "./node.js"])];
 
+const dtsPath = resolve(pkgDir, "domq_wasm.d.ts");
+let dts = readFileSync(dtsPath, "utf8");
+dts = dts
+  .replace("constructor(input: any);", "constructor(input: string | Uint8Array);")
+  .replace("static parse(input: any): Document;", "static parse(input: string | Uint8Array): Document;")
+  .replace("export function parse(input: any): DomDocument;", "export function parse(input: string | Uint8Array): DomDocument;");
+writeFileSync(dtsPath, dts);
+
 writeFileSync(manifestPath, JSON.stringify(ordered, null, 2) + "\n");
 console.log(`finished ${manifestPath}`);
