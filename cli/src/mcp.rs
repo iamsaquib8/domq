@@ -154,7 +154,18 @@ fn request(id: &str, method: &str, params: &Value) -> String {
                 &format!("missing _meta \"{VERSION_KEY}\""),
             );
         }
-        None => false,
+        None => {
+            if let Some(caps) = meta.and_then(|m| m.get(CAPABILITIES_KEY))
+                && !matches!(caps, Value::Object(_))
+            {
+                return error(
+                    id,
+                    INVALID_PARAMS,
+                    &format!("_meta \"{CAPABILITIES_KEY}\" must be an object"),
+                );
+            }
+            false
+        }
         Some(Value::String(version)) if !supported(version) => {
             let mut data = json::Object::default();
             data.field("supported", &supported_versions())
@@ -166,15 +177,37 @@ fn request(id: &str, method: &str, params: &Value) -> String {
                 Some(&data.finish()),
             );
         }
+        Some(Value::String(version)) if version == MODERN => {
+            match meta.and_then(|m| m.get(CAPABILITIES_KEY)) {
+                None => {
+                    return error(
+                        id,
+                        INVALID_PARAMS,
+                        &format!("missing _meta \"{CAPABILITIES_KEY}\""),
+                    );
+                }
+                Some(Value::Object(_)) => true,
+                Some(_) => {
+                    return error(
+                        id,
+                        INVALID_PARAMS,
+                        &format!("_meta \"{CAPABILITIES_KEY}\" must be an object"),
+                    );
+                }
+            }
+        }
         Some(Value::String(_)) => {
-            if meta.and_then(|m| m.get(CAPABILITIES_KEY)).is_none() {
+            // A supported legacy version in _meta is served with legacy semantics.
+            if let Some(caps) = meta.and_then(|m| m.get(CAPABILITIES_KEY))
+                && !matches!(caps, Value::Object(_))
+            {
                 return error(
                     id,
                     INVALID_PARAMS,
-                    &format!("missing _meta \"{CAPABILITIES_KEY}\""),
+                    &format!("_meta \"{CAPABILITIES_KEY}\" must be an object"),
                 );
             }
-            true
+            false
         }
         Some(_) => {
             return error(
@@ -1109,6 +1142,24 @@ mod tests {
             Some(&Value::Number("-32602".into()))
         );
 
+        let non_object_caps = send(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":"nope"}}}"#,
+        );
+        assert_eq!(
+            non_object_caps.get("error").and_then(|e| e.get("code")),
+            Some(&Value::Number("-32602".into()))
+        );
+
+        let non_object_legacy_caps = send(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-06-18","io.modelcontextprotocol/clientCapabilities":"nope"}}}"#,
+        );
+        assert_eq!(
+            non_object_legacy_caps
+                .get("error")
+                .and_then(|e| e.get("code")),
+            Some(&Value::Number("-32602".into()))
+        );
+
         let discover_without_meta = send(r#"{"jsonrpc":"2.0","id":1,"method":"server/discover"}"#);
         assert!(discover_without_meta.get("error").is_some());
     }
@@ -1130,6 +1181,26 @@ mod tests {
                 .and_then(|c| c.get("tools"))
                 .is_some()
         );
+
+        // A legacy initialize request carrying _meta is served with legacy semantics.
+        let legacy_with_meta = send(
+            r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-06-18","io.modelcontextprotocol/clientCapabilities":{}}}}"#,
+        );
+        let l_res = legacy_with_meta.get("result").unwrap();
+        assert_eq!(
+            l_res.get("protocolVersion").and_then(Value::as_str),
+            Some("2025-06-18")
+        );
+        assert!(l_res.get("resultType").is_none());
+
+        // A legacy request declaring a legacy version in _meta has no modern result fields.
+        let legacy_tools = send(
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-06-18","io.modelcontextprotocol/clientCapabilities":{}}}}"#,
+        );
+        let t_res = legacy_tools.get("result").unwrap();
+        assert!(t_res.get("resultType").is_none());
+        assert!(t_res.get("_meta").is_none());
+        assert!(t_res.get("tools").is_some());
 
         let newer = send(
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2099-01-01"}}"#,
