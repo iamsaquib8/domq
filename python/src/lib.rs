@@ -20,7 +20,7 @@ use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::marker::Ungil;
 use pyo3::prelude::*;
 use pyo3::pybacked::{PyBackedBytes, PyBackedStr};
-use pyo3::types::{PyDict, PyIterator, PyList, PyString};
+use pyo3::types::{PyBytes, PyDict, PyIterator, PyList, PyString};
 
 /// Inputs at least this many bytes long are parsed with the GIL released.
 const DETACH_BYTES: usize = 16 * 1024;
@@ -77,10 +77,12 @@ fn to_selector<'a>(obj: &'a Bound<'_, PyAny>) -> PyResult<SelectorInput<'a>> {
 #[pyfunction]
 #[pyo3(signature = (source, encoding = None))]
 fn parse(py: Python<'_>, source: &Bound<'_, PyAny>, encoding: Option<&str>) -> PyResult<Document> {
-    if let Ok(s) = source.extract::<PyBackedStr>() {
+    if source.is_instance_of::<PyString>() {
+        let s = source.extract::<PyBackedStr>()?;
         let dom = maybe_detach(py, s.len() >= DETACH_BYTES, move || domq::parse(&s));
         Ok(Document { dom })
-    } else if let Ok(b) = source.extract::<PyBackedBytes>() {
+    } else if source.is_instance_of::<PyBytes>() {
+        let b = source.extract::<PyBackedBytes>()?;
         let encoding_owned = encoding.map(str::to_owned);
         let dom = maybe_detach(py, b.len() >= DETACH_BYTES, move || {
             domq::parse_bytes_with(&b, encoding_owned.as_deref())

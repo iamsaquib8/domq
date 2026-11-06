@@ -68,9 +68,9 @@ def test_classes_are_not_constructible():
         domq.PageOutline()
 
 
-def test_parse_requires_str():
+def test_parse_requires_str_or_bytes():
     with pytest.raises(TypeError):
-        domq.parse(b"<p>bytes</p>")
+        domq.parse(123)
     with pytest.raises(TypeError):
         domq.parse(None)
 
