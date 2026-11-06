@@ -892,6 +892,7 @@ fn chunks(args: &Args<'_>) -> Result<Output, String> {
     let opts = parse_markdown_options(args)?;
     let chunks = match selected(&dom, args)? {
         None => dom.to_markdown_chunks_with(max_chars, &opts),
+        Some(m) if m.is_empty() => return Ok(no_match()),
         Some(m) => m
             .iter()
             .flat_map(|n| n.to_markdown_chunks_with(max_chars, &opts))
@@ -947,9 +948,13 @@ fn metadata(args: &Args<'_>) -> Result<Output, String> {
 
 fn tables(args: &Args<'_>) -> Result<Output, String> {
     let dom = domq::parse(args.required_str("html")?);
-    let selector = crate::compile(args.selector("selector")?.unwrap_or("table"))?;
-    let tables = dom
-        .select(&selector)
+    let tables = match selected(&dom, args)? {
+        Some(m) if m.is_empty() => return Ok(no_match()),
+        Some(m) => crate::matched_tables(&m),
+        None => dom.select("table").collect(),
+    };
+    let tables = tables
+        .into_iter()
         .map(|t| t.table_rows())
         .filter(|rows| !rows.is_empty())
         .map(|rows| {
@@ -1296,6 +1301,10 @@ mod tests {
         assert_eq!(text_of(&text), "Widget\n\nGizmo");
         let none = call("text", &page_args(r#","selector":"video""#));
         assert_eq!(text_of(&none), "No elements match the selector.");
+        let none_chunks = call("chunks", &page_args(r#","selector":"video""#));
+        assert_eq!(text_of(&none_chunks), "No elements match the selector.");
+        let none_tables = call("tables", &page_args(r#","selector":"video""#));
+        assert_eq!(text_of(&none_tables), "No elements match the selector.");
     }
 
     #[test]
@@ -1398,6 +1407,11 @@ mod tests {
             text_of(&tables),
             r#"{"tables":[{"rows":[["A","B"],["x","x"]]}]}"#
         );
+        let wrapper = call(
+            "tables",
+            r##"{"html":"<div id=r><table><tr><td>1</table></div>","selector":"#r"}"##,
+        );
+        assert_eq!(text_of(&wrapper), r#"{"tables":[{"rows":[["1"]]}]}"#);
 
         let chunks = call("chunks", &page_args(r#","main":true,"max_chars":40"#));
         let chunks = chunks

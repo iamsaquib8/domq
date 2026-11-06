@@ -648,6 +648,9 @@ fn csv_output() {
     let single_empty_cell =
         "<table><tr><td>a</td></tr><tr><td></td></tr><tr><td>b</td></tr></table>";
     assert_eq!(ok(&["--csv"], single_empty_cell), "a\r\n\"\"\r\nb\r\n");
+
+    let wrapped = "<div id=r><table><tr><td>1</td></tr></table></div>";
+    assert_eq!(ok(&["--csv", "#r"], wrapped), "1\r\n");
 }
 
 // --- --main ------------------------------------------------------------------
