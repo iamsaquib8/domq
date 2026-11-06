@@ -479,8 +479,10 @@ fn decode_returns_js_object() {
         get(&res_latin1, "encoding").as_string().unwrap(),
         "windows-1252"
     );
-    assert!(get(&res_latin1, "warning")
-        .as_string()
-        .unwrap()
-        .contains("windows-1252"));
+    assert!(
+        get(&res_latin1, "warning")
+            .as_string()
+            .unwrap()
+            .contains("windows-1252")
+    );
 }
