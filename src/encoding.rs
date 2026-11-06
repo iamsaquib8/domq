@@ -7,7 +7,8 @@
 //! 3. `<meta charset=…>` or `<meta http-equiv=content-type content="…; charset=…">`
 //!    in the first 1024 bytes (the WHATWG prescan);
 //! 4. UTF-8, if the bytes are valid UTF-8 (including an incomplete sequence cut off
-//!    at the very end of the stream);
+//!    at the very end of the stream), or contain valid multibyte UTF-8 sequences
+//!    with rare invalid sequences (decoded lossy with a warning);
 //! 5. Otherwise Windows-1252, which maps every byte to a character.
 //!
 //! Supported encodings: UTF-8, UTF-16LE, UTF-16BE, and Windows-1252, under their
@@ -125,9 +126,25 @@ pub fn decode_with(bytes: &[u8], label: Option<&str>) -> Decoded {
     if let Prescan::Found(encoding) = declared {
         return done(decode_as(bytes, encoding), encoding, None);
     }
-    // 4. UTF-8.
+    // 4. UTF-8 (strictly valid, or with rare invalid sequences).
     if is_utf8(bytes) {
         return done(decode_as(bytes, Encoding::Utf8), Encoding::Utf8, None);
+    }
+    let scan = scan_utf8(bytes);
+    let non_ascii = scan.valid_multibyte + scan.invalid_sequences;
+    if scan.valid_multibyte > 0
+        && (scan.invalid_sequences <= 16 || scan.invalid_sequences * 100 <= non_ascii)
+    {
+        let plural = if scan.invalid_sequences == 1 { "" } else { "s" };
+        let warning = format!(
+            "{} invalid UTF-8 sequence{} replaced with U+FFFD",
+            scan.invalid_sequences, plural
+        );
+        return done(
+            decode_as(bytes, Encoding::Utf8),
+            Encoding::Utf8,
+            Some(warning),
+        );
     }
     // 5. Fallback to Windows-1252.
     let warning = match declared {
@@ -135,7 +152,11 @@ pub fn decode_with(bytes: &[u8], label: Option<&str>) -> Decoded {
             "the page declares charset '{label}', which is not supported; \
              decoding as windows-1252"
         )),
-        _ => None,
+        _ => Some(
+            "no charset declared and input is not valid UTF-8; \
+             decoding as windows-1252 (use --encoding to override)"
+                .to_string(),
+        ),
     };
     done(
         decode_as(bytes, Encoding::Windows1252),
@@ -179,6 +200,52 @@ fn is_utf8(bytes: &[u8]) -> bool {
     match core::str::from_utf8(bytes) {
         Ok(_) => true,
         Err(e) => e.error_len().is_none(),
+    }
+}
+
+struct Utf8Scan {
+    valid_multibyte: usize,
+    invalid_sequences: usize,
+}
+
+fn scan_utf8(bytes: &[u8]) -> Utf8Scan {
+    let mut valid_multibyte = 0;
+    let mut invalid_sequences = 0;
+    let mut remaining = bytes;
+
+    while !remaining.is_empty() {
+        match core::str::from_utf8(remaining) {
+            Ok(valid) => {
+                for &b in valid.as_bytes() {
+                    if b >= 0xC0 {
+                        valid_multibyte += 1;
+                    }
+                }
+                break;
+            }
+            Err(e) => {
+                let valid_len = e.valid_up_to();
+                for &b in &remaining[..valid_len] {
+                    if b >= 0xC0 {
+                        valid_multibyte += 1;
+                    }
+                }
+                invalid_sequences += 1;
+                match e.error_len() {
+                    Some(len) => {
+                        remaining = &remaining[valid_len + len..];
+                    }
+                    None => {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    Utf8Scan {
+        valid_multibyte,
+        invalid_sequences,
     }
 }
 
@@ -456,7 +523,6 @@ mod tests {
 
     fn detect(bytes: &[u8]) -> (String, Encoding) {
         let d = decode(bytes);
-        assert_eq!(d.warning, None);
         (d.text, d.encoding)
     }
 
@@ -660,6 +726,47 @@ mod tests {
             let _ = decode(&html[..end]);
             let _ = prescan(&html[..end]);
         }
+    }
+
+    #[test]
+    fn stray_invalid_byte_recovers_as_utf8_with_warning() {
+        // Issue #143 repro: 50 UTF-8 paragraphs with 1 stray \xa0 byte.
+        let mut input = Vec::new();
+        for _ in 0..50 {
+            input.extend_from_slice("<p>café naïve — “quotes” 日本語</p>".as_bytes());
+        }
+        input.extend_from_slice(b"<p>stray \xa0 byte</p>");
+        let d = decode(&input);
+        assert_eq!(d.encoding, Encoding::Utf8);
+        assert!(d.text.contains("café naïve — “quotes” 日本語"));
+        assert!(d.text.contains("stray \u{FFFD} byte"));
+        assert_eq!(
+            d.warning.as_deref(),
+            Some("1 invalid UTF-8 sequence replaced with U+FFFD")
+        );
+    }
+
+    #[test]
+    fn pure_latin1_falls_back_to_windows_1252_with_warning() {
+        let d = decode(b"<p>caf\xE9</p>");
+        assert_eq!(d.encoding, Encoding::Windows1252);
+        assert_eq!(d.text, "<p>café</p>");
+        assert_eq!(
+            d.warning.as_deref(),
+            Some(
+                "no charset declared and input is not valid UTF-8; decoding as windows-1252 (use --encoding to override)"
+            )
+        );
+    }
+
+    #[test]
+    fn multiple_stray_invalid_bytes_plural_warning() {
+        let d = decode(b"<p>caf\xC3\xA9</p> \xA0 \xA1");
+        assert_eq!(d.encoding, Encoding::Utf8);
+        assert_eq!(
+            d.warning.as_deref(),
+            Some("2 invalid UTF-8 sequences replaced with U+FFFD")
+        );
     }
 
     #[test]

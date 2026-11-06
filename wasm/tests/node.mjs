@@ -161,6 +161,14 @@ assert.equal(dec.warning, null);
 const decWin = decode(Buffer.from("<meta charset=latin1>\xe9", "latin1"));
 assert.equal(decWin.encoding, "windows-1252");
 
+const decStray = decode(Buffer.concat([Buffer.from("<p>café</p>", "utf8"), Buffer.from([0xa0])]));
+assert.equal(decStray.encoding, "utf-8");
+assert.equal(decStray.warning, "1 invalid UTF-8 sequence replaced with U+FFFD");
+
+const decLatin1 = decode(Buffer.from("<p>caf\xe9</p>", "latin1"));
+assert.equal(decLatin1.encoding, "windows-1252");
+assert.match(decLatin1.warning, /windows-1252/);
+
 const bytesDoc = new Document(utf8Bytes);
 assert.equal(bytesDoc.toText(), "hello bytes");
 bytesDoc.free();

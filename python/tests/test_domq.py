@@ -816,6 +816,14 @@ def test_decode():
     res = domq.decode(b"caf\xe9 \x80\x81\x9f\xff")
     assert res.encoding == "windows-1252"
     assert "café" in res.text
+    assert res.warning is not None
+    assert "windows-1252" in res.warning
+
+    # Stray invalid byte recovers as UTF-8 with warning
+    res = domq.decode(b"<p>caf\xc3\xa9</p>\xa0")
+    assert res.encoding == "utf-8"
+    assert res.text == "<p>café</p>\ufffd"
+    assert res.warning == "1 invalid UTF-8 sequence replaced with U+FFFD"
 
     # Unknown encoding warning
     res = domq.decode(b"<p>test</p>", encoding="non-existent-encoding")
