@@ -3,6 +3,14 @@
 //! A thin, zero-dependency wrapper over the `domq` library. Flags mirror
 //! `htmlq` where they overlap; see `domq --help`.
 
+#![warn(clippy::print_stderr)]
+
+macro_rules! warn {
+    ($($arg:tt)*) => {
+        $crate::emit_warn(format_args!($($arg)*))
+    };
+}
+
 mod args;
 mod extract;
 mod json;
@@ -17,6 +25,16 @@ use std::process::ExitCode;
 use domq::{Dom, NodeRef, Selector};
 
 use args::{Command, Mode, Options};
+
+/// Write a message to stderr, ignoring any write failure (such as a closed
+/// pipe).
+pub(crate) fn emit_warn(args: std::fmt::Arguments<'_>) {
+    let mut stderr = io::stderr().lock();
+    let _ = stderr
+        .write_fmt(args)
+        .and_then(|()| stderr.write_all(b"\n"))
+        .and_then(|()| stderr.flush());
+}
 
 /// Attributes holding a single URL, rewritten by `--base`.
 const URL_ATTRS: &[&str] = &["href", "src", "action", "cite", "poster", "formaction"];
@@ -34,7 +52,7 @@ fn main() -> ExitCode {
             return match write_output(None, &report) {
                 Ok(()) => ExitCode::from(code),
                 Err(e) => {
-                    eprintln!("domq: {e}");
+                    warn!("domq: {e}");
                     ExitCode::from(2)
                 }
             };
@@ -47,7 +65,7 @@ fn main() -> ExitCode {
             return emit(None, &format!("domq {}\n", env!("CARGO_PKG_VERSION")));
         }
         Err(e) => {
-            eprintln!("domq: {e}\nTry '{}' for more information.", e.help);
+            warn!("domq: {e}\nTry '{}' for more information.", e.help);
             return ExitCode::from(2);
         }
     };
@@ -56,12 +74,12 @@ fn main() -> ExitCode {
             Ok(()) if opts.exit_status && !out.matched => ExitCode::FAILURE,
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
-                eprintln!("domq: {e}");
+                warn!("domq: {e}");
                 ExitCode::FAILURE
             }
         },
         Err(e) => {
-            eprintln!("domq: {e}");
+            warn!("domq: {e}");
             ExitCode::FAILURE
         }
     }
@@ -556,7 +574,7 @@ fn read_input(path: Option<&str>, encoding: Option<&str>) -> Result<String, Stri
             None | Some("-") => "<stdin>",
             Some(p) => p,
         };
-        eprintln!("domq: warning: {name}: {warning}");
+        warn!("domq: warning: {name}: {warning}");
     }
     Ok(decoded.text)
 }
@@ -584,7 +602,7 @@ fn emit(path: Option<&str>, out: &str) -> ExitCode {
     match write_output(path, out) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("domq: {e}");
+            warn!("domq: {e}");
             ExitCode::FAILURE
         }
     }

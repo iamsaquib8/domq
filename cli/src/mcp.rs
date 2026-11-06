@@ -66,7 +66,7 @@ pub fn serve() -> ExitCode {
             Ok(_) => {}
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => {
-                eprintln!("domq mcp: reading stdin: {e}");
+                warn!("domq mcp: reading stdin: {e}");
                 return ExitCode::FAILURE;
             }
         }
