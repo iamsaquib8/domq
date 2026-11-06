@@ -320,6 +320,26 @@ fn count_and_first() {
 }
 
 #[test]
+fn first_applies_after_attribute_and_whitespace_filtering() {
+    let html = "<a name=top>x</a><a href=/a>y</a><a href=/b>z</a>";
+    assert_eq!(ok(&["-1", "-a", "href", "a"], html), "/a\n");
+
+    let p = "<p>   </p><p>x</p><p>y</p>";
+    assert_eq!(ok(&["-1", "-w", "-t", "p"], p), "x\n");
+    assert_eq!(ok(&["-1", "-w", "-m", "p"], p), "x\n");
+
+    assert_eq!(ok(&["-w", "-c", "p"], p), "2\n");
+    assert_eq!(ok(&["-c", "p"], p), "3\n");
+    assert_eq!(ok(&["-1", "-w", "-c", "p"], p), "1\n");
+
+    let blank = "<p> </p><p>\t\n</p>";
+    assert_eq!(ok(&["-w", "-c", "p"], blank), "0\n");
+    assert_eq!(domq(&["--exit-status", "-w", "-c", "p"], blank).2, 1);
+    assert_eq!(domq(&["--exit-status", "-1", "-w", "-t", "p"], blank).2, 1);
+    assert_eq!(domq(&["--exit-status", "-1", "-w", "-t", "p"], p).2, 0);
+}
+
+#[test]
 fn json_output() {
     assert_eq!(
         ok(&["-j", "li"], PAGE),
