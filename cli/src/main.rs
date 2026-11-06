@@ -142,12 +142,9 @@ fn run(opts: &Options) -> Result<Output, String> {
             matched: true,
         });
     };
-    let mut matches: Vec<NodeRef<'_>> = dom.select(&selector).collect();
+    let matches: Vec<NodeRef<'_>> = dom.select(&selector).collect();
     if opts.mode == Mode::Csv {
         return Ok(csv_output(&matches, opts.first));
-    }
-    if opts.first {
-        matches.truncate(1);
     }
     Ok(match_output(&matches, opts))
 }
@@ -175,11 +172,14 @@ fn document_output(dom: &Dom, opts: &Options) -> String {
 /// Output for a list of selected elements.
 fn match_output(matches: &[NodeRef<'_>], opts: &Options) -> Output {
     if let Some(name) = &opts.attribute {
-        let values: Vec<&str> = matches
+        let mut values: Vec<&str> = matches
             .iter()
             .filter_map(|m| m.attr(name))
             .filter(|v| !(opts.ignore_whitespace && v.trim().is_empty()))
             .collect();
+        if opts.first {
+            values.truncate(1);
+        }
         let matched = !values.is_empty();
         let text = match opts.mode {
             Mode::Count => format!("{}\n", values.len()),
@@ -189,32 +189,63 @@ fn match_output(matches: &[NodeRef<'_>], opts: &Options) -> Output {
         };
         return Output { text, matched };
     }
-    let mut matched = !matches.is_empty();
-    let text = match opts.mode {
-        Mode::Count => format!("{}\n", matches.len()),
-        Mode::Json => format!("{}\n", json::array(matches.iter().map(|m| m.to_json()))),
-        Mode::Jsonl => lines(matches.iter().map(|m| m.to_json()), "\n"),
+    let (text, matched) = match opts.mode {
+        Mode::Count => {
+            let count = if opts.ignore_whitespace {
+                matches
+                    .iter()
+                    .filter(|m| !m.to_text().trim().is_empty())
+                    .take(if opts.first { 1 } else { usize::MAX })
+                    .count()
+            } else if opts.first {
+                matches.len().min(1)
+            } else {
+                matches.len()
+            };
+            (format!("{count}\n"), count > 0)
+        }
         Mode::Text => {
-            let values: Vec<String> =
+            let mut values: Vec<String> =
                 non_blank(matches.iter().map(|m| m.to_text()), opts).collect();
-            matched = !values.is_empty();
-            lines(values.into_iter(), "\n")
+            if opts.first {
+                values.truncate(1);
+            }
+            let matched = !values.is_empty();
+            (lines(values.into_iter(), "\n"), matched)
         }
         Mode::Markdown => {
             let md_opts = opts.markdown_options();
-            let values: Vec<String> =
+            let mut values: Vec<String> =
                 non_blank(matches.iter().map(|m| m.to_markdown_with(&md_opts)), opts).collect();
-            matched = !values.is_empty();
-            lines(values.into_iter(), "\n\n")
-        }
-        Mode::Html if opts.pretty => {
-            let mut out = String::new();
-            for m in matches {
-                pretty::write(*m, &mut out);
+            if opts.first {
+                values.truncate(1);
             }
-            out
+            let matched = !values.is_empty();
+            (lines(values.into_iter(), "\n\n"), matched)
         }
-        Mode::Html | Mode::Csv => lines(matches.iter().map(|m| m.to_html()), "\n"),
+        _ => {
+            let selected = if opts.first {
+                &matches[..matches.len().min(1)]
+            } else {
+                matches
+            };
+            let matched = !selected.is_empty();
+            let text = match opts.mode {
+                Mode::Json => format!("{}\n", json::array(selected.iter().map(|m| m.to_json()))),
+                Mode::Jsonl => lines(selected.iter().map(|m| m.to_json()), "\n"),
+                Mode::Html if opts.pretty => {
+                    let mut out = String::new();
+                    for m in selected {
+                        pretty::write(*m, &mut out);
+                    }
+                    out
+                }
+                Mode::Html | Mode::Csv => lines(selected.iter().map(|m| m.to_html()), "\n"),
+                // Handled above.
+                Mode::Count | Mode::Text | Mode::Markdown => String::new(),
+            };
+            (text, matched)
+        }
     };
     Output { text, matched }
 }

@@ -11,8 +11,13 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ## [Unreleased]
 
+### Output changes
+
+- CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
+
 ### Fixed
 
+- CLI: `-1` is applied after attribute (`-a`) and whitespace (`-w`) filtering rather than before, and `-c` honours `-w` to skip blank matches ([#144](https://github.com/iamsaquib8/domq/issues/144)).
 - Reject Markdown options combined with another output format, regardless of flag order.
 
 ## [0.6.0] — 2026-11-03
