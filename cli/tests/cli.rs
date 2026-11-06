@@ -190,6 +190,32 @@ fn base_rewrites_the_attribute_that_counts() {
 }
 
 #[test]
+fn base_url_must_be_absolute() {
+    for bad in ["/relative/", "not a url", "htps://", "https://"] {
+        let (out, err, code) = domq(&["-b", bad, "-a", "href", "a"], "<a href=\"b\">B</a>");
+        assert_eq!(code, 2, "exit code for -b {bad}");
+        assert!(out.is_empty(), "stdout for -b {bad}: {out:?}");
+        assert!(
+            err.contains("--base must be an absolute URL (scheme://…)")
+                && err.contains("domq --help"),
+            "stderr for -b {bad}: {err}"
+        );
+
+        let (out, err, code) = domq(
+            &[&format!("--base={bad}"), "-a", "href", "a"],
+            "<a href=\"b\">B</a>",
+        );
+        assert_eq!(code, 2, "exit code for --base={bad}");
+        assert!(out.is_empty(), "stdout for --base={bad}: {out:?}");
+        assert!(
+            err.contains("--base must be an absolute URL (scheme://…)")
+                && err.contains("domq --help"),
+            "stderr for --base={bad}: {err}"
+        );
+    }
+}
+
+#[test]
 fn remove_nodes_before_selecting() {
     assert_eq!(
         ok(&["-r", "nav", "-r", "footer", "-a", "href", "a"], PAGE),

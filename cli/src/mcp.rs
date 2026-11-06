@@ -408,6 +408,16 @@ impl Args<'_> {
             .ok_or_else(|| format!("missing required argument `{key}`"))
     }
 
+    fn base_url(&self) -> Result<Option<&str>, String> {
+        let Some(url) = self.str("base_url")? else {
+            return Ok(None);
+        };
+        if !crate::args::is_absolute_url(url) {
+            return Err("`base_url` must be an absolute URL (scheme://…)".into());
+        }
+        Ok(Some(url))
+    }
+
     /// A selector argument; blank counts as absent.
     fn selector(&self, key: &str) -> Result<Option<&str>, String> {
         Ok(self.str(key)?.filter(|s| !s.trim().is_empty()))
@@ -708,7 +718,7 @@ const TOOLS: &[Tool] = &[
 /// narrowed to the main content with `main`.
 fn document(args: &Args<'_>) -> Result<Dom, String> {
     let mut dom = domq::parse(args.required_str("html")?);
-    if let Some(page) = args.str("base_url")?
+    if let Some(page) = args.base_url()?
         && let Some(base) = dom.base_url(Some(page))
     {
         crate::absolutize(&mut dom, &base, Some(page));
@@ -768,7 +778,7 @@ fn parse_markdown_options(args: &Args<'_>) -> Result<domq::MarkdownOptions, Stri
         };
     }
     opts.drop_data_uris = args.flag("drop_data_uris")?;
-    if let Some(base) = args.str("base_url")? {
+    if let Some(base) = args.base_url()? {
         opts.base_url = Some(base.to_string());
     }
     Ok(opts)
@@ -909,7 +919,7 @@ fn links(args: &Args<'_>) -> Result<Output, String> {
         None => None,
     };
     let links: Vec<String> = dom
-        .links(args.str("base_url")?)
+        .links(args.base_url()?)
         .into_iter()
         .filter(|l| {
             inside
@@ -931,9 +941,7 @@ fn links(args: &Args<'_>) -> Result<Output, String> {
 
 fn metadata(args: &Args<'_>) -> Result<Output, String> {
     let dom = domq::parse(args.required_str("html")?);
-    let base = args
-        .str("base_url")?
-        .and_then(|page| dom.base_url(Some(page)));
+    let base = args.base_url()?.and_then(|page| dom.base_url(Some(page)));
     Ok(Output::json(crate::meta_json(&dom, base.as_deref())))
 }
 
@@ -1247,6 +1255,27 @@ mod tests {
         );
         let wrong_type = call("select", &page_args(r#","selector":"h1","limit":"5""#));
         assert!(text_of(&wrong_type).contains("`limit` must be an integer from 1 to 1000"));
+    }
+
+    #[test]
+    fn base_url_errors_are_tool_errors() {
+        for bad in ["not a url", "/relative/", "htps://", "https://"] {
+            for tool in ["links", "metadata", "markdown", "chunks", "extract"] {
+                let args = match tool {
+                    "extract" => {
+                        format!(r#"{{"html":"<p>x</p>","fields":{{"t":"p"}},"base_url":"{bad}"}}"#)
+                    }
+                    _ => format!(r#"{{"html":"<a href=/a>A</a>","base_url":"{bad}"}}"#),
+                };
+                let res = call(tool, &args);
+                assert!(is_error(&res), "{tool} should error on base_url={bad}");
+                assert!(
+                    text_of(&res).contains("`base_url` must be an absolute URL (scheme://…)"),
+                    "unexpected error message for {tool}: {}",
+                    text_of(&res)
+                );
+            }
+        }
     }
 
     #[test]
