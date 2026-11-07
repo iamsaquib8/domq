@@ -541,22 +541,30 @@ impl<'a> Markdown<'a> {
             }
             "ul" | "ol" | "menu" if top => {
                 self.flush();
-                // A list nested in an item follows the item's text tightly.
+                let ordered = tag == "ol";
+                let reversed = ordered && node.has_attr("reversed");
+                let start = number(node.attr("start")).unwrap_or_else(|| {
+                    if reversed {
+                        let items = node.child_elements().filter(|c| c.tag_name() == Some("li"));
+                        items.count() as i64
+                    } else {
+                        1
+                    }
+                });
+                // A list nested in an item follows the item's text tightly,
+                // except an ordered one that does not start at 1: it cannot
+                // interrupt a paragraph, so it needs a blank line.
                 let nested = matches!(self.prefixes.last(), Some(Prefix::Item { .. }));
-                self.sep(if nested { 1 } else { 2 });
+                let first = node
+                    .child_elements()
+                    .find(|c| c.tag_name() == Some("li"))
+                    .and_then(|li| number(li.attr("value")))
+                    .unwrap_or(start)
+                    .clamp(0, MAX_NUMBER);
+                let tight = nested && !(ordered && first != 1 && self.prefixes.len() < MAX_NEST);
+                self.sep(if tight { 1 } else { 2 });
                 f.block = true;
                 if self.prefixes.len() < MAX_NEST {
-                    let ordered = tag == "ol";
-                    let reversed = ordered && node.has_attr("reversed");
-                    let start = number(node.attr("start")).unwrap_or_else(|| {
-                        if reversed {
-                            let items =
-                                node.child_elements().filter(|c| c.tag_name() == Some("li"));
-                            items.count() as i64
-                        } else {
-                            1
-                        }
-                    });
                     // Right after a list of the same kind (nothing between)?
                     let depth = self.prefixes.len();
                     let alt = matches!(self.last_list, Some((d, at, o, false))
