@@ -73,7 +73,7 @@ wasm-pack build --target web --release
 node npm/finish.mjs                             # Node entry point + "exports" in pkg/package.json
 wasm-pack test --node                           # binding tests
 sh npm/smoke-test.sh                            # npm-pack pkg/, install it, run tests/node.mjs
-gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c    # expect ~65 KB (CI gate: 66560 bytes)
+gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c    # expect ~71 KB (CI gate: 80000 bytes)
 
 cd pkg
 npm pack --dry-run                              # expect 7 files, incl. LICENSE, node.js and the .wasm

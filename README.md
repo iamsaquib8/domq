@@ -376,8 +376,8 @@ MCP config:
 
 ## JavaScript & WebAssembly
 
-The same parser — selectors, text, Markdown and all — in a ~70 KB (gzipped; 0.6.0
-is ~65 KB) wasm module with zero JS dependencies and full TypeScript types.
+The same parser — selectors, text, Markdown and all — in a ~71 KB (gzipped; 0.6.0
+was ~65 KB) wasm module with zero JS dependencies and full TypeScript types.
 Works in the browser, Cloudflare Workers, Deno, Bun, and Node (no setup needed
 in Node). [Package docs →](./wasm) · [**Playground →**](https://iamsaquib8.github.io/domq/)
 
