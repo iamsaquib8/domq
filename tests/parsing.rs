@@ -765,6 +765,7 @@ fn tag_names_may_hold_non_ascii_and_symbols() {
     assert_eq!(dom.root().unwrap().tag_name(), Some("my-élément"));
     assert_eq!(dom.to_html(), html);
     assert_eq!(dom.root().unwrap().attributes().count(), 0);
+    #[cfg(feature = "query")]
     assert_eq!(dom.select("my-élément").count(), 1);
     assert_eq!(dom.errors().len(), 0);
 
