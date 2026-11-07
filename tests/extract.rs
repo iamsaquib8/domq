@@ -1037,3 +1037,88 @@ fn error_messages_match_the_python_binding() {
         r#"Item[1]._reviews[1].stars (".stars" @data-value): cannot parse "x" as u8: invalid digit found in string"#
     );
 }
+
+// --- selectors are compiled once per call -------------------------------------
+
+mod prepared {
+    use super::*;
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A hand-written type that counts how often its plan is built: the hook
+    /// the derive uses to compile selectors once per `extract`/`extract_all`
+    /// call, nested types included.
+    static PLANS: AtomicUsize = AtomicUsize::new(0);
+
+    struct Counted;
+
+    impl FromHtml for Counted {
+        fn from_html(_: Scope<'_>) -> Result<Self, ExtractError> {
+            Ok(Counted)
+        }
+
+        fn __plan() -> Result<domq::__private::Plan, ExtractError> {
+            PLANS.fetch_add(1, Ordering::SeqCst);
+            Ok(domq::__private::Plan::new())
+        }
+    }
+
+    #[derive(FromHtml)]
+    #[html(select = ".card")]
+    struct Card {
+        #[html(select = "h2")]
+        _title: String,
+        #[html(select = ".tag")]
+        _tags: Vec<Counted>,
+        #[html(select = ".extra")]
+        _extra: Option<Counted>,
+    }
+
+    #[test]
+    fn nested_plans_are_built_once_per_call_not_per_item() {
+        let cards = "<div class=card><h2>x</h2><i class=tag></i><i class=tag></i></div>".repeat(50);
+        let dom = parse(&cards);
+        PLANS.store(0, Ordering::SeqCst);
+        let items: Vec<Card> = dom.extract_all().unwrap();
+        assert_eq!(items.len(), 50);
+        // Two nested fields, one plan each, for 50 cards.
+        assert_eq!(PLANS.load(Ordering::SeqCst), 2);
+
+        PLANS.store(0, Ordering::SeqCst);
+        let _: Card = dom.extract().unwrap();
+        assert_eq!(PLANS.load(Ordering::SeqCst), 2);
+    }
+
+    #[derive(FromHtml, Debug)]
+    struct Inner {
+        #[html(select = "b:hover")]
+        _bad: Option<String>,
+    }
+
+    #[derive(FromHtml, Debug)]
+    #[html(select = ".card")]
+    struct Outer {
+        #[html(select = ".inner")]
+        _inner: Option<Inner>,
+    }
+
+    #[test]
+    fn every_selector_is_validated_before_any_extraction() {
+        // No `.inner` element exists, so nothing ever reads `b:hover`; the
+        // plan still rejects it, before the first card is read.
+        let dom = parse("<div class=card></div><div class=card></div>");
+        let err = dom.extract_all::<Outer>().unwrap_err();
+        assert!(matches!(err.kind(), ExtractErrorKind::InvalidSelector(_)));
+        assert_eq!(
+            err.to_string(),
+            r#"Outer._inner._bad ("b:hover"): invalid selector: unsupported pseudo-class ':hover' at byte 1"#
+        );
+        // Same for a single value.
+        assert!(dom.extract::<Outer>().is_err());
+        assert!(
+            dom.select_first(".card")
+                .unwrap()
+                .extract::<Outer>()
+                .is_err()
+        );
+    }
+}
