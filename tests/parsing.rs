@@ -1120,3 +1120,155 @@ fn tag_names_may_hold_non_ascii_and_symbols() {
     let toks: Vec<_> = tokenize("<my-é x>").collect();
     assert!(matches!(toks[0], Token::StartTag { name: "my-é", .. }));
 }
+
+// A script's `<!--<script>` is "double escaped": the next `</script>` does
+// not end the element (#234).
+
+fn script_text(html: &str) -> Option<String> {
+    let dom = parse(html);
+    let script = dom.find_by_tag("script").next()?;
+    Some(script.text_content())
+}
+
+#[test]
+fn a_double_escaped_script_ends_at_the_second_end_tag() {
+    let html = "<script><!--<script>a</script>b</script><p>x</p>";
+    let dom = parse(html);
+    assert_eq!(
+        script_text(html).as_deref(),
+        Some("<!--<script>a</script>b")
+    );
+    // `b</script>` is not left over as page text, and the paragraph follows.
+    assert_eq!(dom.to_text(), "x");
+    assert_eq!(dom.roots().count(), 2);
+    assert_eq!(dom.to_html(), html);
+}
+
+#[test]
+fn script_data_states() {
+    for (html, want) in [
+        // Escaped, but not double escaped: the first end tag ends it.
+        ("<script><!-- a </script>x", "<!-- a "),
+        ("<script><!--<b>a</script>x", "<!--<b>a"),
+        // `-->` leaves the escaped part, so a later `<script` is plain text.
+        (
+            "<script><!-- a --><script>b</script>x",
+            "<!-- a --><script>b",
+        ),
+        ("<script><!--<script>a--></script>x", "<!--<script>a-->"),
+        // `<!-->` and `<!--->` are `<!--` followed by `>`/`->`.
+        ("<script><!--><script>a</script>x", "<!--><script>a"),
+        ("<script><!---><script>a</script>x", "<!---><script>a"),
+        // In the double escaped part, `</script>` goes back to escaped, and a
+        // second `</script>` ends the element; names are case-insensitive and
+        // end at whitespace, `/` or `>`.
+        (
+            "<script><!--<script>a</script>b</script>x",
+            "<!--<script>a</script>b",
+        ),
+        (
+            "<SCRIPT><!--<ScRipT >a</sCRIPT/>b</SCRIPT >x",
+            "<!--<ScRipT >a</sCRIPT/>b",
+        ),
+        (
+            "<script><!--<script/>a</script\tb</script>x",
+            "<!--<script/>a</script\tb",
+        ),
+        // Not `script`: `<scripts`, `<script`+`x`, and an undelimited name.
+        ("<script><!--<scripts>a</script>b", "<!--<scripts>a"),
+        (
+            "<script><!--<script>a</scripts>b</script>x",
+            "<!--<script>a</scripts>b</script>x",
+        ),
+        // Dashes need to be adjacent.
+        (
+            "<script><!-- - -><script>a</script>x</script>y",
+            "<!-- - -><script>a</script>x",
+        ),
+        // The double escaped part does not nest: one `</script>` leaves it.
+        (
+            "<script><!--<script><script>a</script>b</script>c</script>x",
+            "<!--<script><script>a</script>b",
+        ),
+    ] {
+        assert_eq!(script_text(html).as_deref(), Some(want), "{html}");
+    }
+    // Style, title and textarea have no such state.
+    let dom = parse("<style><!--<script>a</style>b");
+    assert_eq!(
+        dom.find_by_tag("style").next().unwrap().text_content(),
+        "<!--<script>a"
+    );
+    assert_eq!(dom.to_text(), "b");
+}
+
+#[test]
+fn double_escaped_scripts_round_trip_and_stay_closed() {
+    for html in [
+        "<script><!--<script>a</script>b</script><p>x</p>",
+        "<script><!--<script>a</script></script></script><p>y</p>",
+        "<script><!--<script>a",
+        "<script><!--<script>a</script",
+        "<script>x</script</script><p>z</p>",
+    ] {
+        let once = parse(html);
+        let out = once.to_html();
+        let twice = parse(&out);
+        assert_eq!(out, twice.to_html(), "{html}");
+        assert_eq!(once.roots().count(), twice.roots().count(), "{html}");
+        // Whatever the text, the element is closed by its own end tag.
+        assert!(out.ends_with("</script>") || out.ends_with("</p>"), "{out}");
+    }
+    // The parsed text survives intact when it ends in plain script data.
+    let html = "<script><!--<script>a</script>b</script><p>x</p>";
+    assert_eq!(
+        script_text(&parse(html).to_html()).as_deref(),
+        Some("<!--<script>a</script>b")
+    );
+}
+
+#[test]
+fn editing_a_script_into_double_escaped_text_cannot_swallow_its_end_tag() {
+    let mut dom = parse("<script>1</script><p>after</p>");
+    let script = dom.find_by_tag("script").next().unwrap().id();
+    dom.set_text(script, "<!--<script>alert(1)");
+    let out = dom.to_html();
+    let again = parse(&out);
+    assert_eq!(again.roots().count(), 2, "{out}");
+    assert_eq!(again.to_text(), "after");
+    // An end tag in plain or escaped text is still written `<\/script`.
+    dom.set_text(script, "a</script><img src=x>");
+    assert_eq!(
+        dom.to_html(),
+        "<script>a<\\/script><img src=x></script><p>after</p>"
+    );
+    dom.set_text(script, "<!--a</script><img src=x>");
+    let again = parse(&dom.to_html());
+    assert_eq!(again.roots().count(), 2);
+}
+
+#[test]
+fn script_scanning_is_linear() {
+    // Many `<!--`, `-`, `<script` and `</script` pieces, and a long run of
+    // letters after a `<`: each byte is looked at a bounded number of times.
+    let n = 200_000;
+    for unit in [
+        "<!--<script>",
+        "-->",
+        "<scrip",
+        "<aaaaaaaaaaaaaaaaaaaaaaaa",
+        "--",
+        "</scriptx",
+    ] {
+        let html = format!("<script>{}</script><p>x</p>", unit.repeat(n));
+        let start = std::time::Instant::now();
+        let dom = parse(&html);
+        let _ = dom.to_html();
+        assert!(
+            start.elapsed().as_millis() < 2000,
+            "{unit}: took {:?}",
+            start.elapsed()
+        );
+        assert!(dom.roots().count() >= 1);
+    }
+}

@@ -430,6 +430,10 @@ impl<'a> Tokenizer<'a> {
         if end_name.eq_ignore_ascii_case("plaintext") {
             self.pos = self.bytes.len();
         }
+        if end_name.eq_ignore_ascii_case("script") {
+            self.pos = ScriptData::default().find_end(self.bytes, self.pos, true);
+            return Token::Text(self.slice(start, self.pos));
+        }
         while self.pos < self.bytes.len() {
             match scan::find_byte(b'<', self.rest()) {
                 None => {
@@ -462,6 +466,139 @@ impl<'a> Tokenizer<'a> {
                     Some(b) => b.is_ascii_whitespace() || matches!(b, b'>' | b'/'),
                 }
             }
+            _ => false,
+        }
+    }
+}
+
+/// Where the scan of a `<script>`'s content is, in the HTML tokenizer's
+/// script data states: after `<!--` the content is "escaped", and there
+/// `<script` starts a "double escaped" part in which `</script>` does not end
+/// the element (it only leaves the double escaped part). `-->` goes back to
+/// plain script data. Used by the tokenizer, and by the serializer to find
+/// the `</script` it must neutralize.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct ScriptData {
+    state: ScriptState,
+    /// How many `-` just before the scan position, within an escaped part
+    /// (`-->` ends it; `<!-->` is `<!--` then `>`).
+    dashes: u32,
+    /// Where the `<` of the `<script` that opened the double escaped part
+    /// the scan is in, if it is in one.
+    double_at: usize,
+}
+
+#[derive(Clone, Copy, Default, PartialEq)]
+enum ScriptState {
+    #[default]
+    Data,
+    Escaped,
+    Double,
+}
+
+impl ScriptData {
+    /// The index in `bytes` of the `<` of the next `</script` that ends the
+    /// element, scanning from `from` (`bytes.len()` if none), and leaving the
+    /// scan state to resume after it. `eof_ends`: whether a `</script` cut
+    /// off by the very end of `bytes` is an end tag. Each byte is looked at a
+    /// bounded number of times, so this is linear.
+    pub(crate) fn find_end(&mut self, bytes: &[u8], from: usize, eof_ends: bool) -> usize {
+        let mut pos = from;
+        while let Some(&b) = bytes.get(pos) {
+            if self.state == ScriptState::Data {
+                // Plain script data: only `<` matters; scan to it in one shot.
+                match scan::find_byte(b'<', bytes.get(pos..).unwrap_or(&[])) {
+                    None => return bytes.len(),
+                    Some(rel) => pos += rel,
+                }
+                if Self::end_tag_at(bytes, pos, eof_ends) {
+                    return pos;
+                }
+                if bytes.get(pos..).is_some_and(|r| r.starts_with(b"<!--")) {
+                    // `<!--` is also the first two dashes of `-->`.
+                    pos += 4;
+                    self.state = ScriptState::Escaped;
+                    self.dashes = 2;
+                } else {
+                    pos += 1;
+                }
+                continue;
+            }
+            match b {
+                b'-' => {
+                    self.dashes = self.dashes.saturating_add(1);
+                    pos += 1;
+                }
+                b'>' => {
+                    pos += 1;
+                    if self.dashes >= 2 {
+                        self.state = ScriptState::Data;
+                    }
+                    self.dashes = 0;
+                }
+                b'<' => {
+                    self.dashes = 0;
+                    let closing = bytes.get(pos + 1) == Some(&b'/');
+                    if closing
+                        && self.state == ScriptState::Escaped
+                        && Self::end_tag_at(bytes, pos, eof_ends)
+                    {
+                        return pos;
+                    }
+                    // `<script` opens a double escaped part; `</script`
+                    // closes one. The delimiter is consumed with it.
+                    let name_at = pos + if closing { 2 } else { 1 };
+                    if (self.state == ScriptState::Escaped) != closing
+                        && let Some(delimiter) = Self::script_name_at(bytes, name_at)
+                    {
+                        self.state = if closing {
+                            ScriptState::Escaped
+                        } else {
+                            self.double_at = pos;
+                            ScriptState::Double
+                        };
+                        pos = delimiter + 1;
+                    } else {
+                        pos += 1;
+                    }
+                }
+                _ => {
+                    self.dashes = 0;
+                    pos += 1;
+                }
+            }
+        }
+        bytes.len()
+    }
+
+    /// The index of the `<` of the `<script` that opened the double escaped
+    /// part the scan is in. `Some` means no `</script` can end the element
+    /// from here on, not even one written after the content.
+    pub(crate) fn double_escaped_at(&self) -> Option<usize> {
+        (self.state == ScriptState::Double).then_some(self.double_at)
+    }
+
+    /// If `script` starts at `at` and ends there (at whitespace, `/` or `>`),
+    /// the index of that delimiter.
+    fn script_name_at(bytes: &[u8], at: usize) -> Option<usize> {
+        let name = bytes.get(at..at + 6)?;
+        let delimiter = bytes.get(at + 6)?;
+        (name.eq_ignore_ascii_case(b"script")
+            && (delimiter.is_ascii_whitespace() || matches!(delimiter, b'/' | b'>')))
+        .then_some(at + 6)
+    }
+
+    /// Whether the `<` at `lt` starts `</script` and ends it: with a
+    /// delimiter, or `</script` itself ending `bytes` and `eof_ends`.
+    fn end_tag_at(bytes: &[u8], lt: usize, eof_ends: bool) -> bool {
+        if bytes.get(lt + 1) != Some(&b'/') {
+            return false;
+        }
+        match bytes.get(lt + 2..lt + 8) {
+            Some(name) if name.eq_ignore_ascii_case(b"script") => match bytes.get(lt + 8) {
+                None => eof_ends,
+                Some(b) => b.is_ascii_whitespace() || matches!(b, b'/' | b'>'),
+            },
             _ => false,
         }
     }
