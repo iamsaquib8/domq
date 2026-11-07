@@ -14,6 +14,7 @@ use alloc::vec::Vec;
 
 use crate::error::{ErrorKind, ParseError};
 use crate::scan;
+use crate::tags::Tag;
 use crate::token::{AttrValue, Token};
 
 /// A streaming HTML tokenizer. Construct with [`Tokenizer::new`] (or the
@@ -27,6 +28,8 @@ pub struct Tokenizer<'a> {
     raw_text_end: Option<&'a str>,
     /// The attributes of the start tag read last (see [`Tokenizer::attrs`]).
     attrs: Vec<(&'a str, AttrValue<'a>)>,
+    /// The name of the start or end tag read last, classified.
+    tag: Tag,
     pub(crate) errors: Vec<ParseError>,
 }
 
@@ -39,6 +42,7 @@ impl<'a> Tokenizer<'a> {
             pos: 0,
             raw_text_end: None,
             attrs: Vec::new(),
+            tag: Tag::OTHER,
             errors: Vec::new(),
         }
     }
@@ -111,6 +115,15 @@ impl<'a> Tokenizer<'a> {
     #[inline]
     pub(crate) fn attrs(&self) -> &[(&'a str, AttrValue<'a>)] {
         &self.attrs
+    }
+
+    /// The name of the start or end tag returned last by
+    /// [`Tokenizer::next_token`], classified (looked up once here for the
+    /// tree builder, which would otherwise match the name again for each
+    /// rule).
+    #[inline]
+    pub(crate) fn tag(&self) -> Tag {
+        self.tag
     }
 
     /// Like `Iterator::next`, but also returns the byte offset the token
@@ -206,6 +219,7 @@ impl<'a> Tokenizer<'a> {
         let open = self.pos;
         self.pos += 1; // consume '<'
         let name = self.read_tag_name();
+        self.tag = Tag::of(name);
         self.attrs.clear();
         let mut self_closing = false;
 
@@ -235,7 +249,7 @@ impl<'a> Tokenizer<'a> {
             }
         }
 
-        if !self_closing && is_rawish_name(name) {
+        if !self_closing && self.tag.is_rawish() {
             self.raw_text_end = Some(name);
         }
 
@@ -303,6 +317,7 @@ impl<'a> Tokenizer<'a> {
         let open = self.pos;
         self.pos += 2; // consume '</'
         let name = self.read_tag_name();
+        self.tag = Tag::of(name);
         self.skip_to(b'>');
         if self.peek() == Some(b'>') {
             self.pos += 1;
@@ -615,22 +630,4 @@ impl<'a> Iterator for Tokenizer<'a> {
         }
         Some(tok)
     }
-}
-
-/// Whether an element's content is treated as raw text by the tokenizer
-/// (no nested tags). Entity-decoding of that text is decided later, per element.
-fn is_rawish_name(name: &str) -> bool {
-    [
-        "script",
-        "style",
-        "title",
-        "textarea",
-        "xmp",
-        "iframe",
-        "noembed",
-        "noframes",
-        "plaintext",
-    ]
-    .iter()
-    .any(|t| name.eq_ignore_ascii_case(t))
 }

@@ -34,7 +34,7 @@ use alloc::vec::Vec;
 use crate::entities::Problem;
 use crate::error::{ErrorKind, ParseError};
 use crate::node::{AttrRange, NodeId, RawKind, Span, SrcRange};
-use crate::tags;
+use crate::tags::{self, Tag};
 use crate::token::{AttrValue, Token};
 use crate::tokenizer::Tokenizer;
 use crate::tree::Dom;
@@ -46,7 +46,7 @@ pub(crate) fn parse_document(src: &str) -> Dom {
     let mut builder = TreeBuilder::new(DomSink::new(src.len()), src);
     while let Some((tok, pos)) = tk.next_token() {
         let end = tk.offset();
-        builder.token(tok, tk.attrs(), pos, end);
+        builder.token(tok, tk.tag(), tk.attrs(), pos, end);
     }
     builder.finish(src.len(), &mut tk.errors);
     let mut dom = builder.sink.dom;
@@ -76,6 +76,7 @@ pub(crate) trait Sink<'a> {
         &mut self,
         parent: Option<&Self::Open>,
         name: Cow<'a, str>,
+        tag: Tag,
         attrs: usize,
         start: usize,
         end: usize,
@@ -138,12 +139,14 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
         (offset.checked_add(s.len())? <= self.src.len()).then_some(offset)
     }
 
-    /// Feed one token that spans `pos..end`. A start tag's attributes come
-    /// separately (see [`Tokenizer::attrs`]).
+    /// Feed one token that spans `pos..end`. A start or end tag's `tag` is its
+    /// name classified (see [`Tokenizer::tag`]); the attributes of a start tag
+    /// come separately (see [`Tokenizer::attrs`]).
     #[inline]
     pub(crate) fn token(
         &mut self,
         tok: Token<'a>,
+        tag: Tag,
         attrs: &[(&'a str, AttrValue<'a>)],
         pos: usize,
         end: usize,
@@ -153,8 +156,8 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
         match tok {
             Token::StartTag {
                 name, self_closing, ..
-            } => self.start_tag(name, attrs, self_closing, pos, end),
-            Token::EndTag { name } => self.end_tag(name, pos, end),
+            } => self.start_tag(name, tag, attrs, self_closing, pos, end),
+            Token::EndTag { name } => self.end_tag(name, tag, pos, end),
             Token::Text(t) => self.text(t, pos, end, skip_lf),
             Token::Cdata(c) => {
                 if !c.is_empty() {
@@ -195,26 +198,33 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
     fn start_tag(
         &mut self,
         name: &'a str,
+        tag: Tag,
         attrs: &[(&'a str, AttrValue<'a>)],
         self_closing: bool,
         pos: usize,
         end: usize,
     ) {
-        let mut lname = lower(name);
+        // A known tag's lower-case name is a static string: no scan for upper
+        // case, no allocation.
+        let (mut lname, mut tag) = match tag {
+            Tag::OTHER => (lower(name), Tag::OTHER),
+            known => (Cow::Borrowed(known.name()), known),
+        };
         // `<image>` is a misspelled `<img>` outside SVG and MathML (where
         // `<image>` is a real element), as in browsers.
-        if lname == "image"
-            && self.open.find(&self.sink, "svg").is_none()
-            && self.open.find(&self.sink, "math").is_none()
+        if tag == Tag::IMAGE
+            && self.open.find_foreign(Tag::SVG).is_none()
+            && self.open.find_foreign(Tag::MATH).is_none()
         {
-            lname = Cow::Borrowed("img");
+            lname = Cow::Borrowed(Tag::IMG.name());
+            tag = Tag::IMG;
         }
 
         // A start tag that closes an element further down (a `<li>` past an
         // unclosed `<a>`, a `<div>` past a `<b>` in a `<p>`): close what sits
         // above that element first.
         for p in [false, true] {
-            if let Some(idx) = self.open.closed_by(&self.sink, &lname, p) {
+            if let Some(idx) = self.open.closed_by(tag, p) {
                 while self.open.len() > idx + 1 {
                     self.pop(pos, pos, true);
                     self.error(pos, ErrorKind::ImplicitlyClosed);
@@ -227,11 +237,7 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
 
         // Implicit close: pop open elements that this start tag closes.
         // They end where this tag starts.
-        while self
-            .open
-            .top()
-            .is_some_and(|top| tags::implicitly_closes(&lname, self.sink.name(top)))
-        {
+        while tags::implicitly_closes(tag, self.open.top_tag()) {
             self.pop(pos, pos, true);
             self.error(pos, ErrorKind::ImplicitlyClosed);
         }
@@ -244,38 +250,41 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
                 self.error(at, kind);
             }
         }
-        let void = self_closing || tags::is_void(&lname);
-        let drops_lf = matches!(&*lname, "pre" | "listing" | "textarea");
+        let void = self_closing || tag.is_void();
+        let drops_lf = tag.drops_lf();
         let open = self
             .sink
-            .start(self.open.top(), lname, attrs.len(), pos, end);
+            .start(self.open.top(), lname, tag, attrs.len(), pos, end);
         if void {
             self.sink.end(open, end, end, true);
         } else {
             self.skip_lf = drops_lf;
-            self.open.push(&self.sink, open);
+            self.open.push(open, tag);
         }
     }
 
-    fn end_tag(&mut self, name: &'a str, pos: usize, end: usize) {
-        let lname = lower(name);
-        if lname == "br" {
+    fn end_tag(&mut self, name: &'a str, tag: Tag, pos: usize, end: usize) {
+        if tag == Tag::BR {
             // Browsers read `</br>` as `<br>`.
-            self.start_tag("br", &[], false, pos, end);
+            self.start_tag("br", Tag::BR, &[], false, pos, end);
             return;
         }
-        if tags::is_void(&lname) {
+        if tag.is_void() {
             return; // void elements never have end tags
         }
-        match self.open.find_end(&self.sink, &lname) {
+        let lname = match tag {
+            Tag::OTHER => lower(name),
+            known => Cow::Borrowed(known.name()),
+        };
+        match self.open.find_end(&self.sink, tag, &lname) {
             Some(idx) => {
-                if idx + 1 != self.open.len() || !self.open.is_named(&self.sink, idx, &lname) {
+                if idx + 1 != self.open.len() || !self.open.is_named(&self.sink, idx, tag, &lname) {
                     // Closing elements whose end tag is optional (`</ul>` over
                     // an open `<li>`) is valid HTML; anything else is
                     // mis-nesting, as is a heading end tag of another level
                     // (`<h2>x</h3>`).
-                    let kind = if self.open.is_named(&self.sink, idx, &lname)
-                        && self.open.only_optional_above(&self.sink, idx)
+                    let kind = if self.open.is_named(&self.sink, idx, tag, &lname)
+                        && self.open.only_optional_above(idx)
                     {
                         ErrorKind::ImplicitlyClosed
                     } else {
@@ -292,10 +301,10 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
             }
             None => {
                 self.error(pos, ErrorKind::StrayEndTag);
-                if lname == "p" {
+                if tag == Tag::P {
                     // A `</p>` with no `<p>` open: browsers insert an empty
                     // one (`<p><hr></p>` has two paragraphs).
-                    self.start_tag("p", &[], false, pos, pos);
+                    self.start_tag("p", Tag::P, &[], false, pos, pos);
                     self.pop(pos, end, false);
                 }
             }
@@ -320,10 +329,8 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
         if t.is_empty() {
             return;
         }
-        let (raw, closes) = {
-            let top = self.open.top().map_or("", |o| self.sink.name(o));
-            (tags::is_raw_text(top), tags::text_closes(top))
-        };
+        let top = self.open.top_tag();
+        let (raw, closes) = (top.is_raw_text(), top.text_closes());
         // Real text means an omitted `</head>` or `</colgroup>` (neither is raw
         // text, nor is what they sit in).
         if closes && t.bytes().any(|b| !b.is_ascii_whitespace()) {
@@ -392,11 +399,12 @@ impl<'a> Sink<'a> for DomSink {
         &mut self,
         parent: Option<&(NodeId, Span)>,
         name: Cow<'a, str>,
+        tag: Tag,
         attrs: usize,
         start: usize,
         end: usize,
     ) -> (NodeId, Span) {
-        if name.eq_ignore_ascii_case("noscript") {
+        if tag == Tag::NOSCRIPT {
             self.dom.has_noscript = true;
         }
         let name = self.dom.intern(&name);
@@ -484,9 +492,12 @@ const OUTER_END_TAG_SEARCH: usize = 8;
 /// current node ([`OpenElements::closed_by`]); and that scan only runs while
 /// an element it could close is open, counted in `open_p`, `open_items` and
 /// `open_nested`.
+///
+/// Each open element is kept with its [`Tag`], so every question about its
+/// name but "is it this unknown name?" is an integer test.
 struct OpenElements<O> {
     /// Open elements, innermost last; their names come from the sink.
-    stack: Vec<O>,
+    stack: Vec<(O, Tag)>,
     /// How many `<p>` are open.
     open_p: usize,
     /// How many list items, cells, rows, table sections and captions are
@@ -511,7 +522,13 @@ impl<O> Default for OpenElements<O> {
 impl<O> OpenElements<O> {
     #[inline]
     fn top(&self) -> Option<&O> {
-        self.stack.last()
+        self.stack.last().map(|(open, _)| open)
+    }
+
+    /// The tag of the current node ([`Tag::OTHER`] if nothing is open).
+    #[inline]
+    fn top_tag(&self) -> Tag {
+        self.stack.last().map_or(Tag::OTHER, |&(_, tag)| tag)
     }
 
     #[inline]
@@ -520,27 +537,27 @@ impl<O> OpenElements<O> {
     }
 
     #[inline]
-    fn push<'a, S: Sink<'a, Open = O>>(&mut self, sink: &S, open: O) {
-        self.count(sink.name(&open), true);
-        self.stack.push(open);
+    fn push(&mut self, open: O, tag: Tag) {
+        self.count(tag, true);
+        self.stack.push((open, tag));
     }
 
     #[inline]
-    fn pop<'a, S: Sink<'a, Open = O>>(&mut self, sink: &S) -> Option<O> {
-        let open = self.stack.pop()?;
-        self.count(sink.name(&open), false);
+    fn pop<'a, S: Sink<'a, Open = O>>(&mut self, _sink: &S) -> Option<O> {
+        let (open, tag) = self.stack.pop()?;
+        self.count(tag, false);
         Some(open)
     }
 
     #[inline]
-    fn count(&mut self, name: &str, pushed: bool) {
-        let counter = match name {
-            "p" => &mut self.open_p,
-            "li" | "dd" | "dt" | "td" | "th" | "tr" | "thead" | "tbody" | "tfoot" | "caption" => {
-                &mut self.open_items
-            }
-            "a" | "nobr" | "button" | "select" => &mut self.open_nested,
-            _ => return,
+    fn count(&mut self, tag: Tag, pushed: bool) {
+        if !tag.is_counted() {
+            return;
+        }
+        let counter = match tag {
+            Tag::P => &mut self.open_p,
+            t if t.is_nested() => &mut self.open_nested,
+            _ => &mut self.open_items,
         };
         *counter = if pushed {
             counter.saturating_add(1)
@@ -552,26 +569,21 @@ impl<O> OpenElements<O> {
     /// Whether every element above stack index `idx` has an optional end tag.
     /// Only asked about a match, whose end tag pops all of them: the scan is
     /// paid for by their pushes.
-    fn only_optional_above<'a, S: Sink<'a, Open = O>>(&self, sink: &S, idx: usize) -> bool {
+    fn only_optional_above(&self, idx: usize) -> bool {
         self.stack
             .get(idx + 1..)
             .unwrap_or(&[])
             .iter()
-            .all(|open| tags::end_tag_optional(sink.name(open)))
+            .all(|&(_, tag)| tag.end_tag_optional())
     }
 
     /// The stack index of the open element that the start tag `opening`
     /// closes: by [`tags::p_search`] with `p`, else by [`tags::search`];
     /// looking at the [`MAX_END_TAG_SEARCH`] innermost elements.
-    fn closed_by<'a, S: Sink<'a, Open = O>>(
-        &self,
-        sink: &S,
-        opening: &str,
-        p: bool,
-    ) -> Option<usize> {
+    fn closed_by(&self, opening: Tag, p: bool) -> Option<usize> {
         let (search, open): (tags::SearchFn, usize) = if p {
             (tags::p_search, self.open_p)
-        } else if matches!(opening, "a" | "nobr" | "button" | "select") {
+        } else if opening.is_nested() {
             (tags::search, self.open_nested)
         } else {
             (tags::search, self.open_items)
@@ -581,7 +593,7 @@ impl<O> OpenElements<O> {
         }
         let inner = self.stack.len().saturating_sub(MAX_END_TAG_SEARCH);
         for i in (inner..self.stack.len()).rev() {
-            match search(opening, sink.name(self.stack.get(i)?))? {
+            match search(opening, self.stack.get(i)?.1)? {
                 tags::Search::Closes => return Some(i),
                 tags::Search::Stops => return None,
                 tags::Search::Continue => {}
@@ -590,12 +602,11 @@ impl<O> OpenElements<O> {
         None
     }
 
-    /// The stack index of the open element named `name` that an end tag
-    /// closes: the innermost among the [`MAX_END_TAG_SEARCH`] innermost, else
-    /// the innermost among the [`OUTER_END_TAG_SEARCH`] outermost. `None`
-    /// makes the end tag stray.
-    fn find<'a, S: Sink<'a, Open = O>>(&self, sink: &S, name: &str) -> Option<usize> {
-        let named = |open: &O| sink.name(open) == name;
+    /// The stack index of the open `svg` or `math` (`tag`) that an `<image>`
+    /// sits in: the innermost among the [`MAX_END_TAG_SEARCH`] innermost open
+    /// elements, else among the [`OUTER_END_TAG_SEARCH`] outermost.
+    fn find_foreign(&self, tag: Tag) -> Option<usize> {
+        let named = |entry: &(O, Tag)| entry.1 == tag;
         let inner = self.stack.len().saturating_sub(MAX_END_TAG_SEARCH);
         if let Some(i) = self
             .stack
@@ -608,23 +619,45 @@ impl<O> OpenElements<O> {
         self.stack.get(..outer)?.iter().rposition(named)
     }
 
-    /// Whether the open element at stack index `idx` is named `name`.
-    fn is_named<'a, S: Sink<'a, Open = O>>(&self, sink: &S, idx: usize, name: &str) -> bool {
+    /// Whether the open element `entry` is the one the end tag `closing`
+    /// (classified as `tag`, lower-cased name `name`) names: the same known
+    /// tag, or the same name when it is not a known one.
+    #[inline]
+    fn names<'a, S: Sink<'a, Open = O>>(sink: &S, entry: &(O, Tag), tag: Tag, name: &str) -> bool {
+        if tag == Tag::OTHER {
+            entry.1 == Tag::OTHER && sink.name(&entry.0) == name
+        } else {
+            entry.1 == tag
+        }
+    }
+
+    /// Whether the open element at stack index `idx` is the one the end tag
+    /// (`tag`, `name`) names.
+    fn is_named<'a, S: Sink<'a, Open = O>>(
+        &self,
+        sink: &S,
+        idx: usize,
+        tag: Tag,
+        name: &str,
+    ) -> bool {
         self.stack
             .get(idx)
-            .is_some_and(|open| sink.name(open) == name)
+            .is_some_and(|entry| Self::names(sink, entry, tag, name))
     }
 
     /// The stack index of the open element that the end tag `closing`
-    /// closes, by [`tags::EndScope::search`]: scanning down from the top, the first
+    /// (classified as `tag`, lower-cased name `name`) closes, by
+    /// [`tags::EndScope::search`]: scanning down from the top, the first
     /// element it names, unless a scope boundary comes first (then the end
     /// tag is stray). Looks at the [`MAX_END_TAG_SEARCH`] innermost elements,
-    /// then the [`OUTER_END_TAG_SEARCH`] outermost, like [`OpenElements::find`].
-    fn find_end<'a, S: Sink<'a, Open = O>>(&self, sink: &S, closing: &str) -> Option<usize> {
-        let scope = tags::EndScope::of(closing);
+    /// then the [`OUTER_END_TAG_SEARCH`] outermost, so an end tag costs O(1)
+    /// whatever the depth.
+    fn find_end<'a, S: Sink<'a, Open = O>>(&self, sink: &S, tag: Tag, name: &str) -> Option<usize> {
+        let scope = tags::EndScope::of(tag);
         let scan = |from: usize, to: usize| {
             for i in (from..to).rev() {
-                match scope.search(closing, sink.name(self.stack.get(i)?)) {
+                let entry = self.stack.get(i)?;
+                match scope.search(tag, entry.1, Self::names(sink, entry, tag, name)) {
                     tags::Search::Closes => return Some(Some(i)),
                     tags::Search::Stops => return Some(None),
                     tags::Search::Continue => {}

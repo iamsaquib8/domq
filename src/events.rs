@@ -17,6 +17,7 @@ use core::ops::Range;
 use crate::builder::{Sink, TreeBuilder, lower};
 use crate::entities;
 use crate::error::ParseError;
+use crate::tags::Tag;
 use crate::tokenizer::Tokenizer;
 
 /// One step of a document as the tree builder sees it, after recovery. See
@@ -123,7 +124,8 @@ impl<'a> Iterator for Events<'a> {
             match self.tokenizer.next_token() {
                 Some((tok, pos)) => {
                     let end = self.tokenizer.offset();
-                    self.builder.token(tok, self.tokenizer.attrs(), pos, end);
+                    self.builder
+                        .token(tok, self.tokenizer.tag(), self.tokenizer.attrs(), pos, end);
                 }
                 None => {
                     self.builder.finish(self.len, &mut self.tokenizer.errors);
@@ -162,6 +164,7 @@ impl<'a> Sink<'a> for Queue<'a> {
         &mut self,
         _parent: Option<&Cow<'a, str>>,
         name: Cow<'a, str>,
+        _tag: Tag,
         _attrs: usize,
         start: usize,
         end: usize,
