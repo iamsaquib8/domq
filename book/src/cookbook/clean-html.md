@@ -177,7 +177,7 @@ re-parsing, another parser) should see well-formed input.
 
 - **Selectors are strings.** An invalid selector in `dom.select("...")` matches
   nothing, silently: parse selectors you do not control with `Selector::parse`
-  first ([Scrape elements and attributes](scraping.md#reuse-a-selector)).
+  first ([Which API do I use?](../which-api.md#i-want-to-find-elements)).
 - **Collect, then edit.** `select` borrows the document, so you cannot edit
   inside the loop; collect `NodeId`s first, as above.
 - **Whitespace stays.** Removing an element leaves the whitespace around it.
