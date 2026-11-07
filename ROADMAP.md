@@ -5,17 +5,19 @@ actually report and ask for. It is organised around **the people who reach for
 a tiny HTML parser** and the job each of them is trying to finish, not around
 parser internals. Issues and PRs that fit the principles below are very welcome.
 
-**Where we are:** 0.6.0 shipped on 2026-11-03 on crates.io, npm, PyPI,
-Homebrew and the release page. It brought reader mode, metadata, links, chunks
-and tables to Python and JavaScript, configurable Markdown (`MarkdownOptions`:
-link style, images, `data:` URIs, base URL) and a page outline for agents
-(`Dom::outline`, `domq --outline`, MCP `outline`). 0.5.0 added `domq mcp`,
-browser-style recovery for the common mis-nesting cases, and published numbers:
-**61.8%** of the 1,959 html5lib tree-construction tests match a browser's tree
-structure (0 panics), and reader mode scores **0.898 F1 on the AEB article
-benchmark** and **0.747 / 0.803 on WCXB** (dev / test), against human labels
-([docs/reader-quality.md](docs/reader-quality.md)). The reports regenerate in
-CI on every PR.
+**Where we are:** 0.7.0 shipped on 2026-11-07 on crates.io, npm, PyPI,
+Homebrew and the release page. It makes the trees and the Markdown right
+before adding more surface: **65.3%** of the 1,959 html5lib tree-construction
+tests now match a browser's tree structure (0 panics; 61.8% in 0.6), reader
+mode scores **0.900 F1 on the AEB article benchmark** and **0.792 / 0.830 on
+WCXB** (dev / test; 0.747 / 0.803 in 0.6), against human labels, and metadata
+now reads JSON-LD (published time 48.5% → 97.0% agreement with Readability.js).
+Bytes in with encoding detection reached Rust, the CLI, Python and
+JavaScript, and the npm package splits into a core and an optional
+`domq-wasm/extract` module. Parsing, outline, Markdown and query time got
+several linear-time and allocation fixes ([docs/reader-quality.md](docs/reader-quality.md),
+[docs/conformance.md](docs/conformance.md)). The reports regenerate in CI on
+every PR.
 The [guide](https://iamsaquib8.github.io/domq/docs/) covers every surface. See
 [what works where](#what-works-where), [what shipped](#shipped) and the
 [changelog](./CHANGELOG.md).
@@ -33,7 +35,7 @@ The [guide](https://iamsaquib8.github.io/domq/docs/) covers every surface. See
    chunks for a prompt or an index, at the edge, on a server or as an agent's
    MCP tool, without a headless browser.
 4. **JavaScript on the edge** `js` — Workers, Deno, Bun, the browser: no DOM
-   needed, and a ~57 KB gzipped wasm module (~78 KB with extraction).
+   needed, and a ~58 KB gzipped wasm module (~80 KB with extraction).
 5. **Python scraping and data code** `py` — where most scraping and RAG code
    lives; a fast, never-panicking parser with selectors and Markdown.
 6. **People who ship HTML** `ship` — docs sites, static-site generators, email
@@ -62,7 +64,7 @@ gap (— means no plan yet).
 | links and resources | ✅ | ✅ `--links` | ✅ | ✅ | ✅ |
 | tables, CSV | ✅ | ✅ `--csv` | ✅ | ✅ | ✅ |
 | declarative extraction | ✅ derive | ✅ `-e` | ✅ | 0.7 | ✅ dataclasses |
-| bytes in, encoding detection | 0.7 | ✅ | — | 0.7 | 0.7 |
+| bytes in, encoding detection | ✅ | ✅ | — | ✅ | ✅ |
 | page outline for agents (roles, names, refs) | ✅ | ✅ `--outline` | ✅ | 0.7 | ✅ |
 | editing | ✅ | `-r` only | — | 0.10 | 0.10 |
 | streaming events | ✅ | 0.10 `--stream` | — | 0.10 | 0.10 |
@@ -93,8 +95,8 @@ Numbers we hold ourselves to (✅ = enforced in CI):
 | budget | limit | today |
 |---|---|---|
 | runtime dependencies, default build | **0** ✅ | 0 |
-| gzipped wasm, core (`domq-wasm`) | **< 60,000 bytes** ✅ (was a 45 KiB promise; see below) | 56,647 B (55.3 KiB) |
-| gzipped wasm, extract (`domq-wasm/extract`: the core plus extraction) | **< 80,000 bytes** ✅ (temporary) | 77,769 B (75.9 KiB) (0.6.0: 64.5 KB, +21.4 KB for reader mode, metadata, links, chunks, tables and Markdown options; since then bytes-in and tokenizer fixes) |
+| gzipped wasm, core (`domq-wasm`) | **< 60,000 bytes** ✅ (was a 45 KiB promise; see below) | 58,468 B (57.1 KiB) |
+| gzipped wasm, extract (`domq-wasm/extract`: the core plus extraction) | **< 80,000 bytes** ✅ (temporary) | 79,534 B (77.7 KiB) (0.6.0: 64.5 KB, +21.4 KB for reader mode, metadata, links, chunks, tables and Markdown options; since then bytes-in, JSON-LD and parser fixes) |
 | panics or hangs on any input (HTML, selectors, edits) | **none** ✅ proptest + fuzz | none known |
 | stack use on deeply nested input | **bounded** ✅ 100k-deep tests | bounded |
 | super-linear time on adversarial input | **none** — every fix gets a timing test | none known |
@@ -112,11 +114,11 @@ and convert import, and **extract**, the core plus the extraction helpers
 (`mainContent`, `metadata`, `links`, `resources`, `toMarkdownChunks`, `tables`,
 `toCsv`).
 
-The old "45 KiB" promise is **not** met: the core is 55.3 KiB, about 10 KiB
+The old "45 KiB" promise is **not** met: the core is 57.1 KiB, about 12 KiB
 over it, because it now also carries bytes-in decoding (`decode`, ~5.4 KB
 gzipped when it landed), configurable Markdown options and the script-data
 tokenizer states, which were not in 0.5's 43 KB. Extraction costs another
-~21 KB (77,769 B vs 56,647 B). The extract gate stays at a temporary 80,000
+~21 KB (79,534 B vs 58,468 B). The extract gate stays at a temporary 80,000
 bytes; the core gate (60,000 bytes) is the one to keep tight. Raise either on
 purpose, never by accident.
 
@@ -156,7 +158,7 @@ In short:
 
 - **Where domq leads:** one zero-dependency, never-panicking core that does
   selectors, reader mode, Markdown, chunks, metadata, links, tables, lint and
-  MCP, on every surface, in ~57 KB of gzipped wasm (~78 KB with extraction); the only forgiving parser
+  MCP, on every surface, in ~58 KB of gzipped wasm (~80 KB with extraction); the only forgiving parser
   with a published conformance report; an MCP server with no network or file
   access; the maintained successor to htmlq and pup.
 - **Where it's behind:** reader-mode quality is measured only as agreement
@@ -366,25 +368,25 @@ decided first, because every JavaScript item after it depends on the answer.
 **Tracking:** epic [#249](https://github.com/iamsaquib8/domq/issues/249) · [milestone](https://github.com/iamsaquib8/domq/milestone/1) · bugs and performance traps to clear alongside: [#257](https://github.com/iamsaquib8/domq/issues/257).
 
 - [x] **S** `js` Decide the wasm budget: split the extraction helpers into a
-      second, optional module (`domq-wasm/extract`; the core is 56,647 B
-      gzipped, extract 77,769 B) with a CI gate on each, and make every size
+      second, optional module (`domq-wasm/extract`; the core is 58,468 B
+      gzipped, extract 79,534 B) with a CI gate on each, and make every size
       claim agree ([#111](https://github.com/iamsaquib8/domq/issues/111)).
       The old 45 KiB promise is restated, not met: see [Budgets](#budgets).
-- [ ] **M** `rust` Trees that match browsers where real pages differ: stray
+- [x] **M** `rust` Trees that match browsers where real pages differ: stray
       end tags inside table cells, mismatched heading end tags, nested `<a>`
       / `<button>`, the newline after `<pre>`, stray `<` in text, non-ASCII
       tag names, script double-escaping and `<div =x>`
-      ([#67](https://github.com/iamsaquib8/domq/issues/67), [#68](https://github.com/iamsaquib8/domq/issues/68), [#69](https://github.com/iamsaquib8/domq/issues/69), [#75](https://github.com/iamsaquib8/domq/issues/75), [#76](https://github.com/iamsaquib8/domq/issues/76), [#84](https://github.com/iamsaquib8/domq/issues/84), [#234](https://github.com/iamsaquib8/domq/issues/234), [#235](https://github.com/iamsaquib8/domq/issues/235)). Listed under "Output changes".
-- [ ] **S** `ai` Reader mode on listings, products, collections and service
+      ([#67](https://github.com/iamsaquib8/domq/issues/67), [#68](https://github.com/iamsaquib8/domq/issues/68), [#69](https://github.com/iamsaquib8/domq/issues/69), [#75](https://github.com/iamsaquib8/domq/issues/75), [#76](https://github.com/iamsaquib8/domq/issues/76), [#84](https://github.com/iamsaquib8/domq/issues/84), [#234](https://github.com/iamsaquib8/domq/issues/234), [#235](https://github.com/iamsaquib8/domq/issues/235)). Listed under "Output changes". *Shipped in 0.7.0.*
+- [x] **S** `ai` Reader mode on listings, products, collections and service
       pages: widen a winner that holds under 10% of the page's text, WCXB dev
-      0.745 → 0.794 with AEB unchanged in the prototype ([#91](https://github.com/iamsaquib8/domq/issues/91)).
-- [ ] **S** `ai` Markdown that renders as written: markers split across
+      0.745 → 0.794 with AEB unchanged in the prototype ([#91](https://github.com/iamsaquib8/domq/issues/91)). *Shipped in 0.7.0:* WCXB 0.747 → 0.792 dev, 0.803 → 0.830 test, AEB 0.898 → 0.900.
+- [x] **S** `ai` Markdown that renders as written: markers split across
       nodes, nested ordered lists, reference links in chunks, the links
       footer, table spans and character references in URLs
-      ([#92](https://github.com/iamsaquib8/domq/issues/92), [#93](https://github.com/iamsaquib8/domq/issues/93), [#94](https://github.com/iamsaquib8/domq/issues/94), [#97](https://github.com/iamsaquib8/domq/issues/97), [#98](https://github.com/iamsaquib8/domq/issues/98), [#105](https://github.com/iamsaquib8/domq/issues/105)).
-- [ ] **S** `ai` `rust` Metadata from JSON-LD: valid JSON out of CDATA
+      ([#92](https://github.com/iamsaquib8/domq/issues/92), [#93](https://github.com/iamsaquib8/domq/issues/93), [#94](https://github.com/iamsaquib8/domq/issues/94), [#97](https://github.com/iamsaquib8/domq/issues/97), [#98](https://github.com/iamsaquib8/domq/issues/98), [#105](https://github.com/iamsaquib8/domq/issues/105)). *Shipped in 0.7.0.*
+- [x] **S** `ai` `rust` Metadata from JSON-LD: valid JSON out of CDATA
       wrappers, then `datePublished`, `author` and `headline` as sources
-      (published-date agreement 48.5% → 97% in the prototype) ([#99](https://github.com/iamsaquib8/domq/issues/99), [#100](https://github.com/iamsaquib8/domq/issues/100)).
+      (published-date agreement 48.5% → 97% in the prototype) ([#99](https://github.com/iamsaquib8/domq/issues/99), [#100](https://github.com/iamsaquib8/domq/issues/100)). *Shipped in 0.7.0:* published-time agreement with Readability.js 48.5% → 97.0%.
 - [x] **M** `ai` `MarkdownOptions` / `to_markdown_with()`: link style (inline,
       reference, or a links footer like Jina's `X-With-Links-Summary`),
       images (keep, alt text only, drop; drop `data:` URIs), absolute URLs
@@ -770,6 +772,33 @@ Ideas we like but haven't committed to. Prototypes and use-cases welcome.
 ---
 
 ## Shipped
+
+### 0.7.0 — 2026-11-07 · "Correct trees, Markdown built for models"
+
+Details in the [changelog](./CHANGELOG.md#070--2026-11-07).
+
+- [x] Trees closer to a browser's on real pages: end tags stop at scope
+      boundaries, mismatched heading end tags, no nested links, the newline
+      after `<pre>`, a stray `<` in text, non-ASCII tag names, script
+      double-escaping and `<div =x>`. 61.8% → 65.3% of the html5lib tests
+      match a browser's tree structure; 0 panics.
+- [x] Reader mode widens a winner that holds under a tenth of the page's text
+      (WCXB 0.747 → 0.792 dev, 0.803 → 0.830 test; AEB 0.898 → 0.900).
+- [x] Markdown that renders as written: block syntax across nodes, nested
+      ordered lists, links in chunks and the links footer, table spans and
+      character references in URLs.
+- [x] Metadata from JSON-LD (published time agreement 48.5% → 97.0%).
+- [x] Bytes in with encoding detection in Rust, the CLI, Python and
+      JavaScript (`parse_bytes`, `decode`); UTF-8 rescue for rare invalid
+      sequences.
+- [x] The npm package is two modules, the core and `domq-wasm/extract`, with
+      a size gate on each (58,468 B and 79,534 B gzipped).
+- [x] Linear-time fixes for the outline, `*-of-type`, `:has(> x)`, reference
+      links, `derive` selectors and Python `links()`, and faster tag-name
+      matching in the parser.
+- [x] CLI and MCP fixes from the audits (#143–#152, #159); a guide organised
+      by task with use-case recipes and API references for JavaScript and
+      Python.
 
 ### 0.6.0 — 2026-11-03 · "Where people are"
 
