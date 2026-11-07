@@ -11,6 +11,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::{Mutex, PoisonError};
 
 use domq::{
     Dom, Metadata as CoreMetadata, NodeId, NodeRef, OutlineNode as CoreOutlineNode,
@@ -80,14 +81,14 @@ fn parse(py: Python<'_>, source: &Bound<'_, PyAny>, encoding: Option<&str>) -> P
     if source.is_instance_of::<PyString>() {
         let s = source.extract::<PyBackedStr>()?;
         let dom = maybe_detach(py, s.len() >= DETACH_BYTES, move || domq::parse(&s));
-        Ok(Document { dom })
+        Ok(Document::new(dom))
     } else if source.is_instance_of::<PyBytes>() {
         let b = source.extract::<PyBackedBytes>()?;
         let encoding_owned = encoding.map(str::to_owned);
         let dom = maybe_detach(py, b.len() >= DETACH_BYTES, move || {
             domq::parse_bytes_with(&b, encoding_owned.as_deref())
         });
-        Ok(Document { dom })
+        Ok(Document::new(dom))
     } else {
         Err(PyTypeError::new_err("source must be str or bytes"))
     }
@@ -642,11 +643,40 @@ impl PageOutline {
 #[pyclass(frozen, module = "domq")]
 struct Document {
     dom: Dom,
+    /// The last `Dom::base_url` answer, with the argument it answered. Finding
+    /// the base scans the whole document when it has no `<base>`, so an
+    /// element loop calling `links()` with one `base_url` does it once.
+    base: Mutex<Option<(Option<String>, Option<String>)>>,
 }
 
 impl Document {
+    fn new(dom: Dom) -> Document {
+        Document {
+            dom,
+            base: Mutex::new(None),
+        }
+    }
+
     fn large(&self) -> bool {
         self.dom.len() >= DETACH_NODES
+    }
+
+    /// `Dom::base_url(page_url)`, remembered for the next call with the same
+    /// `page_url`.
+    fn base_url(&self, page_url: Option<&str>) -> Option<String> {
+        let remembered = {
+            let guard = self.base.lock().unwrap_or_else(PoisonError::into_inner);
+            match &*guard {
+                Some((key, base)) if key.as_deref() == page_url => Some(base.clone()),
+                _ => None,
+            }
+        };
+        remembered.unwrap_or_else(|| {
+            let base = self.dom.base_url(page_url);
+            let mut guard = self.base.lock().unwrap_or_else(PoisonError::into_inner);
+            *guard = Some((page_url.map(str::to_owned), base.clone()));
+            base
+        })
     }
 }
 
@@ -1019,6 +1049,16 @@ impl Element {
             id: node.id(),
         }
     }
+
+    /// Whether this element's subtree is big enough to be worth releasing the
+    /// GIL for: its source is `DETACH_BYTES` long, or, for a node without
+    /// source, the document is large.
+    fn large(&self) -> bool {
+        match self.node().ok().and_then(|node| node.source_range()) {
+            Some(range) => range.len() >= DETACH_BYTES,
+            None => self.doc.get().large(),
+        }
+    }
 }
 
 #[pymethods]
@@ -1145,14 +1185,12 @@ impl Element {
     /// Hyperlinks inside this element's subtree.
     #[pyo3(signature = (base_url = None))]
     fn links(&self, py: Python<'_>, base_url: Option<&str>) -> PyResult<Vec<Link>> {
-        let this_id = self.id;
-        let doc_bound = self.doc.bind(py);
-        let doc = doc_bound.get();
-        let raw = maybe_detach(py, doc.large(), || {
-            doc.dom
-                .links(base_url)
+        let node = self.node()?;
+        let doc = self.doc.get();
+        let raw = maybe_detach(py, self.large(), || {
+            let base = doc.base_url(base_url);
+            node.links_resolved(base.as_deref())
                 .into_iter()
-                .filter(|l| l.node.id() == this_id || l.node.ancestors().any(|a| a.id() == this_id))
                 .map(|l| (l.node.id(), l.url, l.text, l.href.to_string()))
                 .collect::<Vec<_>>()
         });
@@ -1178,14 +1216,12 @@ impl Element {
     /// Embedded resource URLs inside this element's subtree.
     #[pyo3(signature = (base_url = None))]
     fn resources(&self, py: Python<'_>, base_url: Option<&str>) -> PyResult<Vec<Resource>> {
-        let this_id = self.id;
-        let doc_bound = self.doc.bind(py);
-        let doc = doc_bound.get();
-        let raw = maybe_detach(py, doc.large(), || {
-            doc.dom
-                .resources(base_url)
+        let node = self.node()?;
+        let doc = self.doc.get();
+        let raw = maybe_detach(py, self.large(), || {
+            let base = doc.base_url(base_url);
+            node.resources_resolved(base.as_deref())
                 .into_iter()
-                .filter(|r| r.node.id() == this_id || r.node.ancestors().any(|a| a.id() == this_id))
                 .map(|r| {
                     (
                         r.node.id(),
