@@ -124,8 +124,13 @@ impl<'a> Iterator for Events<'a> {
             match self.tokenizer.next_token() {
                 Some((tok, pos)) => {
                     let end = self.tokenizer.offset();
-                    self.builder
-                        .token(tok, self.tokenizer.tag(), self.tokenizer.attrs(), pos, end);
+                    self.builder.token(
+                        tok,
+                        self.tokenizer.hints(),
+                        self.tokenizer.attrs(),
+                        pos,
+                        end,
+                    );
                 }
                 None => {
                     self.builder.finish(self.len, &mut self.tokenizer.errors);
@@ -154,8 +159,12 @@ impl<'a> Sink<'a> for Queue<'a> {
         open
     }
 
-    fn attr(&mut self, name: &'a str, value: &'a str) -> Option<entities::Problem> {
-        let (value, unknown) = entities::decode(value, true);
+    fn attr(&mut self, name: &'a str, value: &'a str, clean: bool) -> Option<entities::Problem> {
+        let (value, unknown) = if clean {
+            (Cow::Borrowed(value), None)
+        } else {
+            entities::decode(value, true)
+        };
         self.attrs.push((lower(name), value));
         unknown
     }
@@ -188,10 +197,11 @@ impl<'a> Sink<'a> for Queue<'a> {
         _parent: Option<&Cow<'a, str>>,
         text: &'a str,
         decode: bool,
+        clean: bool,
         start: usize,
         end: usize,
     ) -> Option<entities::Problem> {
-        let (text, unknown) = if decode {
+        let (text, unknown) = if decode && !clean {
             entities::decode(text, false)
         } else {
             (Cow::Borrowed(text), None)
