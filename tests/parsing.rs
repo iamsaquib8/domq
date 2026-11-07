@@ -983,3 +983,57 @@ fn links_in_separate_cells_and_scopes_are_untouched() {
         "<a href=\"/1\">1</a><a href=\"/2\">2</a>"
     );
 }
+
+// A `<` that starts no markup stays in its text (#76).
+
+fn text_children(html: &str) -> Vec<String> {
+    let dom = parse(html);
+    let p = dom.find_by_tag("p").next().unwrap();
+    p.children()
+        .filter_map(|c| c.text().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn a_stray_lt_does_not_split_the_text() {
+    let dom = parse("<p>if a < b then</p>");
+    let p = dom.root().unwrap();
+    assert_eq!(p.children().count(), 1);
+    assert_eq!(p.first_child().unwrap().text(), Some("if a < b then"));
+    for (html, want) in [
+        ("<p><3 and <- and < </p>", "<3 and <- and < "),
+        ("<p>1 <2 <3<4</p>", "1 <2 <3<4"),
+        ("<p>a <&amp; b</p>", "a <& b"),
+        ("<p>x <\u{e9}</p>", "x <\u{e9}"),
+        ("<p>x <", "x <"),
+        ("<p>x </", "x </"),
+    ] {
+        assert_eq!(text_children(html), [want], "{html}");
+    }
+    // Real markup still ends the run.
+    assert_eq!(
+        text_children("<p>a < b<!--c--> < d<b>e</b> <3"),
+        ["a < b", " < d", " <3"]
+    );
+    let dom = parse("<p>a <i>b</i> c <? d>");
+    assert_eq!(dom.find_by_tag("p").next().unwrap().children().count(), 4);
+}
+
+#[test]
+fn a_stray_lt_in_a_text_run_is_one_token() {
+    let toks: Vec<_> = tokenize("a < b <3 <").collect();
+    assert_eq!(toks, [Token::Text("a < b <3 <")]);
+    // The text keeps its source range.
+    let src = "<p>a < b</p>";
+    let dom = parse(src);
+    let text = dom.root().unwrap().first_child().unwrap();
+    assert_eq!(&src[text.source_range().unwrap()], "a < b");
+}
+
+#[test]
+fn an_empty_end_tag_makes_no_token() {
+    // `</>` is dropped (with a parse error); it must not leave an empty text.
+    let toks: Vec<_> = tokenize("a</>b</></>").collect();
+    assert_eq!(toks, [Token::Text("a"), Token::Text("b")]);
+    assert_eq!(parse("</>").roots().count(), 0);
+}
