@@ -762,6 +762,90 @@ def test_element_serialization_scales_across_threads(capsys):
         print(f"\nElement.to_markdown, 4 calls: sequential {seq * 1e3:.1f} ms, 4 threads {par * 1e3:.1f} ms, x{seq / par:.2f}")
 
 
+def test_element_links_and_resources_stay_in_the_subtree():
+    doc = domq.parse(
+        "<div class=c><a href=/a>A</a><img src=a.png></div>"
+        "<div class=c><a href=b>B</a><img src=b.png><img src='c.png' srcset='c.png 1x, d.png 2x'></div>"
+    )
+    first, second = doc.select(".c")
+    assert [(l.url, l.text) for l in first.links("https://x.dev/dir/")] == [
+        ("https://x.dev/a", "A")
+    ]
+    assert [(l.url, l.text) for l in second.links("https://x.dev/dir/")] == [
+        ("https://x.dev/dir/b", "B")
+    ]
+    assert [r.url for r in second.resources("https://x.dev/dir/")] == [
+        "https://x.dev/dir/b.png",
+        "https://x.dev/dir/c.png",
+        "https://x.dev/dir/c.png",
+        "https://x.dev/dir/d.png",
+    ]
+    # The element itself counts when it is a link.
+    link = doc.select_first("a")
+    assert [l.url for l in link.links()] == ["/a"]
+    assert link.links()[0].element == link
+    # The same answers as the document's, restricted to the subtree.
+    for base in (None, "https://x.dev/dir/"):
+        for card in (first, second):
+            want = [l.url for l in doc.links(base) if l.element.parent == card]
+            assert [l.url for l in card.links(base)] == want
+
+
+def test_element_links_honour_base_element_and_change_of_base_url():
+    doc = domq.parse(
+        '<head><base href="/docs/"></head><ul><li><a href="a">A</a><img src="a.png"></li></ul>'
+    )
+    li = doc.select_first("li")
+    # Alternate the argument: the document remembers only the last base.
+    for page in ("https://x.dev/", "https://y.dev/en/", "https://x.dev/", None, None):
+        assert [l.url for l in li.links(page)] == [l.url for l in doc.links(page)]
+        assert [r.url for r in li.resources(page)] == [r.url for r in doc.resources(page)]
+    assert li.links("https://x.dev/")[0].url == "https://x.dev/docs/a"
+
+
+def _best_of(runs, fn):
+    """The fastest of `runs` calls, with the garbage collector paused (its
+    passes over a growing heap would otherwise show up as superlinear work)."""
+    best = float("inf")
+    gc.disable()
+    try:
+        for _ in range(runs):
+            start = time.perf_counter()
+            fn()
+            best = min(best, time.perf_counter() - start)
+    finally:
+        gc.enable()
+    return best
+
+
+def test_element_links_and_resources_take_time_proportional_to_the_subtree():
+    """A per-card loop is linear in the number of cards (it was quadratic).
+
+    Compares 250 cards with 2000 instead of timing anything absolutely: linear
+    work costs about 8x more, quadratic about 64x. The bound sits between the
+    two, far from both, so a loaded machine does not make it flaky.
+    """
+
+    def loop_time(cards, method):
+        html = "".join(
+            f'<div class=c><a href="/p/{i}">item {i}</a><img src="/i/{i}.png"></div>'
+            for i in range(cards)
+        )
+        doc = domq.parse(html)
+        elements = doc.select(".c")
+        assert len(elements) == cards
+        return _best_of(
+            7, lambda: [getattr(e, method)("https://example.com/") for e in elements]
+        )
+
+    for method in ("links", "resources"):
+        small = loop_time(250, method)
+        large = loop_time(2000, method)
+        ratio = large / max(small, 1e-9)
+        print(f"{method}(): 250 cards {small * 1e3:.2f} ms, 2000 cards {large * 1e3:.2f} ms, x{ratio:.1f} (linear: x8)")
+        assert ratio < 24, f"{method}() looks superlinear: x{ratio:.1f} for 8x the cards"
+
+
 # --- tables & CSV -------------------------------------------------------------
 
 
