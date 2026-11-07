@@ -605,6 +605,7 @@ fn other_parse_error(src: &str, e: &ParseError) -> Raw {
         ErrorKind::UnterminatedCdata => (Level::Warning, "unterminated-cdata"),
         ErrorKind::UnexpectedEof => (Level::Warning, "unexpected-eof"),
         ErrorKind::BogusComment => (Level::Warning, "bogus-comment"),
+        ErrorKind::UnexpectedEqualsSign => (Level::Warning, "unexpected-equals-sign"),
         _ => (Level::Warning, "parse-error"),
     };
     let message = match (&e.kind, tag_at(src, e.position)) {
