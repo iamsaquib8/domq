@@ -765,6 +765,7 @@ fn an_equals_sign_before_an_attribute_name_starts_the_name() {
     let attrs: Vec<_> = div.attributes().collect();
     assert_eq!(attrs, [("=x", "")]);
     assert_eq!(div.attr("x"), None);
+    #[cfg(feature = "query")]
     assert_eq!(dom.select("[x]").count(), 0);
     // A parse error is recorded, at the `=`.
     let errors = dom.errors();
