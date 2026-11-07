@@ -158,6 +158,16 @@ fn write_open<'a>(
             if tags::is_void(tag) {
                 return; // void elements have no children and no end tag
             }
+            // The parser drops one newline after these start tags, so one
+            // that starts the content needs another to survive a round-trip.
+            if matches!(tag, "pre" | "listing" | "textarea")
+                && node
+                    .first_child()
+                    .and_then(|c| c.text())
+                    .is_some_and(|t| t.starts_with('\n') || t.starts_with("\r\n"))
+            {
+                out.push('\n');
+            }
             stack.push(if text_only.is_none() && tags::ends_only_at_end_tag(tag) {
                 *text_only = Some(out.len());
                 Step::CloseTextOnly(tag)

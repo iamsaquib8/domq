@@ -12,8 +12,8 @@ regenerates it and fails when it differs. -->
 
 | Measure | Passing | Rate |
 |---|---:|---:|
-| Exact tree: the html5lib dump, line for line | 83 | 4.2% |
-| Same structure, in domq's model of HTML | 1260 | 64.3% |
+| Exact tree: the html5lib dump, line for line | 87 | 4.4% |
+| Same structure, in domq's model of HTML | 1266 | 64.6% |
 
 domq is a forgiving parser, not a spec-compliant one (see the
 [README](../README.md#what-it-handles)), so the exact rate is low by design:
@@ -35,12 +35,12 @@ text and comments. A test that fails here is a real difference from a browser.
 
 | Area | Tests | Exact | Structure |
 |---|---:|---:|---:|
-| General tree building | 647 | 1.5% | 66.0% |
+| General tree building | 647 | 2.2% | 66.8% |
 | Comments, doctypes, quirks | 87 | 0.0% | 81.6% |
 | Character references | 101 | 0.0% | 100.0% |
 | Raw text, script data, unsafe text | 380 | 0.0% | 68.7% |
 | Mis-nested formatting (adoption agency) | 86 | 0.0% | 26.7% |
-| Tables and foster parenting | 63 | 0.0% | 41.3% |
+| Tables and foster parenting | 63 | 0.0% | 42.9% |
 | Foreign content (SVG, MathML) | 202 | 19.3% | 71.3% |
 | Templates | 127 | 1.6% | 73.2% |
 | Fragments and context | 142 | 22.5% | 52.1% |
@@ -125,11 +125,11 @@ text and comments. A test that fails here is a real difference from a browser.
 | `tests24.dat` | Mis-nested formatting (adoption agency) | 8 | 0.0% | 0.0% |
 | `tests25.dat` | Mis-nested formatting (adoption agency) | 26 | 0.0% | 76.9% |
 | `tests26.dat` | Mis-nested formatting (adoption agency) | 20 | 0.0% | 5.0% |
-| `tests3.dat` | General tree building | 24 | 16.7% | 58.3% |
+| `tests3.dat` | General tree building | 24 | 33.3% | 79.2% |
 | `tests4.dat` | Fragments and context | 9 | 33.3% | 44.4% |
 | `tests5.dat` | Raw text, script data, unsafe text | 16 | 0.0% | 81.2% |
 | `tests6.dat` | Fragments and context | 52 | 15.4% | 69.2% |
-| `tests7.dat` | Tables and foster parenting | 34 | 0.0% | 58.8% |
+| `tests7.dat` | Tables and foster parenting | 34 | 0.0% | 61.8% |
 | `tests8.dat` | Tables and foster parenting | 10 | 0.0% | 20.0% |
 | `tests9.dat` | Foreign content (SVG, MathML) | 27 | 0.0% | 48.1% |
 | `tests_innerHTML_1.dat` | Fragments and context | 81 | 25.9% | 42.0% |
