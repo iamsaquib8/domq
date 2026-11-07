@@ -151,7 +151,7 @@ fn links_inside_hidden_elements_are_still_found() {
     // check is for content hidden inside a link.
     let html = "<nav hidden><a href=/menu>Menu item</a></nav>\
                 <a href=/self hidden>Self</a>\
-                <a href=/outer>out<span hidden>in<a href=/inner>inner</a></span>side</a>";
+                <a href=/outer>out<span hidden>in<table><tr><td><a href=/inner>inner</a></td></tr></table></span>side</a>";
     assert_eq!(
         urls(html, None),
         [
@@ -228,13 +228,22 @@ fn text_fallbacks_for_icon_links() {
 
 #[test]
 fn nested_links_split_their_text() {
-    // Invalid HTML this parser keeps nested: the inner text belongs to the
-    // inner link only, and both are reported in document order.
-    let html = "<a href=/outer>before <a href=/inner>inside</a> after</a>";
+    // A link inside a table cell inside a link stays nested (a table cell is
+    // a scope boundary, so the inner `<a>` does not close the outer one): the
+    // inner text belongs to the inner link only, and both are reported in
+    // document order.
+    let html = "<a href=/outer>before <table><tr><td><a href=/inner>inside</a></td></tr></table> after</a>";
     assert_eq!(
         urls(html, None),
         [pair("/outer", "before after"), pair("/inner", "inside")]
     );
+}
+
+#[test]
+fn a_link_in_a_link_is_a_sibling() {
+    // Browsers never nest links: the second `<a>` closes the first.
+    let html = "<a href=/one>One<a href=/two>Two</a> after";
+    assert_eq!(urls(html, None), [pair("/one", "One"), pair("/two", "Two")]);
 }
 
 #[test]
