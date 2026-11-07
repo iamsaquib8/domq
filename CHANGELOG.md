@@ -13,6 +13,7 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ### Output changes
 
+- Parser: a tag name runs to the first whitespace, `/` or `>` instead of stopping at the first character that is not an ASCII letter, digit, `-`, `:`, `_` or `.` ([#84](https://github.com/iamsaquib8/domq/issues/84)). `<my-élément>` is one element (it used to be `<my- élément>` with an attribute), and `<div$x>` is an element named `div$x`. Selectors such as `my-élément` now match it.
 - Parser: a `<` that starts no markup (`a < b`, `<3`, `<-`) stays in its text run instead of splitting it into three nodes ([#76](https://github.com/iamsaquib8/domq/issues/76)). `<p>if a < b then</p>` has one text node, so `first_child().text()`, the JSON tree, `children()` walks and the `Event::Text` stream see the whole sentence. `tokenize` yields one `Text` token for the run, and no longer yields an empty `Text("")` for a dropped `</>`. (The text on either side of a `</>` is still two nodes.)
 - Parser: an end tag no longer closes an element beyond a scope boundary ([#67](https://github.com/iamsaquib8/domq/issues/67)). A `</div>`, `</span>` or `</a>` inside a `<td>`, `<th>` or `<caption>` whose element opened outside the table is ignored, instead of closing the cell, the row and the table, so later cells and rows stay in the table. Tables, `table_rows()`, CSV and Markdown tables change on pages with mis-nested markup in cells. Other end tags stop at `applet caption html table td th marquee object template`; table end tags (`</td>`, `</tr>`, `</table>`, …) stop at `table template html`; `</body>`, `</html>` and `</template>` look through everything, as before.
 - Parser: any heading end tag closes the innermost open heading of any level, so `<h2>Title</h3>` closes the `<h2>` ([#68](https://github.com/iamsaquib8/domq/issues/68)). The paragraphs after such a heading no longer land inside it, which fixes `to_markdown()` heading lines and chunk heading paths on those pages.
@@ -21,6 +22,8 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 - CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
 
 ### Fixed
+
+- Parser: HTML conformance (same structure) goes from 1226 to 1229 of 1959 tests, and exact from 87 to 88, with no regressions (`html5test-com.dat:1`, `webkit01.dat:174`, `webkit02.dat:309`).
 
 - Parser: HTML conformance (same structure) goes from 1216 to 1226 of 1959 tests, with no regressions: 3 tests from #67 (`template.dat:78`, `template.dat:1224`, `tests16.dat:2587`), 2 from #68 (`tests19.dat:277`, `tests19.dat:305`) and 5 from #69 (`tests20.dat:1`, `tests26.dat:381`, `tests3.dat:256`, `tests3.dat:271`, `tests6.dat:166`).
 - Parser: HTML conformance (same structure) goes from 1210 to 1216 of 1959 tests, and exact from 83 to 87, with no regressions (`tests3.dat:63`, `:75`, `:89`, `:215`, `:227`, `tests7.dat:188`).

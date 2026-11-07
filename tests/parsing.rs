@@ -1037,3 +1037,35 @@ fn an_empty_end_tag_makes_no_token() {
     assert_eq!(toks, [Token::Text("a"), Token::Text("b")]);
     assert_eq!(parse("</>").roots().count(), 0);
 }
+
+// Tag names run to whitespace, `/` or `>` (#84).
+
+#[test]
+fn tag_names_may_hold_non_ascii_and_symbols() {
+    let html = "<my-élément>t</my-élément>";
+    let dom = parse(html);
+    assert_eq!(dom.root().unwrap().tag_name(), Some("my-élément"));
+    assert_eq!(dom.to_html(), html);
+    assert_eq!(dom.root().unwrap().attributes().count(), 0);
+    #[cfg(feature = "query")]
+    assert_eq!(dom.select("my-élément").count(), 1);
+    assert_eq!(dom.errors().len(), 0);
+
+    let dom = parse("<div$x>t</div$x>");
+    assert_eq!(dom.root().unwrap().tag_name(), Some("div$x"));
+    assert_eq!(dom.to_html(), "<div$x>t</div$x>");
+
+    // Attributes after such a name, a self-closing one, and only ASCII upper
+    // case is lowered. A name must still start with an ASCII letter.
+    let dom = parse("<X-Ünï-Tag a=1 b/>x<x-ÜNÏ-TAG>y");
+    let kids: Vec<_> = dom.roots().filter_map(|n| n.tag_name()).collect();
+    assert_eq!(kids, ["x-Ünï-tag", "x-ÜnÏ-tag"]);
+    assert_eq!(dom.root().unwrap().attr("a"), Some("1"));
+    // The end tag matches the start tag.
+    let dom = parse("<a-é><b>x</b></a-é>y");
+    assert_eq!(dom.to_html(), "<a-é><b>x</b></a-é>y");
+    assert_eq!(parse("<Ünï>").to_html(), "&lt;Ünï&gt;");
+    // Tokens carry the whole name.
+    let toks: Vec<_> = tokenize("<my-é x>").collect();
+    assert!(matches!(toks[0], Token::StartTag { name: "my-é", .. }));
+}

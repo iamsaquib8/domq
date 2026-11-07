@@ -189,14 +189,15 @@ impl<'a> Tokenizer<'a> {
         })
     }
 
+    /// A tag name runs to the first whitespace, `/` or `>` (or NUL), whatever
+    /// else it holds: `<my-élément>` and `<div$x>` are names, as in browsers.
     fn read_tag_name(&mut self) -> &'a str {
         let start = self.pos;
         while let Some(b) = self.peek() {
-            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b':' | b'_' | b'.') {
-                self.pos += 1;
-            } else {
+            if b.is_ascii_whitespace() || matches!(b, b'/' | b'>' | 0) {
                 break;
             }
+            self.pos += 1;
         }
         self.slice(start, self.pos)
     }
