@@ -6,8 +6,10 @@
 //! `combobox`, `checkbox`, `radio`), with accessible names and minimal unique
 //! CSS selectors.
 
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString as _};
+use alloc::vec;
 use alloc::vec::Vec;
 
 use super::{collapse, is_space};
@@ -266,25 +268,182 @@ impl Dom {
     pub fn outline(&self) -> PageOutline {
         let mut nodes = Vec::new();
         let mut container_stack: Vec<NodeId> = Vec::new();
+        let mut cx = Cx::new(self);
 
         for root in self.roots() {
-            extract_outline_tree(root, self, &mut nodes, &mut container_stack);
+            extract_outline_tree(root, &mut cx, &mut nodes, &mut container_stack);
         }
 
         PageOutline { nodes }
     }
 }
 
-impl NodeRef<'_> {
+impl<'a> NodeRef<'a> {
     /// Generate a semantic outline for this node and its subtree.
     pub fn outline(&self) -> PageOutline {
         let mut nodes = Vec::new();
         let mut container_stack: Vec<NodeId> = Vec::new();
+        let mut cx = Cx::new(self.dom());
 
-        extract_outline_tree(*self, self.dom(), &mut nodes, &mut container_stack);
+        extract_outline_tree(*self, &mut cx, &mut nodes, &mut container_stack);
 
         PageOutline { nodes }
     }
+}
+
+/// Longest accessible name, in characters; longer ones are cut and end in `…`.
+const MAX_NAME_LEN: usize = 100;
+
+/// Something an element can be looked up by, to tell whether it is the only
+/// one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Key<'a> {
+    Id(&'a str),
+    /// An attribute that names an element for tests: its name and value.
+    Attr(&'a str, &'a str),
+    /// A tag with an attribute: tag, attribute name, value.
+    TagAttr(&'a str, &'a str, &'a str),
+    Class(&'a str),
+    TagClass(&'a str, &'a str),
+}
+
+/// What the outline asks of the whole document, answered from one pass over it
+/// so that no outline node has to scan the document (or its siblings, or its
+/// ancestors) again (#90).
+struct Cx<'a> {
+    dom: &'a Dom,
+    /// How many elements match each key, and the first one in document order.
+    counts: BTreeMap<Key<'a>, (usize, NodeId)>,
+    /// The `<label>`s with a `for` attribute, by its value, in document order.
+    labels_for: BTreeMap<&'a str, Vec<NodeId>>,
+    /// Per node (by arena index): its position among the siblings of its tag,
+    /// from 1, and how many there are. `(1, 0)` for a top-level node.
+    siblings: Vec<(u32, u32)>,
+    /// Names already worked out: the head of an element's text, by node, and
+    /// the name a `for` value gives, so that many controls pointing at one
+    /// label or one big element read it once.
+    texts: BTreeMap<usize, String>,
+    label_names: BTreeMap<&'a str, Option<String>>,
+    /// Open elements of the walk, kept as it goes: how many are sectioning
+    /// content (plus those above where it started), and the `<label>`s.
+    sectioning: usize,
+    open_labels: Vec<NodeId>,
+}
+
+impl<'a> Cx<'a> {
+    fn new(dom: &'a Dom) -> Self {
+        let mut cx = Cx {
+            dom,
+            counts: BTreeMap::new(),
+            labels_for: BTreeMap::new(),
+            siblings: vec![(1, 0); dom.nodes.len()],
+            texts: BTreeMap::new(),
+            label_names: BTreeMap::new(),
+            sectioning: 0,
+            open_labels: Vec::new(),
+        };
+        let mut classes: Vec<&str> = Vec::new();
+        let mut tags: BTreeMap<&str, u32> = BTreeMap::new();
+        for node in dom.nodes() {
+            for child in node.child_elements() {
+                let seen = tags.entry(child.tag_name().unwrap_or("")).or_insert(0);
+                *seen += 1;
+                if let Some(slot) = cx.siblings.get_mut(child.id().index()) {
+                    slot.0 = *seen;
+                }
+            }
+            for child in node.child_elements() {
+                let total = tags.get(child.tag_name().unwrap_or("")).copied();
+                if let Some(slot) = cx.siblings.get_mut(child.id().index()) {
+                    slot.1 = total.unwrap_or(0);
+                }
+            }
+            tags.clear();
+
+            let Some(tag) = node.tag_name() else {
+                continue;
+            };
+            if let Some(id) = node.attr("id") {
+                cx.count(Key::Id(id), node);
+            }
+            for name in ["data-testid", "data-test-id"] {
+                if let Some(v) = node.attr(name) {
+                    cx.count(Key::Attr(name, v), node);
+                }
+            }
+            for name in ["name", "type"] {
+                if let Some(v) = node.attr(name) {
+                    cx.count(Key::TagAttr(tag, name, v), node);
+                }
+            }
+            // An element counts once for a class it names twice.
+            classes.clear();
+            classes.extend(node.classes());
+            classes.sort_unstable();
+            classes.dedup();
+            for &c in &classes {
+                cx.count(Key::Class(c), node);
+                cx.count(Key::TagClass(tag, c), node);
+            }
+            if tag.eq_ignore_ascii_case("label")
+                && let Some(target) = node.attr("for")
+            {
+                cx.labels_for.entry(target).or_default().push(node.id());
+            }
+        }
+        cx
+    }
+
+    fn count(&mut self, key: Key<'a>, node: NodeRef<'a>) {
+        self.counts.entry(key).or_insert((0, node.id())).0 += 1;
+    }
+
+    /// Whether exactly one element has `key`.
+    fn unique(&self, key: Key<'_>) -> bool {
+        self.counts.get(&key).is_some_and(|&(n, _)| n == 1)
+    }
+
+    /// The text of `node` as far as a name can use it: collapsed, and cut at
+    /// one character more than the longest name, so that cutting it to a name
+    /// gives what the whole text would.
+    fn text_head(&mut self, node: NodeRef<'a>) -> String {
+        if let Some(text) = self.texts.get(&node.id().index()) {
+            return text.clone();
+        }
+        let text = head_text(node);
+        self.texts.insert(node.id().index(), text.clone());
+        text
+    }
+
+    /// The name the first `<label for=id>` with text gives.
+    fn label_for(&mut self, id: &'a str) -> Option<String> {
+        if let Some(name) = self.label_names.get(id) {
+            return name.clone();
+        }
+        let labels = self.labels_for.get(id).cloned().unwrap_or_default();
+        let mut name = None;
+        for label in labels {
+            let Some(label) = self.dom.get(label) else {
+                continue;
+            };
+            let text = self.text_head(label);
+            if !text.is_empty() {
+                name = Some(truncate_name(text));
+                break;
+            }
+        }
+        self.label_names.insert(id, name.clone());
+        name
+    }
+}
+
+/// `collapse(node.to_text())`, cut after `MAX_NAME_LEN + 1` characters.
+fn head_text(node: NodeRef<'_>) -> String {
+    let mut text = collapse(&node.text_head(MAX_NAME_LEN + 1));
+    if let Some((cut, _)) = text.char_indices().nth(MAX_NAME_LEN + 1) {
+        text.truncate(cut);
+    }
+    text
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,7 +455,9 @@ enum ElementRole<'a> {
     None,
 }
 
-fn classify_element<'a>(node: NodeRef<'a>) -> ElementRole<'a> {
+/// `sectioned`: the element is inside `article`, `aside`, `main`, `nav` or
+/// `section`, which makes a `header` or `footer` a plain one, not a landmark.
+fn classify_element<'a>(node: NodeRef<'a>, sectioned: bool) -> ElementRole<'a> {
     if let Some(r) = node.attr("role") {
         let first_token = r.split(is_space).find(|t| !t.is_empty()).unwrap_or("");
         match first_token.to_ascii_lowercase().as_str() {
@@ -325,14 +486,14 @@ fn classify_element<'a>(node: NodeRef<'a>) -> ElementRole<'a> {
     let tag = node.tag_name().unwrap_or("");
     match tag {
         "header" => {
-            if in_sectioning_content(node) {
+            if sectioned {
                 ElementRole::Landmark("header")
             } else {
                 ElementRole::Landmark("banner")
             }
         }
         "footer" => {
-            if in_sectioning_content(node) {
+            if sectioned {
                 ElementRole::Landmark("footer")
             } else {
                 ElementRole::Landmark("contentinfo")
@@ -381,17 +542,11 @@ fn classify_element<'a>(node: NodeRef<'a>) -> ElementRole<'a> {
 }
 
 fn in_sectioning_content(node: NodeRef<'_>) -> bool {
-    let mut cur = node.parent();
-    while let Some(p) = cur {
-        if matches!(
-            p.tag_name(),
-            Some("article" | "aside" | "main" | "nav" | "section")
-        ) {
-            return true;
-        }
-        cur = p.parent();
-    }
-    false
+    node.ancestors().any(|p| is_sectioning(p.tag_name()))
+}
+
+fn is_sectioning(tag: Option<&str>) -> bool {
+    matches!(tag, Some("article" | "aside" | "main" | "nav" | "section"))
 }
 
 fn is_container_landmark(role: &ElementRole<'_>) -> bool {
@@ -408,12 +563,21 @@ fn is_hidden_element(node: NodeRef<'_>) -> bool {
             .is_some_and(|v| v.trim().eq_ignore_ascii_case("true"))
 }
 
-fn extract_outline_tree(
-    root: NodeRef<'_>,
-    dom: &Dom,
+fn extract_outline_tree<'a>(
+    root: NodeRef<'a>,
+    cx: &mut Cx<'a>,
     nodes: &mut Vec<OutlineNode>,
     container_stack: &mut Vec<NodeId>,
 ) {
+    // What is open above `root` counts too.
+    cx.sectioning = usize::from(in_sectioning_content(root));
+    cx.open_labels.clear();
+    cx.open_labels.extend(
+        root.ancestors()
+            .find(|p| p.tag_name() == Some("label"))
+            .map(|p| p.id()),
+    );
+
     walk(root, |node, enter| {
         if !node.is_element() {
             return false;
@@ -423,8 +587,9 @@ fn extract_outline_tree(
             return false;
         }
 
-        let role = classify_element(node);
+        let role = classify_element(node, cx.sectioning > 0);
         let is_container = is_container_landmark(&role);
+        let tag = node.tag_name();
 
         if enter {
             if role != ElementRole::None {
@@ -438,14 +603,14 @@ fn extract_outline_tree(
                     ElementRole::None => unreachable!(),
                 };
 
-                let name = compute_accessible_name(node, dom);
-                let selector = synthesize_selector(node, dom);
+                let name = compute_accessible_name(node, cx);
+                let selector = synthesize_selector(node, cx);
                 let href = if matches!(role, ElementRole::Control("link")) {
                     node.attr("href").map(String::from)
                 } else {
                     None
                 };
-                let tag = node.tag_name().unwrap_or("").to_string();
+                let tag = tag.unwrap_or("").to_string();
                 let source_range = node.source_range().map(|r| (r.start, r.end));
 
                 nodes.push(OutlineNode {
@@ -464,21 +629,38 @@ fn extract_outline_tree(
             if is_container {
                 container_stack.push(node.id());
             }
-        } else if is_container && container_stack.last() == Some(&node.id()) {
-            container_stack.pop();
+            // Open for the element's descendants (see `Cx`).
+            if is_sectioning(tag) {
+                cx.sectioning += 1;
+            }
+            if tag == Some("label") {
+                cx.open_labels.push(node.id());
+            }
+        } else {
+            if is_container && container_stack.last() == Some(&node.id()) {
+                container_stack.pop();
+            }
+            if is_sectioning(tag) {
+                cx.sectioning = cx.sectioning.saturating_sub(1);
+            }
+            if tag == Some("label") {
+                cx.open_labels.pop();
+            }
         }
 
         true
     });
 }
 
-fn compute_accessible_name(node: NodeRef<'_>, dom: &Dom) -> Option<String> {
+fn compute_accessible_name<'a>(node: NodeRef<'a>, cx: &mut Cx<'a>) -> Option<String> {
     // 1. aria-labelledby
     if let Some(ids) = node.attr("aria-labelledby") {
         let mut parts = Vec::new();
         for id in ids.split(is_space).filter(|s| !s.is_empty()) {
-            if let Some(target) = dom.find_by_id(id) {
-                let t = collapse(&target.to_text());
+            if let Some(&(_, first)) = cx.counts.get(&Key::Id(id))
+                && let Some(target) = cx.dom.get(first)
+            {
+                let t = cx.text_head(target);
                 if !t.is_empty() {
                     parts.push(t);
                 }
@@ -502,28 +684,18 @@ fn compute_accessible_name(node: NodeRef<'_>, dom: &Dom) -> Option<String> {
     // 3. Form controls (<input>, <select>, <textarea>)
     if matches!(tag, "input" | "select" | "textarea") {
         // Associated label by id
-        if let Some(id) = node.attr("id") {
-            for label in dom.find_by_tag("label") {
-                if label.attr("for") == Some(id) {
-                    let t = collapse(&label.to_text());
-                    if !t.is_empty() {
-                        return Some(truncate_name(t));
-                    }
-                }
-            }
+        if let Some(id) = node.attr("id")
+            && let Some(name) = cx.label_for(id)
+        {
+            return Some(name);
         }
 
         // Ancestor label
-        let mut cur = node.parent();
-        while let Some(p) = cur {
-            if p.tag_name() == Some("label") {
-                let t = collapse(&p.to_text());
-                if !t.is_empty() {
-                    return Some(truncate_name(t));
-                }
-                break;
+        if let Some(label) = cx.open_labels.last().and_then(|&id| cx.dom.get(id)) {
+            let t = cx.text_head(label);
+            if !t.is_empty() {
+                return Some(truncate_name(t));
             }
-            cur = p.parent();
         }
 
         // Placeholder
@@ -568,7 +740,7 @@ fn compute_accessible_name(node: NodeRef<'_>, dom: &Dom) -> Option<String> {
         )
     });
     if is_text_element {
-        let t = collapse(&node.to_text());
+        let t = head_text(node);
         if !t.is_empty() {
             return Some(truncate_name(t));
         }
@@ -598,7 +770,7 @@ fn compute_accessible_name(node: NodeRef<'_>, dom: &Dom) -> Option<String> {
 }
 
 fn truncate_name(mut s: String) -> String {
-    const MAX_LEN: usize = 100;
+    const MAX_LEN: usize = MAX_NAME_LEN;
     if s.chars().count() > MAX_LEN {
         let cut = s
             .char_indices()
@@ -611,13 +783,13 @@ fn truncate_name(mut s: String) -> String {
     s
 }
 
-fn synthesize_selector(node: NodeRef<'_>, dom: &Dom) -> String {
+fn synthesize_selector(node: NodeRef<'_>, cx: &Cx<'_>) -> String {
     let tag = node.tag_name().unwrap_or("");
 
     // 1. Unique ID
     if let Some(id) = node.attr("id") {
         let id = id.trim();
-        if !id.is_empty() && is_unique_id(dom, id) {
+        if !id.is_empty() && cx.unique(Key::Id(id)) {
             if is_clean_css_ident(id) {
                 return format!("#{id}");
             } else {
@@ -633,7 +805,7 @@ fn synthesize_selector(node: NodeRef<'_>, dom: &Dom) -> String {
     for test_attr in &["data-testid", "data-test-id"] {
         if let Some(tid) = node.attr(test_attr) {
             let tid = tid.trim();
-            if !tid.is_empty() && is_unique_attr(dom, test_attr, tid) {
+            if !tid.is_empty() && cx.unique(Key::Attr(test_attr, tid)) {
                 let mut out = format!("[{test_attr}=\"");
                 escape_css_attr_val(&mut out, tid);
                 out.push_str("\"]");
@@ -645,7 +817,7 @@ fn synthesize_selector(node: NodeRef<'_>, dom: &Dom) -> String {
     // 3. Unique name attribute (e.g. input[name="q"])
     if let Some(name) = node.attr("name") {
         let name = name.trim();
-        if !name.is_empty() && is_unique_tag_attr(dom, tag, "name", name) {
+        if !name.is_empty() && cx.unique(Key::TagAttr(tag, "name", name)) {
             let mut out = format!("{tag}[name=\"");
             escape_css_attr_val(&mut out, name);
             out.push_str("\"]");
@@ -658,7 +830,7 @@ fn synthesize_selector(node: NodeRef<'_>, dom: &Dom) -> String {
         && let Some(ty) = node.attr("type")
     {
         let ty = ty.trim();
-        if matches!(ty, "search" | "submit" | "reset") && is_unique_tag_attr(dom, tag, "type", ty) {
+        if matches!(ty, "search" | "submit" | "reset") && cx.unique(Key::TagAttr(tag, "type", ty)) {
             return format!("{tag}[type=\"{ty}\"]");
         }
     }
@@ -667,10 +839,10 @@ fn synthesize_selector(node: NodeRef<'_>, dom: &Dom) -> String {
     if let Some(cls) = node.attr("class") {
         for c in cls.split(is_space).filter(|s| !s.is_empty()) {
             if is_clean_css_ident(c) {
-                if is_unique_class(dom, c) {
+                if cx.unique(Key::Class(c)) {
                     return format!(".{c}");
                 }
-                if is_unique_tag_class(dom, tag, c) {
+                if cx.unique(Key::TagClass(tag, c)) {
                     return format!("{tag}.{c}");
                 }
             }
@@ -678,19 +850,26 @@ fn synthesize_selector(node: NodeRef<'_>, dom: &Dom) -> String {
     }
 
     // 6. Structural hierarchy path
-    build_path_selector(node, dom)
+    build_path_selector(node, cx)
 }
 
-fn build_path_selector(node: NodeRef<'_>, dom: &Dom) -> String {
-    let mut segments = Vec::new();
+/// One step of a path selector, from the element up.
+enum Step<'a> {
+    Id(&'a str),
+    Tag(&'a str),
+    Nth(&'a str, u32),
+}
+
+fn build_path_selector(node: NodeRef<'_>, cx: &Cx<'_>) -> String {
+    let mut steps = Vec::new();
     let mut cur = Some(node);
 
     while let Some(el) = cur {
         let tag = el.tag_name().unwrap_or("");
         if tag.is_empty() || tag == "html" || tag == "body" {
             // Stop at root containers
-            if segments.is_empty() {
-                segments.push(tag.to_string());
+            if steps.is_empty() {
+                steps.push(Step::Tag(tag));
             }
             break;
         }
@@ -698,103 +877,44 @@ fn build_path_selector(node: NodeRef<'_>, dom: &Dom) -> String {
         // If this ancestor has a clean unique ID, stop path here
         if let Some(id) = el.attr("id") {
             let id = id.trim();
-            if is_clean_css_ident(id) && is_unique_id(dom, id) {
-                segments.push(format!("#{id}"));
+            if is_clean_css_ident(id) && cx.unique(Key::Id(id)) {
+                steps.push(Step::Id(id));
                 break;
             }
         }
 
-        // Count index among same-tag siblings under parent
-        let mut index = 1;
-        let mut same_tag_count = 0;
-        if let Some(parent) = el.parent() {
-            for sibling in parent.child_elements() {
-                if sibling.tag_name() == el.tag_name() {
-                    same_tag_count += 1;
-                    if sibling.id() == el.id() {
-                        index = same_tag_count;
-                    }
-                }
-            }
-        }
+        // Position among same-tag siblings under the parent
+        let (index, same_tag_count) = cx.siblings.get(el.id().index()).copied().unwrap_or((1, 0));
 
-        let segment = if same_tag_count > 1 {
-            format!("{tag}:nth-of-type({index})")
+        steps.push(if same_tag_count > 1 {
+            Step::Nth(tag, index)
         } else {
-            tag.to_string()
-        };
-
-        segments.push(segment);
+            Step::Tag(tag)
+        });
         cur = el.parent();
     }
 
-    segments.reverse();
-    segments.join(" > ")
-}
-
-fn is_unique_id(dom: &Dom, id: &str) -> bool {
-    let mut count = 0;
-    for n in dom.nodes() {
-        if n.attr("id") == Some(id) {
-            count += 1;
-            if count > 1 {
-                return false;
+    // The path can be as long as the tree is deep: write it in one string.
+    let mut out = String::new();
+    for (i, step) in steps.iter().rev().enumerate() {
+        if i > 0 {
+            out.push_str(" > ");
+        }
+        match *step {
+            Step::Id(id) => {
+                out.push('#');
+                out.push_str(id);
+            }
+            Step::Tag(tag) => out.push_str(tag),
+            Step::Nth(tag, index) => {
+                out.push_str(tag);
+                out.push_str(":nth-of-type(");
+                push_usize(&mut out, index as usize);
+                out.push(')');
             }
         }
     }
-    count == 1
-}
-
-fn is_unique_attr(dom: &Dom, attr: &str, val: &str) -> bool {
-    let mut count = 0;
-    for n in dom.nodes() {
-        if n.attr(attr) == Some(val) {
-            count += 1;
-            if count > 1 {
-                return false;
-            }
-        }
-    }
-    count == 1
-}
-
-fn is_unique_tag_attr(dom: &Dom, tag: &str, attr: &str, val: &str) -> bool {
-    let mut count = 0;
-    for n in dom.nodes() {
-        if n.tag_name() == Some(tag) && n.attr(attr) == Some(val) {
-            count += 1;
-            if count > 1 {
-                return false;
-            }
-        }
-    }
-    count == 1
-}
-
-fn is_unique_class(dom: &Dom, class: &str) -> bool {
-    let mut count = 0;
-    for n in dom.nodes() {
-        if n.has_class(class) {
-            count += 1;
-            if count > 1 {
-                return false;
-            }
-        }
-    }
-    count == 1
-}
-
-fn is_unique_tag_class(dom: &Dom, tag: &str, class: &str) -> bool {
-    let mut count = 0;
-    for n in dom.nodes() {
-        if n.tag_name() == Some(tag) && n.has_class(class) {
-            count += 1;
-            if count > 1 {
-                return false;
-            }
-        }
-    }
-    count == 1
+    out
 }
 
 fn is_clean_css_ident(s: &str) -> bool {
@@ -869,3 +989,8 @@ fn write_str(out: &mut String, s: &str) {
     }
     out.push('"');
 }
+
+#[cfg(test)]
+mod oracle;
+#[cfg(test)]
+mod tests;
