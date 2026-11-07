@@ -36,7 +36,7 @@ use crate::error::{ErrorKind, ParseError};
 use crate::node::{AttrRange, NodeId, RawKind, Span, SrcRange};
 use crate::tags::{self, Tag};
 use crate::token::{AttrValue, Token};
-use crate::tokenizer::{Hints, Tokenizer};
+use crate::tokenizer::Tokenizer;
 use crate::tree::Dom;
 
 /// Parse `src` into a best-effort [`Dom`]. Never panics; diagnostics land in
@@ -46,7 +46,7 @@ pub(crate) fn parse_document(src: &str) -> Dom {
     let mut builder = TreeBuilder::new(DomSink::new(src.len()), src);
     while let Some((tok, pos)) = tk.next_token() {
         let end = tk.offset();
-        builder.token(tok, tk.hints(), tk.attrs(), pos, end);
+        builder.token(tok, tk.tag(), tk.attrs(), pos, end);
     }
     builder.finish(src.len(), &mut tk.errors);
     let mut dom = builder.sink.dom;
@@ -66,10 +66,9 @@ pub(crate) trait Sink<'a> {
 
     /// One attribute of the start tag about to be reported by
     /// [`Sink::start`], as written: the name not yet lower-cased, the value
-    /// not yet entity-decoded (`clean`: known to hold no `&`, nothing to
-    /// decode). Returns the first problem decoding met, at a byte offset into
-    /// `value` (see [`crate::entities::decode_into`]).
-    fn attr(&mut self, name: &'a str, value: &'a str, clean: bool) -> Option<Problem>;
+    /// not yet entity-decoded. Returns the first problem decoding met, at a
+    /// byte offset into `value` (see [`crate::entities::decode_into`]).
+    fn attr(&mut self, name: &'a str, value: &'a str) -> Option<Problem>;
 
     /// An element starts, inside `parent` (`None`: at the top level). Its
     /// `attrs` attributes were just passed to [`Sink::attr`].
@@ -88,15 +87,13 @@ pub(crate) trait Sink<'a> {
     /// self-closing start tag).
     fn end(&mut self, open: Self::Open, start: usize, end: usize, implied: bool);
 
-    /// Character data, entity-decoded if `decode` (`clean`: known to hold no
-    /// `&`, nothing to decode). Returns the first problem decoding met, at a
-    /// byte offset into `text`.
+    /// Character data, entity-decoded if `decode`. Returns the first problem
+    /// decoding met, at a byte offset into `text`.
     fn text(
         &mut self,
         parent: Option<&Self::Open>,
         text: &'a str,
         decode: bool,
-        clean: bool,
         start: usize,
         end: usize,
     ) -> Option<Problem>;
@@ -142,14 +139,14 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
         (offset.checked_add(s.len())? <= self.src.len()).then_some(offset)
     }
 
-    /// Feed one token that spans `pos..end`, with what the tokenizer noticed
-    /// about it (see [`Tokenizer::hints`]). The attributes of a start tag come
-    /// separately (see [`Tokenizer::attrs`]).
+    /// Feed one token that spans `pos..end`. A start or end tag's `tag` is its
+    /// name classified (see [`Tokenizer::tag`]); the attributes of a start tag
+    /// come separately (see [`Tokenizer::attrs`]).
     #[inline]
     pub(crate) fn token(
         &mut self,
         tok: Token<'a>,
-        hints: Hints,
+        tag: Tag,
         attrs: &[(&'a str, AttrValue<'a>)],
         pos: usize,
         end: usize,
@@ -159,12 +156,12 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
         match tok {
             Token::StartTag {
                 name, self_closing, ..
-            } => self.start_tag(name, hints, attrs, self_closing, pos, end),
-            Token::EndTag { name } => self.end_tag(name, hints.tag, pos, end),
-            Token::Text(t) => self.text(t, hints.text_clean, pos, end, skip_lf),
+            } => self.start_tag(name, tag, attrs, self_closing, pos, end),
+            Token::EndTag { name } => self.end_tag(name, tag, pos, end),
+            Token::Text(t) => self.text(t, pos, end, skip_lf),
             Token::Cdata(c) => {
                 if !c.is_empty() {
-                    self.sink.text(self.open.top(), c, false, false, pos, end);
+                    self.sink.text(self.open.top(), c, false, pos, end);
                 }
             }
             Token::Comment(c) => self.sink.comment(self.open.top(), c, pos, end),
@@ -201,13 +198,12 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
     fn start_tag(
         &mut self,
         name: &'a str,
-        hints: Hints,
+        tag: Tag,
         attrs: &[(&'a str, AttrValue<'a>)],
         self_closing: bool,
         pos: usize,
         end: usize,
     ) {
-        let tag = hints.tag;
         // A known tag's lower-case name is a static string: no scan for upper
         // case, no allocation.
         let (mut lname, mut tag) = match tag {
@@ -246,9 +242,9 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
             self.error(pos, ErrorKind::ImplicitlyClosed);
         }
 
-        for (i, &(k, v)) in attrs.iter().enumerate() {
+        for &(k, v) in attrs {
             let value = v.as_str();
-            if let Some((at, kind)) = self.sink.attr(k, value, hints.attr_clean(i)) {
+            if let Some((at, kind)) = self.sink.attr(k, value) {
                 // At the `&`; the tag's start if the value can't be located.
                 let at = self.source_offset(value).map_or(pos, |offset| offset + at);
                 self.error(at, kind);
@@ -270,7 +266,7 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
     fn end_tag(&mut self, name: &'a str, tag: Tag, pos: usize, end: usize) {
         if tag == Tag::BR {
             // Browsers read `</br>` as `<br>`.
-            self.start_tag("br", Self::just(Tag::BR), &[], false, pos, end);
+            self.start_tag("br", Tag::BR, &[], false, pos, end);
             return;
         }
         if tag.is_void() {
@@ -308,23 +304,14 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
                 if tag == Tag::P {
                     // A `</p>` with no `<p>` open: browsers insert an empty
                     // one (`<p><hr></p>` has two paragraphs).
-                    self.start_tag("p", Self::just(Tag::P), &[], false, pos, pos);
+                    self.start_tag("p", Tag::P, &[], false, pos, pos);
                     self.pop(pos, end, false);
                 }
             }
         }
     }
 
-    /// The hints of a tag the builder makes up (`</br>` is a `<br>`).
-    fn just(tag: Tag) -> Hints {
-        Hints {
-            tag,
-            text_clean: false,
-            attrs_clean: 0,
-        }
-    }
-
-    fn text(&mut self, t: &'a str, clean: bool, mut pos: usize, end: usize, skip_lf: bool) {
+    fn text(&mut self, t: &'a str, mut pos: usize, end: usize, skip_lf: bool) {
         // Browsers drop one newline right after `<pre>`, `<listing>` and
         // `<textarea>` (the serializer writes one back where the content
         // starts with one).
@@ -351,7 +338,7 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
             self.error(pos, ErrorKind::ImplicitlyClosed);
         }
         // A text token's string starts at the token.
-        if let Some((at, kind)) = self.sink.text(self.open.top(), t, !raw, clean, pos, end) {
+        if let Some((at, kind)) = self.sink.text(self.open.top(), t, !raw, pos, end) {
             self.error(pos + at, kind);
         }
     }
@@ -400,9 +387,9 @@ impl<'a> Sink<'a> for DomSink {
     }
 
     #[inline]
-    fn attr(&mut self, name: &'a str, value: &'a str, clean: bool) -> Option<Problem> {
+    fn attr(&mut self, name: &'a str, value: &'a str) -> Option<Problem> {
         let key = self.dom.intern_lower(name);
-        let (value, unknown) = self.dom.intern_decoded(value, true, clean);
+        let (value, unknown) = self.dom.intern_decoded(value, true);
         self.dom.attrs.push((key, value));
         unknown
     }
@@ -449,12 +436,11 @@ impl<'a> Sink<'a> for DomSink {
         parent: Option<&(NodeId, Span)>,
         text: &'a str,
         decode: bool,
-        clean: bool,
         start: usize,
         end: usize,
     ) -> Option<Problem> {
         let (span, unknown) = if decode {
-            self.dom.intern_decoded(text, false, clean)
+            self.dom.intern_decoded(text, false)
         } else {
             (self.dom.intern(text), None)
         };
@@ -605,29 +591,19 @@ impl<O> OpenElements<O> {
     /// closes: by [`tags::p_search`] with `p`, else by [`tags::search`];
     /// looking at the [`MAX_END_TAG_SEARCH`] innermost elements.
     fn closed_by(&self, opening: Tag, p: bool) -> Option<usize> {
-        if p {
-            self.scan_closed_by(self.open_p, |open| tags::p_search(opening, open))
+        let (search, open): (tags::SearchFn, usize) = if p {
+            (tags::p_search, self.open_p)
         } else if opening.is_nested() {
-            self.scan_closed_by(self.open_nested, |open| tags::search(opening, open))
+            (tags::search, self.open_nested)
         } else {
-            self.scan_closed_by(self.open_items, |open| tags::search(opening, open))
-        }
-    }
-
-    /// [`OpenElements::closed_by`] for one `search`: nothing to find while
-    /// `open` (how many elements it could close are open) is zero.
-    #[inline(always)]
-    fn scan_closed_by(
-        &self,
-        open: usize,
-        search: impl Fn(Tag) -> Option<tags::Search>,
-    ) -> Option<usize> {
+            (tags::search, self.open_items)
+        };
         if open == 0 {
             return None;
         }
         let inner = self.stack.len().saturating_sub(MAX_END_TAG_SEARCH);
         for i in (inner..self.stack.len()).rev() {
-            match search(self.stack.get(i)?.1)? {
+            match search(opening, self.stack.get(i)?.1)? {
                 tags::Search::Closes => return Some(i),
                 tags::Search::Stops => return None,
                 tags::Search::Continue => {}
@@ -737,7 +713,7 @@ mod tests {
         let mut builder = TreeBuilder::new(DomSink::new(src.len()), src);
         while let Some((tok, pos)) = tk.next_token() {
             let end = tk.offset();
-            builder.token(tok, tk.hints(), tk.attrs(), pos, end);
+            builder.token(tok, tk.tag(), tk.attrs(), pos, end);
         }
         builder.open.foreign_scans.get()
     }
