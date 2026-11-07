@@ -240,6 +240,62 @@ fn ordered_lists() {
 }
 
 #[test]
+fn a_nested_ordered_list_not_starting_at_1_follows_a_blank_line() {
+    // An ordered list can only interrupt a paragraph when it starts at 1, so
+    // anything else after the item's text would be swallowed into it.
+    for (html, want) in [
+        (
+            "<ul><li>Item<ol start=5><li>five</li><li>six</li></ol></li></ul>",
+            "- Item\n\n  5. five\n  6. six",
+        ),
+        (
+            "<ul><li>Item<ol start=0><li>zero</li></ol></li></ul>",
+            "- Item\n\n  0. zero",
+        ),
+        (
+            "<ol><li>One<ol start=3><li>three</li></ol></li></ol>",
+            "1. One\n\n   3. three",
+        ),
+        (
+            "<ul><li>Item<ol reversed><li>a</li><li>b</li><li>c</li></ol></li></ul>",
+            "- Item\n\n  3. a\n  2. b\n  1. c",
+        ),
+        (
+            "<ol><li>One<ol reversed><li>a</li><li>b</li></ol></li></ol>",
+            "1. One\n\n   2. a\n   1. b",
+        ),
+        // The first item's own number counts.
+        (
+            "<ul><li>Item<ol><li value=7>a</li></ol></li></ul>",
+            "- Item\n\n  7. a",
+        ),
+        (
+            "<ul><li>Item<ol start=7><li value=1>a</li></ol></li></ul>",
+            "- Item\n  1. a",
+        ),
+        // Starting at 1 (the default), or a bullet list, stays tight.
+        (
+            "<ul><li>Item<ol><li>a</li></ol></li></ul>",
+            "- Item\n  1. a",
+        ),
+        (
+            "<ul><li>Item<ol start=1><li>a</li></ol></li></ul>",
+            "- Item\n  1. a",
+        ),
+        (
+            "<ol start=5><li>Item<ul><li>a</li></ul></li></ol>",
+            "5. Item\n   - a",
+        ),
+        (
+            "<ol reversed><li>Item<ol reversed><li>a</li></ol></li></ol>",
+            "1. Item\n   1. a",
+        ),
+    ] {
+        assert_eq!(md(html), want, "{html}");
+    }
+}
+
+#[test]
 fn list_item_values_and_reversed_lists() {
     // Numbers are what a browser shows (renderers only honour the first).
     assert_eq!(md("<ol><li>a<li value=7>b<li>c</ol>"), "1. a\n7. b\n8. c");

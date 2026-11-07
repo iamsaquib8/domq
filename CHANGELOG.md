@@ -13,6 +13,7 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ### Output changes
 
+- Markdown: an ordered list nested in a list item that does not start at 1 (`<ol start="5">`, `<ol reversed>` with more than one item, an item with `value`) follows a blank line ([#93](https://github.com/iamsaquib8/domq/issues/93)): `- Item\n\n  5. five`. Right after the item's text it was part of the item's paragraph (`<li>Item 5. five 6. six</li>`), since only a list starting at 1 can interrupt a paragraph.
 - CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
 
 ### Fixed
