@@ -19,20 +19,47 @@ Declarative extraction into dataclasses (:func:`extract`, :func:`extract_all`):
 Item(name='a')
 """
 
-from ._domq import Document, Element, __version__, parse
+from ._domq import (
+    Chunk,
+    Decoded,
+    Document,
+    Element,
+    Link,
+    Metadata,
+    OutlineNode,
+    PageOutline,
+    Resource,
+    Selector,
+    __version__,
+    decode,
+    parse,
+    resolve_srcset,
+    resolve_url,
+)
 from ._extract import Attr, ExtractError, Html, Markdown, OuterHtml, Select, extract, extract_all
 
 __all__ = [
     "Attr",
+    "Chunk",
+    "Decoded",
     "Document",
     "Element",
     "ExtractError",
     "Html",
+    "Link",
     "Markdown",
+    "Metadata",
     "OuterHtml",
+    "OutlineNode",
+    "PageOutline",
+    "Resource",
     "Select",
+    "Selector",
     "__version__",
+    "decode",
     "extract",
     "extract_all",
     "parse",
+    "resolve_srcset",
+    "resolve_url",
 ]

@@ -4,6 +4,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 use core::ops::Range;
+use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::error::ParseError;
 use crate::node::{AttrRange, Node, NodeId, NodeKind, RawKind, Span, SrcRange};
@@ -35,9 +36,56 @@ pub struct Dom {
     /// and [`Dom::nodes`] is a plain scan of the arena.
     pub(crate) reordered: bool,
     pub(crate) errors: Vec<ParseError>,
+    pub(crate) has_noscript: bool,
+    /// What [`serialize::noscript_is_content`](crate::serialize) found, once a
+    /// reader has asked since the last edit that could change it.
+    noscript: NoscriptCache,
+}
+
+/// The cached answer of [`crate::serialize::noscript_is_content`]: `UNKNOWN`
+/// (it is "dirty") until a reader computes it, then false or true. Parsing
+/// and every edit leave it unknown; the first reader after that computes it
+/// in one pass. It is an atomic so that readers, which only hold `&Dom`, can
+/// store it and `Dom` stays `Send + Sync`: the answer depends only on the
+/// tree, which `&mut self` edits alone change, so concurrent readers compute
+/// and store the same value.
+#[derive(Default)]
+struct NoscriptCache(AtomicU8);
+
+impl NoscriptCache {
+    const UNKNOWN: u8 = 0;
+}
+
+impl Clone for NoscriptCache {
+    fn clone(&self) -> Self {
+        NoscriptCache(AtomicU8::new(self.0.load(Ordering::Relaxed)))
+    }
 }
 
 impl Dom {
+    /// Whether this document's `<noscript>` elements hold its content (see
+    /// [`crate::serialize::noscript_is_content`]), computed on first use.
+    pub(crate) fn noscript_is_content(&self) -> bool {
+        if !self.has_noscript {
+            return false;
+        }
+        match self.noscript.0.load(Ordering::Relaxed) {
+            NoscriptCache::UNKNOWN => {
+                let content = crate::serialize::noscript_is_content(self);
+                self.noscript
+                    .0
+                    .store(1 + u8::from(content), Ordering::Relaxed);
+                content
+            }
+            known => known > 1,
+        }
+    }
+
+    /// Forget the cached answer: an edit may have changed it.
+    pub(crate) fn invalidate_noscript(&mut self) {
+        *self.noscript.0.get_mut() = NoscriptCache::UNKNOWN;
+    }
+
     pub(crate) fn with_capacity(src_len: usize) -> Self {
         Dom {
             // About one node per 13 bytes of dense markup, so the arena rarely
@@ -52,6 +100,8 @@ impl Dom {
             last_root: None,
             reordered: false,
             errors: Vec::new(),
+            has_noscript: false,
+            noscript: NoscriptCache::default(),
         }
     }
 

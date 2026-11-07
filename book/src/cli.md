@@ -59,6 +59,14 @@ OUTPUT (default: matching elements as HTML, one per line; -t, -m, -j, --jsonl,
     -w, --ignore-whitespace     Skip matches whose output is empty or whitespace
                                 (with --links, links without text)
         --exit-status           Exit 1 when nothing matches
+        --markdown-links <STYLE>
+                                Link style for -m/--markdown: inline (default),
+                                reference or footer
+        --markdown-images <STYLE>
+                                Image style for -m/--markdown: keep (default),
+                                alt or drop
+        --markdown-drop-data-uris
+                                Strip data: URIs in Markdown links and images
 
 EXTRACT:
     -e, --extract <NAME=SPEC>   Print a JSON object with a NAME key (repeat it);
@@ -73,6 +81,8 @@ EXTRACT:
                                 links inside its matches
         --meta                  Print the page metadata (title, description,
                                 canonical, OpenGraph, JSON-LD, ...) as JSON
+        --outline               Print a semantic outline of landmarks, headings,
+                                controls and forms (with --json / --jsonl)
 
 DOCUMENT:
     -r, --remove-nodes <SEL>    Remove nodes matching SEL before selecting
@@ -181,7 +191,12 @@ TOOLS (all read-only):
     links       links with resolved URLs and text
     metadata    title, description, OpenGraph, JSON-LD, feeds, ...
     tables      tables as rows of cells
+    outline     landmarks, headings and controls, with selectors to act on
     lint        accessibility and markup problems, with positions
+
+    markdown and chunks also take links (inline, reference, footer), images
+    (keep, alt, drop) and drop_data_uris, like the --markdown-* flags. Chunks
+    always write links inline: each chunk must stand alone.
 
 SETUP:
     Claude Code:   claude mcp add domq -- domq mcp

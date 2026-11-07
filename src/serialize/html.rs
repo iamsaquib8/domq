@@ -18,6 +18,7 @@ use alloc::vec::Vec;
 use crate::node::NodeKind;
 use crate::scan;
 use crate::tags;
+use crate::tokenizer::ScriptData;
 use crate::tree::{Dom, NodeRef};
 
 impl Dom {
@@ -157,6 +158,16 @@ fn write_open<'a>(
             if tags::is_void(tag) {
                 return; // void elements have no children and no end tag
             }
+            // The parser drops one newline after these start tags, so one
+            // that starts the content needs another to survive a round-trip.
+            if matches!(tag, "pre" | "listing" | "textarea")
+                && node
+                    .first_child()
+                    .and_then(|c| c.text())
+                    .is_some_and(|t| t.starts_with('\n') || t.starts_with("\r\n"))
+            {
+                out.push('\n');
+            }
             stack.push(if text_only.is_none() && tags::ends_only_at_end_tag(tag) {
                 *text_only = Some(out.len());
                 Step::CloseTextOnly(tag)
@@ -210,15 +221,41 @@ fn neutralize_end_tags(out: &mut String, start: usize, tag: &str) {
     let mut fixed = String::new();
     let mut copied = 0;
     let mut at = 0;
-    while let Some(i) = bytes.get(at..).and_then(|b| scan::find(b"</", b)) {
-        at += i + 2;
-        if let (Some(name), Some(b)) = (bytes.get(at..at + tag.len()), bytes.get(at + tag.len()))
-            && name.eq_ignore_ascii_case(tag.as_bytes())
-            && matches!(b, b'\t' | b'\n' | b'\x0c' | b'\r' | b' ' | b'/' | b'>')
-        {
-            fixed.push_str(content.get(copied..at - 1).unwrap_or_default());
+    if tag.eq_ignore_ascii_case("script") {
+        // The tokenizer's script data states decide which `</script` end the
+        // element: one inside `<!--<script>…` does not.
+        let mut scan = ScriptData::default();
+        loop {
+            let i = scan.find_end(bytes, at, false);
+            if i >= bytes.len() {
+                break;
+            }
+            fixed.push_str(content.get(copied..=i).unwrap_or_default());
             fixed.push('\\');
-            copied = at - 1;
+            copied = i + 1;
+            at = i + 2;
+        }
+        // Content that stays in a double escaped part to its end (a script
+        // cut off by the end of the input, or edited text) would swallow the
+        // element's own end tag: write the `<script` that opened it as
+        // `<\script`.
+        if let Some(i) = scan.double_escaped_at().filter(|&i| i >= copied) {
+            fixed.push_str(content.get(copied..=i).unwrap_or_default());
+            fixed.push('\\');
+            copied = i + 1;
+        }
+    } else {
+        while let Some(i) = bytes.get(at..).and_then(|b| scan::find(b"</", b)) {
+            at += i + 2;
+            if let (Some(name), Some(b)) =
+                (bytes.get(at..at + tag.len()), bytes.get(at + tag.len()))
+                && name.eq_ignore_ascii_case(tag.as_bytes())
+                && matches!(b, b'\t' | b'\n' | b'\x0c' | b'\r' | b' ' | b'/' | b'>')
+            {
+                fixed.push_str(content.get(copied..at - 1).unwrap_or_default());
+                fixed.push('\\');
+                copied = at - 1;
+            }
         }
     }
     if copied > 0 {

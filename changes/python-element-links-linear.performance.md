@@ -1,0 +1,1 @@
+Python: `Element.links()` and `Element.resources()` walk only the element's subtree (and release the GIL for a large one) instead of the whole document, so calling them once per card is linear in the page, not quadratic: 1,000 cards take about 2 ms instead of about 12 s on a loaded machine ([#114](https://github.com/iamsaquib8/domq/issues/114)).

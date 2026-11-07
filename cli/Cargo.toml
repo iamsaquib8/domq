@@ -1,6 +1,6 @@
 [package]
 name = "domq-cli"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.88"
 authors = ["iamsaquib8 <saquibulhassan6@gmail.com>"]
@@ -17,7 +17,7 @@ name = "domq"
 path = "src/main.rs"
 
 [dependencies]
-domq = { path = "..", version = "0.5", default-features = false, features = ["json", "query", "markdown", "std"] }
+domq = { path = "..", version = "0.6", default-features = false, features = ["json", "query", "markdown", "std"] }
 
 # `cargo binstall domq-cli` downloads the prebuilt binary from the GitHub
 # release (built by .github/workflows/release.yml) instead of compiling.

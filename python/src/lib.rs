@@ -11,13 +11,17 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::{Mutex, PoisonError};
 
-use domq::{Dom, NodeId, NodeRef, Selector};
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use domq::{
+    Dom, Metadata as CoreMetadata, NodeId, NodeRef, OutlineNode as CoreOutlineNode,
+    PageOutline as CorePageOutline, Selector as CoreSelector,
+};
+use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::marker::Ungil;
 use pyo3::prelude::*;
-use pyo3::pybacked::PyBackedStr;
-use pyo3::types::{PyDict, PyString};
+use pyo3::pybacked::{PyBackedBytes, PyBackedStr};
+use pyo3::types::{PyBytes, PyDict, PyIterator, PyList, PyString};
 
 /// Inputs at least this many bytes long are parsed with the GIL released.
 const DETACH_BYTES: usize = 16 * 1024;
@@ -30,58 +34,840 @@ fn maybe_detach<T: Ungil>(py: Python<'_>, large: bool, f: impl Ungil + FnOnce() 
 }
 
 /// Parse a selector, raising `ValueError` (with the position) when it is invalid.
-fn compile(selector: &str) -> PyResult<Selector> {
-    Selector::parse(selector)
+fn compile(selector: &str) -> PyResult<CoreSelector> {
+    CoreSelector::parse(selector)
         .map_err(|e| PyValueError::new_err(format!("invalid selector '{selector}': {e}")))
+}
+
+enum SelectorInput<'a> {
+    Compiled(CoreSelector),
+    Precompiled(pyo3::PyRef<'a, Selector>),
+}
+
+impl SelectorInput<'_> {
+    fn as_selector(&self) -> &CoreSelector {
+        match self {
+            SelectorInput::Compiled(s) => s,
+            SelectorInput::Precompiled(p) => &p.inner,
+        }
+    }
+}
+
+fn to_selector<'a>(obj: &'a Bound<'_, PyAny>) -> PyResult<SelectorInput<'a>> {
+    if let Ok(s) = obj.cast::<PyString>() {
+        let text = s.to_str()?;
+        let compiled = compile(text)?;
+        Ok(SelectorInput::Compiled(compiled))
+    } else if let Ok(sel) = obj.cast::<Selector>() {
+        Ok(SelectorInput::Precompiled(sel.borrow()))
+    } else {
+        Err(PyTypeError::new_err(
+            "selector must be str or domq.Selector",
+        ))
+    }
 }
 
 /// Parse an HTML document (or fragment) into a `Document`.
 ///
+/// Accepts a `str` or raw `bytes`. When `bytes` are passed, character encoding
+/// is detected automatically via the WHATWG encoding-sniffing algorithm (or
+/// overridden with `encoding`).
+///
 /// Never raises on malformed HTML: anything the parser had to recover from is
 /// listed in `Document.errors`. Large inputs are parsed with the GIL released.
 #[pyfunction]
-fn parse(py: Python<'_>, html: PyBackedStr) -> Document {
-    let dom = maybe_detach(py, html.len() >= DETACH_BYTES, || domq::parse(&html));
-    Document { dom }
+#[pyo3(signature = (source, encoding = None))]
+fn parse(py: Python<'_>, source: &Bound<'_, PyAny>, encoding: Option<&str>) -> PyResult<Document> {
+    if source.is_instance_of::<PyString>() {
+        let s = source.extract::<PyBackedStr>()?;
+        let dom = maybe_detach(py, s.len() >= DETACH_BYTES, move || domq::parse(&s));
+        Ok(Document::new(dom))
+    } else if source.is_instance_of::<PyBytes>() {
+        let b = source.extract::<PyBackedBytes>()?;
+        let encoding_owned = encoding.map(str::to_owned);
+        let dom = maybe_detach(py, b.len() >= DETACH_BYTES, move || {
+            domq::parse_bytes_with(&b, encoding_owned.as_deref())
+        });
+        Ok(Document::new(dom))
+    } else {
+        Err(PyTypeError::new_err("source must be str or bytes"))
+    }
+}
+
+/// The result of [`decode`].
+#[pyclass(frozen, module = "domq")]
+struct Decoded {
+    text: String,
+    encoding: String,
+    warning: Option<String>,
+}
+
+#[pymethods]
+impl Decoded {
+    /// The decoded text.
+    #[getter]
+    fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The encoding detected or chosen.
+    #[getter]
+    fn encoding(&self) -> &str {
+        &self.encoding
+    }
+
+    /// Any warning produced during decoding (e.g. unknown or unsupported charset).
+    #[getter]
+    fn warning(&self) -> Option<&str> {
+        self.warning.as_deref()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<Decoded encoding={:?} warning={:?}>",
+            self.encoding, self.warning
+        )
+    }
+
+    fn __str__(&self) -> &str {
+        &self.text
+    }
+}
+
+/// Decode raw HTML bytes into a string, using WHATWG encoding sniffing.
+#[pyfunction]
+#[pyo3(signature = (bytes, encoding = None))]
+fn decode(py: Python<'_>, bytes: PyBackedBytes, encoding: Option<&str>) -> Decoded {
+    let encoding_owned = encoding.map(str::to_owned);
+    let decoded = maybe_detach(py, bytes.len() >= DETACH_BYTES, move || {
+        domq::decode_with(&bytes, encoding_owned.as_deref())
+    });
+    Decoded {
+        text: decoded.text,
+        encoding: decoded.encoding.name().to_string(),
+        warning: decoded.warning,
+    }
+}
+
+/// Resolve `relative` against `base`, following RFC 3986 §5.2.
+#[pyfunction]
+fn resolve_url(base: &str, relative: &str) -> String {
+    domq::resolve_url(base, relative)
+}
+
+/// Resolve URLs in a `srcset` attribute string against `base`.
+#[pyfunction]
+fn resolve_srcset(base: &str, srcset: &str) -> String {
+    domq::resolve_srcset(base, srcset)
+}
+
+/// A precompiled CSS selector for fast repeated queries.
+#[pyclass(frozen, module = "domq")]
+struct Selector {
+    inner: CoreSelector,
+    query: String,
+}
+
+#[pymethods]
+impl Selector {
+    #[new]
+    fn new(query: &str) -> PyResult<Self> {
+        let inner = compile(query)?;
+        Ok(Selector {
+            inner,
+            query: query.to_string(),
+        })
+    }
+
+    /// The CSS selector query string.
+    #[getter]
+    fn query(&self) -> &str {
+        &self.query
+    }
+
+    /// Whether `element` matches this selector.
+    fn matches(&self, element: &Bound<'_, Element>) -> PyResult<bool> {
+        let node = element.get().node()?;
+        Ok(self.inner.matches(node))
+    }
+
+    /// The nearest element matching this selector, starting with `element`
+    /// itself and walking up its ancestors.
+    fn closest(&self, py: Python<'_>, element: &Bound<'_, Element>) -> PyResult<Option<Element>> {
+        let el = element.get();
+        let node = el.node()?;
+        Ok(node.closest(&self.inner).map(|n| el.wrap(py, n)))
+    }
+
+    fn __str__(&self) -> &str {
+        &self.query
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Selector({})", py_repr(&self.query))
+    }
+}
+
+/// Page metadata from `<title>`, `<meta>`, `<link>`, OpenGraph, Twitter Cards,
+/// and JSON-LD blocks.
+#[pyclass(frozen, module = "domq")]
+struct Metadata {
+    inner: CoreMetadata,
+}
+
+#[pymethods]
+impl Metadata {
+    /// `<title>` (not one inside `<svg>`), else `og:title`, else `twitter:title`.
+    #[getter]
+    fn title(&self) -> Option<&str> {
+        self.inner.title.as_deref()
+    }
+
+    /// `<meta name="description">`, else `og:description`, else `twitter:description`.
+    #[getter]
+    fn description(&self) -> Option<&str> {
+        self.inner.description.as_deref()
+    }
+
+    /// `<link rel="canonical" href="...">`, else `og:url`.
+    #[getter]
+    fn canonical(&self) -> Option<&str> {
+        self.inner.canonical.as_deref()
+    }
+
+    /// The `lang` attribute of `<html>`, else `<meta http-equiv="content-language">`.
+    #[getter]
+    fn lang(&self) -> Option<&str> {
+        self.inner.lang.as_deref()
+    }
+
+    /// Alias for `lang`.
+    #[getter]
+    fn language(&self) -> Option<&str> {
+        self.inner.lang.as_deref()
+    }
+
+    /// `og:site_name`, else `<meta name="application-name">`.
+    #[getter]
+    fn site_name(&self) -> Option<&str> {
+        self.inner.site_name.as_deref()
+    }
+
+    /// `og:image`, else `twitter:image`, else `<link rel="image_src">`.
+    #[getter]
+    fn image(&self) -> Option<&str> {
+        self.inner.image.as_deref()
+    }
+
+    /// `<meta name="author">`, else `article:author`, else `<a rel="author">`.
+    #[getter]
+    fn author(&self) -> Option<&str> {
+        self.inner.author.as_deref()
+    }
+
+    /// Publication date as written (e.g. ISO 8601).
+    #[getter]
+    fn published(&self) -> Option<&str> {
+        self.inner.published.as_deref()
+    }
+
+    /// `<meta name="keywords">` split on commas, else `article:tag` values.
+    #[getter]
+    fn keywords(&self) -> Vec<String> {
+        self.inner.keywords.clone()
+    }
+
+    /// OpenGraph `<meta property=... content=...>` pairs in document order.
+    #[getter]
+    fn og(&self) -> Vec<(String, String)> {
+        self.inner.og.clone()
+    }
+
+    /// Twitter-card `<meta name="twitter:..." content=...>` pairs in document order.
+    #[getter]
+    fn twitter(&self) -> Vec<(String, String)> {
+        self.inner.twitter.clone()
+    }
+
+    /// Raw JSON-LD strings from `<script type="application/ld+json">` blocks.
+    #[getter]
+    fn json_ld(&self) -> Vec<String> {
+        self.inner.json_ld.clone()
+    }
+
+    /// Feed URLs from `<link rel="alternate">` (RSS, Atom, JSON Feed).
+    #[getter]
+    fn feeds(&self) -> Vec<String> {
+        self.inner.feeds.clone()
+    }
+
+    /// Convert metadata fields into a dictionary.
+    fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = PyDict::new(py);
+        dict.set_item("title", &self.inner.title)?;
+        dict.set_item("description", &self.inner.description)?;
+        dict.set_item("canonical", &self.inner.canonical)?;
+        dict.set_item("lang", &self.inner.lang)?;
+        dict.set_item("language", &self.inner.lang)?;
+        dict.set_item("site_name", &self.inner.site_name)?;
+        dict.set_item("image", &self.inner.image)?;
+        dict.set_item("author", &self.inner.author)?;
+        dict.set_item("published", &self.inner.published)?;
+        dict.set_item("keywords", &self.inner.keywords)?;
+        dict.set_item("og", &self.inner.og)?;
+        dict.set_item("twitter", &self.inner.twitter)?;
+        dict.set_item("json_ld", &self.inner.json_ld)?;
+        dict.set_item("feeds", &self.inner.feeds)?;
+        Ok(dict)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<Metadata title={} canonical={} lang={}>",
+            py_opt_repr(self.inner.title.as_deref()),
+            py_opt_repr(self.inner.canonical.as_deref()),
+            py_opt_repr(self.inner.lang.as_deref())
+        )
+    }
+}
+
+/// A hyperlink (`<a href>` or `<area href>`) with its resolved URL and readable text.
+#[pyclass(frozen, module = "domq")]
+struct Link {
+    element: Py<Element>,
+    url: String,
+    text: String,
+    href: String,
+}
+
+#[pymethods]
+impl Link {
+    /// The resolved URL.
+    #[getter]
+    fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// The readable text of the link, with whitespace collapsed.
+    #[getter]
+    fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The raw `href` attribute as written in the markup.
+    #[getter]
+    fn href(&self) -> &str {
+        &self.href
+    }
+
+    /// The link element (`<a>` or `<area>`).
+    #[getter]
+    fn element<'py>(&self, py: Python<'py>) -> Py<Element> {
+        self.element.clone_ref(py)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<Link url={} text={}>",
+            py_repr(&self.url),
+            py_repr(&self.text)
+        )
+    }
+
+    fn __str__(&self) -> &str {
+        &self.url
+    }
+}
+
+/// An embedded resource URL (`<img src>`, `<link href>`, `<script src>`, etc.).
+#[pyclass(frozen, module = "domq")]
+struct Resource {
+    element: Py<Element>,
+    url: String,
+    attr: &'static str,
+    value: String,
+    tag: String,
+}
+
+#[pymethods]
+impl Resource {
+    /// The resolved resource URL.
+    #[getter]
+    fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// The attribute name (`"href"`, `"src"`, `"srcset"`, `"poster"`, or `"data"`).
+    #[getter]
+    fn attr(&self) -> &str {
+        self.attr
+    }
+
+    /// The raw attribute value as written before resolution.
+    #[getter]
+    fn value(&self) -> &str {
+        &self.value
+    }
+
+    /// The tag name of the element.
+    #[getter]
+    fn tag(&self) -> &str {
+        &self.tag
+    }
+
+    /// The element carrying the resource URL.
+    #[getter]
+    fn element<'py>(&self, py: Python<'py>) -> Py<Element> {
+        self.element.clone_ref(py)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<Resource tag={} attr={} url={}>",
+            py_repr(&self.tag),
+            py_repr(self.attr),
+            py_repr(&self.url)
+        )
+    }
+
+    fn __str__(&self) -> &str {
+        &self.url
+    }
+}
+
+/// A piece of a document's Markdown split at headings under a character budget.
+#[pyclass(frozen, module = "domq")]
+struct Chunk {
+    markdown: String,
+    heading_path: Vec<String>,
+}
+
+#[pymethods]
+impl Chunk {
+    /// The Markdown text of this chunk.
+    #[getter]
+    fn markdown(&self) -> &str {
+        &self.markdown
+    }
+
+    /// Plain-text titles of the headings this chunk sits under, outermost first.
+    #[getter]
+    fn heading_path(&self) -> Vec<String> {
+        self.heading_path.clone()
+    }
+
+    /// The heading path joined with `" > "` for RAG context.
+    #[getter]
+    fn context(&self) -> String {
+        self.heading_path.join(" > ")
+    }
+
+    /// Byte size of the chunk Markdown.
+    #[getter]
+    fn byte_size(&self) -> usize {
+        self.markdown.len()
+    }
+
+    fn __len__(&self) -> usize {
+        self.markdown.len()
+    }
+
+    fn __str__(&self) -> &str {
+        &self.markdown
+    }
+
+    fn __repr__(&self) -> String {
+        let ctx = self.context();
+        if ctx.is_empty() {
+            format!("<Chunk len={}>", self.markdown.len())
+        } else {
+            format!(
+                "<Chunk context={} len={}>",
+                py_repr(&ctx),
+                self.markdown.len()
+            )
+        }
+    }
+}
+
+/// An element in the semantic page outline.
+#[pyclass(frozen, module = "domq")]
+struct OutlineNode {
+    inner: CoreOutlineNode,
+}
+
+#[pymethods]
+impl OutlineNode {
+    /// 1-based index reference assigned in outline order.
+    #[getter]
+    fn ref_id(&self) -> usize {
+        self.inner.ref_id
+    }
+
+    /// Semantic role (`"banner"`, `"navigation"`, `"heading"`, `"link"`, `"button"`, etc.).
+    #[getter]
+    fn role(&self) -> &str {
+        &self.inner.role
+    }
+
+    /// Accessible name, if available.
+    #[getter]
+    fn name(&self) -> Option<&str> {
+        self.inner.name.as_deref()
+    }
+
+    /// Heading level (1..=6) for `role == "heading"`.
+    #[getter]
+    fn level(&self) -> Option<u8> {
+        self.inner.level
+    }
+
+    /// Minimal, unique CSS selector resolving back to this element.
+    #[getter]
+    fn selector(&self) -> &str {
+        &self.inner.selector
+    }
+
+    /// Target URL for links (`href`), if present.
+    #[getter]
+    fn href(&self) -> Option<&str> {
+        self.inner.href.as_deref()
+    }
+
+    /// HTML tag name.
+    #[getter]
+    fn tag(&self) -> &str {
+        &self.inner.tag
+    }
+
+    /// Hierarchy depth in the outline (0 for top-level landmarks).
+    #[getter]
+    fn depth(&self) -> usize {
+        self.inner.depth
+    }
+
+    /// Byte range in the original HTML source, if known.
+    #[getter]
+    fn source_range(&self) -> Option<(usize, usize)> {
+        self.inner.source_range
+    }
+
+    /// Render this outline node as a JSON string.
+    fn to_json(&self) -> String {
+        self.inner.to_json()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<OutlineNode ref={} role={} name={} selector={}>",
+            self.inner.ref_id,
+            py_repr(&self.inner.role),
+            py_opt_repr(self.inner.name.as_deref()),
+            py_repr(&self.inner.selector)
+        )
+    }
+
+    fn __str__(&self) -> String {
+        self.inner.to_json()
+    }
+}
+
+/// Semantic page outline of landmarks, headings, interactive controls, and forms.
+#[pyclass(frozen, module = "domq")]
+struct PageOutline {
+    inner: CorePageOutline,
+}
+
+#[pymethods]
+impl PageOutline {
+    /// All outline nodes in document order.
+    #[getter]
+    fn nodes(&self) -> Vec<OutlineNode> {
+        self.inner
+            .nodes
+            .iter()
+            .cloned()
+            .map(|node| OutlineNode { inner: node })
+            .collect()
+    }
+
+    /// Render as a compact indented text outline for model prompts.
+    fn to_text(&self) -> String {
+        self.inner.to_text()
+    }
+
+    /// Render as a JSON array string.
+    fn to_json(&self) -> String {
+        self.inner.to_json()
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __getitem__(&self, index: isize) -> PyResult<OutlineNode> {
+        let len = self.inner.len() as isize;
+        let idx = if index < 0 { index + len } else { index };
+        if idx < 0 || idx >= len {
+            return Err(PyIndexError::new_err("index out of range"));
+        }
+        Ok(OutlineNode {
+            inner: self.inner.nodes[idx as usize].clone(),
+        })
+    }
+
+    fn __iter__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyIterator>> {
+        let py = slf.py();
+        let nodes: Vec<OutlineNode> = slf
+            .get()
+            .inner
+            .nodes
+            .iter()
+            .cloned()
+            .map(|inner| OutlineNode { inner })
+            .collect();
+        let list = PyList::new(py, nodes)?;
+        list.try_iter()
+    }
+
+    fn __str__(&self) -> String {
+        self.inner.to_text()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("<PageOutline nodes={}>", self.inner.len())
+    }
 }
 
 /// A parsed HTML document. Create one with `domq.parse(html)`.
 #[pyclass(frozen, module = "domq")]
 struct Document {
     dom: Dom,
+    /// The last `Dom::base_url` answer, with the argument it answered. Finding
+    /// the base scans the whole document when it has no `<base>`, so an
+    /// element loop calling `links()` with one `base_url` does it once.
+    base: Mutex<Option<(Option<String>, Option<String>)>>,
 }
 
 impl Document {
+    fn new(dom: Dom) -> Document {
+        Document {
+            dom,
+            base: Mutex::new(None),
+        }
+    }
+
     fn large(&self) -> bool {
         self.dom.len() >= DETACH_NODES
     }
+
+    /// `Dom::base_url(page_url)`, remembered for the next call with the same
+    /// `page_url`.
+    fn base_url(&self, page_url: Option<&str>) -> Option<String> {
+        let remembered = {
+            let guard = self.base.lock().unwrap_or_else(PoisonError::into_inner);
+            match &*guard {
+                Some((key, base)) if key.as_deref() == page_url => Some(base.clone()),
+                _ => None,
+            }
+        };
+        remembered.unwrap_or_else(|| {
+            let base = self.dom.base_url(page_url);
+            let mut guard = self.base.lock().unwrap_or_else(PoisonError::into_inner);
+            *guard = Some((page_url.map(str::to_owned), base.clone()));
+            base
+        })
+    }
+}
+
+fn parse_py_markdown_options(
+    links: Option<&str>,
+    images: Option<&str>,
+    drop_data_uris: bool,
+    base_url: Option<String>,
+) -> PyResult<domq::MarkdownOptions> {
+    let mut opts = domq::MarkdownOptions::default();
+    if let Some(l) = links {
+        opts.link_style = match l.to_ascii_lowercase().as_str() {
+            "inline" => domq::LinkStyle::Inline,
+            "reference" => domq::LinkStyle::Reference,
+            "footer" => domq::LinkStyle::Footer,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown links style {other:?}; expected 'inline', 'reference' or 'footer'"
+                )));
+            }
+        };
+    }
+    if let Some(img) = images {
+        opts.image_style = match img.to_ascii_lowercase().as_str() {
+            "keep" => domq::ImageStyle::Keep,
+            "alt" => domq::ImageStyle::AltOnly,
+            "drop" => domq::ImageStyle::Drop,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown images style {other:?}; expected 'keep', 'alt' or 'drop'"
+                )));
+            }
+        };
+    }
+    opts.drop_data_uris = drop_data_uris;
+    opts.base_url = base_url;
+    Ok(opts)
+}
+
+/// `s` as Python's `repr()` writes a `str`: single-quoted (double-quoted when
+/// it holds a `'` and no `"`), with backslashes, the quote and control
+/// characters escaped.
+fn py_repr(s: &str) -> String {
+    let quote = if s.contains('\'') && !s.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push(quote);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c == quote => {
+                out.push('\\');
+                out.push(c);
+            }
+            c if c.is_control() => out.push_str(&format!("\\x{:02x}", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out.push(quote);
+    out
+}
+
+/// [`py_repr`] of an optional string, `None` when absent.
+fn py_opt_repr(s: Option<&str>) -> String {
+    s.map_or_else(|| String::from("None"), py_repr)
 }
 
 #[pymethods]
 impl Document {
     /// Every element matching a CSS selector, in document order.
     ///
+    /// Accepts a CSS selector string or a precompiled `domq.Selector`.
     /// Raises `ValueError` if the selector is invalid or unsupported.
-    fn select(slf: &Bound<'_, Self>, selector: PyBackedStr) -> PyResult<Vec<Element>> {
-        let sel = compile(&selector)?;
+    fn select(slf: &Bound<'_, Self>, selector: &Bound<'_, PyAny>) -> PyResult<Vec<Element>> {
+        let sel = to_selector(selector)?;
         let doc = slf.get();
         Ok(doc
             .dom
-            .select(&sel)
+            .select(sel.as_selector())
             .map(|n| Element::new(slf, n.id()))
             .collect())
     }
 
     /// The first element matching a CSS selector, or `None`.
     ///
+    /// Accepts a CSS selector string or a precompiled `domq.Selector`.
     /// Raises `ValueError` if the selector is invalid or unsupported.
-    fn select_first(slf: &Bound<'_, Self>, selector: PyBackedStr) -> PyResult<Option<Element>> {
-        let sel = compile(&selector)?;
+    fn select_first(
+        slf: &Bound<'_, Self>,
+        selector: &Bound<'_, PyAny>,
+    ) -> PyResult<Option<Element>> {
+        let sel = to_selector(selector)?;
         Ok(slf
             .get()
             .dom
-            .select_first(&sel)
+            .select_first(sel.as_selector())
             .map(|n| Element::new(slf, n.id())))
+    }
+
+    /// The element holding the page's main content ("reader mode"), or `None`.
+    fn main_content(slf: &Bound<'_, Self>, py: Python<'_>) -> Option<Element> {
+        let doc = slf.get();
+        let target_id = maybe_detach(py, doc.large(), || doc.dom.main_content().map(|n| n.id()));
+        target_id.map(|id| Element::new(slf, id))
+    }
+
+    /// Page metadata: title, description, canonical URL, language, OpenGraph,
+    /// Twitter Cards, feeds, and JSON-LD blocks.
+    #[pyo3(signature = (base_url = None))]
+    fn metadata(&self, py: Python<'_>, base_url: Option<&str>) -> Metadata {
+        let base = self.dom.base_url(base_url);
+        let mut meta = maybe_detach(py, self.large(), || self.dom.metadata());
+        if let Some(b) = base.as_deref() {
+            if let Some(c) = meta.canonical.as_mut() {
+                *c = domq::resolve_url(b, c);
+            }
+            if let Some(img) = meta.image.as_mut() {
+                *img = domq::resolve_url(b, img);
+            }
+            for f in &mut meta.feeds {
+                *f = domq::resolve_url(b, f);
+            }
+        }
+        Metadata { inner: meta }
+    }
+
+    /// Every hyperlink (`<a href>` and `<area href>`) in document order.
+    #[pyo3(signature = (base_url = None))]
+    fn links(slf: &Bound<'_, Self>, py: Python<'_>, base_url: Option<&str>) -> PyResult<Vec<Link>> {
+        let doc = slf.get();
+        let raw = maybe_detach(py, doc.large(), || {
+            doc.dom
+                .links(base_url)
+                .into_iter()
+                .map(|l| (l.node.id(), l.url, l.text, l.href.to_string()))
+                .collect::<Vec<_>>()
+        });
+        raw.into_iter()
+            .map(|(id, url, text, href)| {
+                let element = Py::new(py, Element::new(slf, id))?;
+                Ok(Link {
+                    element,
+                    url,
+                    text,
+                    href,
+                })
+            })
+            .collect()
+    }
+
+    /// Every embedded resource URL in document order.
+    #[pyo3(signature = (base_url = None))]
+    fn resources(
+        slf: &Bound<'_, Self>,
+        py: Python<'_>,
+        base_url: Option<&str>,
+    ) -> PyResult<Vec<Resource>> {
+        let doc = slf.get();
+        let raw = maybe_detach(py, doc.large(), || {
+            doc.dom
+                .resources(base_url)
+                .into_iter()
+                .map(|r| {
+                    (
+                        r.node.id(),
+                        r.url,
+                        r.attr,
+                        r.value.to_string(),
+                        r.node.tag_name().unwrap_or("").to_string(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+        raw.into_iter()
+            .map(|(id, url, attr, value, tag)| {
+                let element = Py::new(py, Element::new(slf, id))?;
+                Ok(Resource {
+                    element,
+                    url,
+                    attr,
+                    value,
+                    tag,
+                })
+            })
+            .collect()
     }
 
     /// Readable plain text: no `<script>`/`<style>`/`<head>`, whitespace
@@ -92,8 +878,84 @@ impl Document {
 
     /// CommonMark + GFM Markdown (headings, lists, links, images, code
     /// blocks, tables, quotes) — handy for LLM prompts and RAG indexes.
-    fn to_markdown(&self, py: Python<'_>) -> String {
-        maybe_detach(py, self.large(), || self.dom.to_markdown())
+    #[pyo3(signature = (*, links = None, images = None, drop_data_uris = false, base_url = None))]
+    fn to_markdown(
+        &self,
+        py: Python<'_>,
+        links: Option<&str>,
+        images: Option<&str>,
+        drop_data_uris: bool,
+        base_url: Option<String>,
+    ) -> PyResult<String> {
+        let opts = parse_py_markdown_options(links, images, drop_data_uris, base_url)?;
+        Ok(maybe_detach(py, self.large(), || {
+            self.dom.to_markdown_with(&opts)
+        }))
+    }
+
+    /// CommonMark + GFM Markdown split at headings into chunks under `max_chars`.
+    ///
+    /// Links are always written inline, whatever `links` says, so that each chunk
+    /// stands alone.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (max_chars = None, *, links = None, images = None, drop_data_uris = false, base_url = None))]
+    fn to_markdown_chunks(
+        &self,
+        py: Python<'_>,
+        max_chars: Option<usize>,
+        links: Option<&str>,
+        images: Option<&str>,
+        drop_data_uris: bool,
+        base_url: Option<String>,
+    ) -> PyResult<Vec<Chunk>> {
+        let budget = max_chars.unwrap_or(1500);
+        let opts = parse_py_markdown_options(links, images, drop_data_uris, base_url)?;
+        let chunks = maybe_detach(py, self.large(), || {
+            self.dom.to_markdown_chunks_with(budget, &opts)
+        });
+        Ok(chunks
+            .into_iter()
+            .map(|c| Chunk {
+                markdown: c.markdown,
+                heading_path: c.heading_path,
+            })
+            .collect())
+    }
+
+    /// Extract rows of cell text for tables matching `selector` (default `"table"`).
+    #[pyo3(signature = (selector = "table"))]
+    fn tables(&self, py: Python<'_>, selector: &str) -> PyResult<Vec<Vec<Vec<String>>>> {
+        let sel = compile(selector)?;
+        Ok(maybe_detach(py, self.large(), || {
+            self.dom
+                .select(&sel)
+                .filter(|n| n.tag_name() == Some("table"))
+                .map(|t| t.table_rows())
+                .collect()
+        }))
+    }
+
+    /// Format matched tables as RFC 4180 CSV, separated by `\r\n`.
+    #[pyo3(signature = (selector = "table"))]
+    fn to_csv(&self, py: Python<'_>, selector: &str) -> PyResult<String> {
+        let sel = compile(selector)?;
+        Ok(maybe_detach(py, self.large(), || {
+            let tables: Vec<String> = self
+                .dom
+                .select(&sel)
+                .filter(|n| n.tag_name() == Some("table"))
+                .map(|t| t.table_rows())
+                .filter(|rows| !rows.is_empty())
+                .map(domq::to_csv)
+                .collect();
+            tables.join("\r\n")
+        }))
+    }
+
+    /// Extract a semantic page outline of landmarks, headings, interactive controls, and forms.
+    fn outline(&self, py: Python<'_>) -> PageOutline {
+        let outline = maybe_detach(py, self.large(), || self.dom.outline());
+        PageOutline { inner: outline }
     }
 
     /// The document re-serialized as HTML.
@@ -172,6 +1034,17 @@ impl Element {
         }
     }
 
+    /// Run `f` on this element's node, with the GIL released when the subtree
+    /// is large. The document is frozen, so nothing changes under `f`.
+    fn detached<T: Ungil>(
+        &self,
+        py: Python<'_>,
+        f: impl Send + FnOnce(NodeRef<'_>) -> T,
+    ) -> PyResult<T> {
+        let node = self.node()?;
+        Ok(maybe_detach(py, self.large(), move || f(node)))
+    }
+
     fn node(&self) -> PyResult<NodeRef<'_>> {
         // Ids come from the same (immutable) document, so this always succeeds.
         self.doc
@@ -185,6 +1058,16 @@ impl Element {
         Element {
             doc: self.doc.clone_ref(py),
             id: node.id(),
+        }
+    }
+
+    /// Whether this element's subtree is big enough to be worth releasing the
+    /// GIL for: its source is `DETACH_BYTES` long, or, for a node without
+    /// source, the document is large.
+    fn large(&self) -> bool {
+        match self.node().ok().and_then(|node| node.source_range()) {
+            Some(range) => range.len() >= DETACH_BYTES,
+            None => self.doc.get().large(),
         }
     }
 }
@@ -226,57 +1109,161 @@ impl Element {
 
     /// Readable text of this element (like `Document.to_text()`).
     #[getter]
-    fn text(&self) -> PyResult<String> {
-        Ok(self.node()?.to_text())
+    fn text(&self, py: Python<'_>) -> PyResult<String> {
+        self.detached(py, |node| node.to_text())
+    }
+
+    /// Readable plain text of this element: whitespace collapsed, a line per
+    /// block and a blank line between paragraphs (like `Document.to_text()`).
+    fn to_text(&self, py: Python<'_>) -> PyResult<String> {
+        self.text(py)
     }
 
     /// All descendant text concatenated, verbatim (DOM `textContent`).
     #[getter]
-    fn text_content(&self) -> PyResult<String> {
-        Ok(self.node()?.text_content())
+    fn text_content(&self, py: Python<'_>) -> PyResult<String> {
+        self.detached(py, |node| node.text_content())
     }
 
     /// This element as HTML, including its own tags (DOM `outerHTML`).
     #[getter]
-    fn html(&self) -> PyResult<String> {
-        Ok(self.node()?.outer_html())
+    fn html(&self, py: Python<'_>) -> PyResult<String> {
+        self.detached(py, |node| node.outer_html())
     }
 
     /// The HTML of this element's children (DOM `innerHTML`).
     #[getter]
-    fn inner_html(&self) -> PyResult<String> {
-        Ok(self.node()?.inner_html())
+    fn inner_html(&self, py: Python<'_>) -> PyResult<String> {
+        self.detached(py, |node| node.inner_html())
     }
 
     /// Descendants matching a CSS selector, in document order. As with the
     /// DOM's `querySelectorAll`, the selector is matched against the whole
     /// document; use `:scope` to anchor it here (`":scope > li"`).
-    fn select(&self, py: Python<'_>, selector: PyBackedStr) -> PyResult<Vec<Element>> {
-        let sel = compile(&selector)?;
+    fn select(&self, py: Python<'_>, selector: &Bound<'_, PyAny>) -> PyResult<Vec<Element>> {
+        let sel = to_selector(selector)?;
         Ok(self
             .node()?
-            .select(&sel)
+            .select(sel.as_selector())
             .map(|n| self.wrap(py, n))
             .collect())
     }
 
     /// The first descendant matching a CSS selector, or `None`.
-    fn select_first(&self, py: Python<'_>, selector: PyBackedStr) -> PyResult<Option<Element>> {
-        let sel = compile(&selector)?;
-        Ok(self.node()?.select_first(&sel).map(|n| self.wrap(py, n)))
+    fn select_first(
+        &self,
+        py: Python<'_>,
+        selector: &Bound<'_, PyAny>,
+    ) -> PyResult<Option<Element>> {
+        let sel = to_selector(selector)?;
+        Ok(self
+            .node()?
+            .select_first(sel.as_selector())
+            .map(|n| self.wrap(py, n)))
     }
 
     /// The nearest element matching `selector`, starting with this element
     /// itself and walking up its ancestors (DOM `Element.closest`).
-    fn closest(&self, py: Python<'_>, selector: PyBackedStr) -> PyResult<Option<Element>> {
-        let sel = compile(&selector)?;
-        Ok(self.node()?.closest(&sel).map(|n| self.wrap(py, n)))
+    fn closest(&self, py: Python<'_>, selector: &Bound<'_, PyAny>) -> PyResult<Option<Element>> {
+        let sel = to_selector(selector)?;
+        Ok(self
+            .node()?
+            .closest(sel.as_selector())
+            .map(|n| self.wrap(py, n)))
     }
 
     /// Whether this element matches a CSS selector (DOM `Element.matches`).
-    fn matches(&self, selector: PyBackedStr) -> PyResult<bool> {
-        let sel = compile(&selector)?;
-        Ok(self.node()?.matches(&sel))
+    fn matches(&self, selector: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let sel = to_selector(selector)?;
+        Ok(self.node()?.matches(sel.as_selector()))
+    }
+
+    /// If this element is a `<table>`, rows of cell text with colspan/rowspan expanded.
+    fn table_rows(&self, py: Python<'_>) -> PyResult<Vec<Vec<String>>> {
+        self.detached(py, |node| node.table_rows())
+    }
+
+    /// If this element is a `<table>`, its cell text formatted as RFC 4180 CSV.
+    fn to_csv(&self, py: Python<'_>) -> PyResult<String> {
+        self.detached(py, |node| {
+            let rows = node.table_rows();
+            if rows.is_empty() {
+                String::new()
+            } else {
+                domq::to_csv(rows)
+            }
+        })
+    }
+
+    /// Hyperlinks inside this element's subtree.
+    #[pyo3(signature = (base_url = None))]
+    fn links(&self, py: Python<'_>, base_url: Option<&str>) -> PyResult<Vec<Link>> {
+        let node = self.node()?;
+        let doc = self.doc.get();
+        let raw = maybe_detach(py, self.large(), || {
+            let base = doc.base_url(base_url);
+            node.links_resolved(base.as_deref())
+                .into_iter()
+                .map(|l| (l.node.id(), l.url, l.text, l.href.to_string()))
+                .collect::<Vec<_>>()
+        });
+        raw.into_iter()
+            .map(|(id, url, text, href)| {
+                let element = Py::new(
+                    py,
+                    Element {
+                        doc: self.doc.clone_ref(py),
+                        id,
+                    },
+                )?;
+                Ok(Link {
+                    element,
+                    url,
+                    text,
+                    href,
+                })
+            })
+            .collect()
+    }
+
+    /// Embedded resource URLs inside this element's subtree.
+    #[pyo3(signature = (base_url = None))]
+    fn resources(&self, py: Python<'_>, base_url: Option<&str>) -> PyResult<Vec<Resource>> {
+        let node = self.node()?;
+        let doc = self.doc.get();
+        let raw = maybe_detach(py, self.large(), || {
+            let base = doc.base_url(base_url);
+            node.resources_resolved(base.as_deref())
+                .into_iter()
+                .map(|r| {
+                    (
+                        r.node.id(),
+                        r.url,
+                        r.attr,
+                        r.value.to_string(),
+                        r.node.tag_name().unwrap_or("").to_string(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+        raw.into_iter()
+            .map(|(id, url, attr, value, tag)| {
+                let element = Py::new(
+                    py,
+                    Element {
+                        doc: self.doc.clone_ref(py),
+                        id,
+                    },
+                )?;
+                Ok(Resource {
+                    element,
+                    url,
+                    attr,
+                    value,
+                    tag,
+                })
+            })
+            .collect()
     }
 
     /// The parent element, or `None` for a top-level element.
@@ -306,17 +1293,58 @@ impl Element {
     }
 
     /// This element as Markdown.
-    fn to_markdown(&self) -> PyResult<String> {
-        Ok(self.node()?.to_markdown())
+    #[pyo3(signature = (*, links = None, images = None, drop_data_uris = false, base_url = None))]
+    fn to_markdown(
+        &self,
+        py: Python<'_>,
+        links: Option<&str>,
+        images: Option<&str>,
+        drop_data_uris: bool,
+        base_url: Option<String>,
+    ) -> PyResult<String> {
+        let opts = parse_py_markdown_options(links, images, drop_data_uris, base_url)?;
+        self.detached(py, |node| node.to_markdown_with(&opts))
+    }
+
+    /// CommonMark + GFM Markdown chunks for this element's subtree.
+    ///
+    /// Links are always written inline, whatever `links` says.
+    #[pyo3(signature = (max_chars = None, *, links = None, images = None, drop_data_uris = false, base_url = None))]
+    fn to_markdown_chunks(
+        &self,
+        py: Python<'_>,
+        max_chars: Option<usize>,
+        links: Option<&str>,
+        images: Option<&str>,
+        drop_data_uris: bool,
+        base_url: Option<String>,
+    ) -> PyResult<Vec<Chunk>> {
+        let budget = max_chars.unwrap_or(1500);
+        let opts = parse_py_markdown_options(links, images, drop_data_uris, base_url)?;
+        let chunks = self.detached(py, |node| node.to_markdown_chunks_with(budget, &opts))?;
+        Ok(chunks
+            .into_iter()
+            .map(|c| Chunk {
+                markdown: c.markdown,
+                heading_path: c.heading_path,
+            })
+            .collect())
+    }
+
+    /// Extract a semantic page outline for this element's subtree.
+    fn outline(&self, py: Python<'_>) -> PyResult<PageOutline> {
+        Ok(PageOutline {
+            inner: self.detached(py, |node| node.outline())?,
+        })
     }
 
     /// This element's subtree as a JSON string.
-    fn to_json(&self) -> PyResult<String> {
-        Ok(self.node()?.to_json())
+    fn to_json(&self, py: Python<'_>) -> PyResult<String> {
+        self.detached(py, |node| node.to_json())
     }
 
-    fn __str__(&self) -> PyResult<String> {
-        self.html()
+    fn __str__(&self, py: Python<'_>) -> PyResult<String> {
+        self.html(py)
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -355,7 +1383,10 @@ impl Element {
 #[pymodule(name = "_domq")]
 mod py_domq {
     #[pymodule_export]
-    use super::{Document, Element, parse};
+    use super::{
+        Chunk, Decoded, Document, Element, Link, Metadata, OutlineNode, PageOutline, Resource,
+        Selector, decode, parse, resolve_srcset, resolve_url,
+    };
 
     /// The package version.
     #[pymodule_export]

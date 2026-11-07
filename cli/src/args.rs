@@ -47,6 +47,14 @@ OUTPUT (default: matching elements as HTML, one per line; -t, -m, -j, --jsonl,
     -w, --ignore-whitespace     Skip matches whose output is empty or whitespace
                                 (with --links, links without text)
         --exit-status           Exit 1 when nothing matches
+        --markdown-links <STYLE>
+                                Link style for -m/--markdown: inline (default),
+                                reference or footer
+        --markdown-images <STYLE>
+                                Image style for -m/--markdown: keep (default),
+                                alt or drop
+        --markdown-drop-data-uris
+                                Strip data: URIs in Markdown links and images
 
 EXTRACT:
     -e, --extract <NAME=SPEC>   Print a JSON object with a NAME key (repeat it);
@@ -61,6 +69,8 @@ EXTRACT:
                                 links inside its matches
         --meta                  Print the page metadata (title, description,
                                 canonical, OpenGraph, JSON-LD, ...) as JSON
+        --outline               Print a semantic outline of landmarks, headings,
+                                controls and forms (with --json / --jsonl)
 
 DOCUMENT:
     -r, --remove-nodes <SEL>    Remove nodes matching SEL before selecting
@@ -112,7 +122,12 @@ TOOLS (all read-only):
     links       links with resolved URLs and text
     metadata    title, description, OpenGraph, JSON-LD, feeds, ...
     tables      tables as rows of cells
+    outline     landmarks, headings and controls, with selectors to act on
     lint        accessibility and markup problems, with positions
+
+    markdown and chunks also take links (inline, reference, footer), images
+    (keep, alt, drop) and drop_data_uris, like the --markdown-* flags. Chunks
+    always write links inline: each chunk must stand alone.
 
 SETUP:
     Claude Code:   claude mcp add domq -- domq mcp
@@ -210,6 +225,7 @@ pub struct Options {
     pub extract: Vec<Field>,
     pub links: bool,
     pub meta: bool,
+    pub outline: bool,
     pub remove: Vec<String>,
     pub main: bool,
     pub base: Option<String>,
@@ -217,6 +233,35 @@ pub struct Options {
     pub input: Option<String>,
     pub output: Option<String>,
     pub encoding: Option<String>,
+    pub markdown_links: Option<String>,
+    pub markdown_images: Option<String>,
+    pub markdown_drop_data_uris: bool,
+}
+
+impl Options {
+    /// Build [`domq::MarkdownOptions`] from CLI flags.
+    pub fn markdown_options(&self) -> domq::MarkdownOptions {
+        let mut mo = domq::MarkdownOptions::default();
+        if let Some(links) = &self.markdown_links {
+            mo.link_style = match links.as_str() {
+                "reference" => domq::LinkStyle::Reference,
+                "footer" => domq::LinkStyle::Footer,
+                _ => domq::LinkStyle::Inline,
+            };
+        }
+        if let Some(images) = &self.markdown_images {
+            mo.image_style = match images.as_str() {
+                "alt" => domq::ImageStyle::AltOnly,
+                "drop" => domq::ImageStyle::Drop,
+                _ => domq::ImageStyle::Keep,
+            };
+        }
+        mo.drop_data_uris = self.markdown_drop_data_uris;
+        if let Some(base) = &self.base {
+            mo.base_url = Some(base.clone());
+        }
+        mo
+    }
 }
 
 /// `domq lint` options.
@@ -344,7 +389,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, ArgEr
     }
 
     opts.selector = selector.join(" ").trim().to_string();
-    validate(&opts)?;
+    validate(&mut opts)?;
     Ok(Command::Run(opts))
 }
 
@@ -377,7 +422,15 @@ fn parse_lint(mut args: impl Iterator<Item = String>) -> Result<Command, ArgErro
                     )));
                 }
             },
-            "--encoding" => opts.encoding = Some(value(inline)?),
+            "--encoding" => {
+                let enc = value(inline)?;
+                if domq::lookup_encoding(&enc).is_none() {
+                    return Err(ArgError::lint(format!(
+                        "unknown or unsupported encoding '{enc}' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
+                    )));
+                }
+                opts.encoding = Some(enc);
+            }
             "-" => opts.files.push(arg),
             _ if name.starts_with('-') => {
                 return Err(ArgError::lint(format!("unknown lint option '{arg}'")));
@@ -400,12 +453,27 @@ fn parse_mcp(mut args: impl Iterator<Item = String>) -> Result<Command, ArgError
 }
 
 /// Reject flag combinations that have no sensible meaning.
-fn validate(opts: &Options) -> Result<(), ArgError> {
+fn validate(opts: &mut Options) -> Result<(), ArgError> {
     let err = |msg: String| Err(ArgError::new(msg));
+    let markdown_option = [
+        (opts.markdown_links.is_some(), "--markdown-links"),
+        (opts.markdown_images.is_some(), "--markdown-images"),
+        (opts.markdown_drop_data_uris, "--markdown-drop-data-uris"),
+    ]
+    .into_iter()
+    .find_map(|(set, flag)| set.then_some(flag));
+    if let Some(flag) = markdown_option {
+        match opts.mode {
+            Mode::Html => opts.mode = Mode::Markdown,
+            Mode::Markdown => {}
+            mode => return err(format!("{flag} needs -m/--markdown (got {})", mode.flag())),
+        }
+    }
     let tasks: Vec<&str> = [
         (!opts.extract.is_empty(), "--extract"),
         (opts.links, "--links"),
         (opts.meta, "--meta"),
+        (opts.outline, "--outline"),
     ]
     .into_iter()
     .filter_map(|(on, name)| on.then_some(name))
@@ -419,8 +487,8 @@ fn validate(opts: &Options) -> Result<(), ArgError> {
         }
         let fits = match opts.mode {
             Mode::Html | Mode::Json | Mode::Jsonl => true,
-            // Links are text lines (`-t` is the default) and countable.
-            Mode::Text | Mode::Count => opts.links,
+            // Links and outline are text lines (`-t` is the default) and countable.
+            Mode::Text | Mode::Count => opts.links || opts.outline,
             Mode::Markdown | Mode::Csv => false,
         };
         if !fits {
@@ -458,6 +526,7 @@ enum Flag {
     Extract,
     Links,
     Meta,
+    Outline,
     Remove,
     Main,
     Base,
@@ -465,6 +534,9 @@ enum Flag {
     Filename,
     Output,
     Encoding,
+    MarkdownLinks,
+    MarkdownImages,
+    MarkdownDropDataUris,
     Help,
     Version,
 }
@@ -486,6 +558,7 @@ impl Flag {
             "extract" => Flag::Extract,
             "links" => Flag::Links,
             "meta" => Flag::Meta,
+            "outline" => Flag::Outline,
             "remove-nodes" | "remove" => Flag::Remove,
             "main" => Flag::Main,
             "base" => Flag::Base,
@@ -493,6 +566,9 @@ impl Flag {
             "filename" | "file" => Flag::Filename,
             "output" => Flag::Output,
             "encoding" => Flag::Encoding,
+            "markdown-links" => Flag::MarkdownLinks,
+            "markdown-images" => Flag::MarkdownImages,
+            "markdown-drop-data-uris" => Flag::MarkdownDropDataUris,
             "help" => Flag::Help,
             "version" => Flag::Version,
             _ => return None,
@@ -531,8 +607,22 @@ impl Flag {
                 | Flag::Filename
                 | Flag::Output
                 | Flag::Encoding
+                | Flag::MarkdownLinks
+                | Flag::MarkdownImages
         )
     }
+}
+
+/// Whether `url` is an absolute URL with a scheme and authority or path (`scheme://…`).
+pub(crate) fn is_absolute_url(url: &str) -> bool {
+    let url = url.trim();
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let mut chars = scheme.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        && !rest.trim().is_empty()
 }
 
 fn apply_value(opts: &mut Options, flag: Flag, value: String) -> Result<(), ArgError> {
@@ -549,10 +639,44 @@ fn apply_value(opts: &mut Options, flag: Flag, value: String) -> Result<(), ArgE
             opts.extract.push(field);
         }
         Flag::Remove => opts.remove.push(value),
-        Flag::Base => opts.base = Some(value),
+        Flag::Base => {
+            if !is_absolute_url(&value) {
+                return Err(ArgError::new(
+                    "--base must be an absolute URL (scheme://…)".into(),
+                ));
+            }
+            opts.base = Some(value);
+        }
         Flag::Filename => opts.input = Some(value),
         Flag::Output => opts.output = Some(value),
-        Flag::Encoding => opts.encoding = Some(value),
+        Flag::Encoding => {
+            if domq::lookup_encoding(&value).is_none() {
+                return Err(ArgError::new(format!(
+                    "unknown or unsupported encoding '{value}' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
+                )));
+            }
+            opts.encoding = Some(value);
+        }
+        Flag::MarkdownLinks => {
+            let val = value.to_ascii_lowercase();
+            if !matches!(val.as_str(), "inline" | "reference" | "footer") {
+                return Err(ArgError::new(format!(
+                    "invalid --markdown-links: {:?} (expected inline, reference or footer)",
+                    value
+                )));
+            }
+            opts.markdown_links = Some(val);
+        }
+        Flag::MarkdownImages => {
+            let val = value.to_ascii_lowercase();
+            if !matches!(val.as_str(), "keep" | "alt" | "drop") {
+                return Err(ArgError::new(format!(
+                    "invalid --markdown-images: {:?} (expected keep, alt or drop)",
+                    value
+                )));
+            }
+            opts.markdown_images = Some(val);
+        }
         _ => {}
     }
     Ok(())
@@ -567,6 +691,10 @@ fn apply_switch(opts: &mut Options, flag: Flag) -> Result<Option<Command>, ArgEr
         Flag::Jsonl => Mode::Jsonl,
         Flag::Csv => Mode::Csv,
         Flag::Count => Mode::Count,
+        Flag::MarkdownDropDataUris => {
+            opts.markdown_drop_data_uris = true;
+            return Ok(None);
+        }
         Flag::Pretty => {
             opts.pretty = true;
             return Ok(None);
@@ -589,6 +717,10 @@ fn apply_switch(opts: &mut Options, flag: Flag) -> Result<Option<Command>, ArgEr
         }
         Flag::Meta => {
             opts.meta = true;
+            return Ok(None);
+        }
+        Flag::Outline => {
+            opts.outline = true;
             return Ok(None);
         }
         Flag::Main => {
@@ -672,6 +804,38 @@ mod tests {
         assert!(parse([OsString::from("--nope")]).is_err());
         assert!(parse([OsString::from("-a")]).is_err());
         assert!(parse([OsString::from("--text=1")]).is_err());
+        let err = try_run(&["--encoding", "bogus"]).unwrap_err();
+        assert_eq!(
+            err.message,
+            "unknown or unsupported encoding 'bogus' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
+        );
+        assert_eq!(err.help, "domq --help");
+        for bad in ["not a url", "/relative/", "htps://", "https://"] {
+            let err = try_run(&["--base", bad]).unwrap_err();
+            assert_eq!(err.message, "--base must be an absolute URL (scheme://…)");
+            assert_eq!(err.help, "domq --help");
+
+            let err = try_run(&["-b", bad]).unwrap_err();
+            assert_eq!(err.message, "--base must be an absolute URL (scheme://…)");
+            assert_eq!(err.help, "domq --help");
+        }
+    }
+
+    #[test]
+    fn absolute_urls() {
+        assert!(is_absolute_url("https://example.com"));
+        assert!(is_absolute_url("https://example.com/foo/bar"));
+        assert!(is_absolute_url("http://localhost:3000"));
+        assert!(is_absolute_url("file:///etc/hosts"));
+        assert!(is_absolute_url("custom+scheme://host"));
+        assert!(!is_absolute_url("/relative/"));
+        assert!(!is_absolute_url("not a url"));
+        assert!(!is_absolute_url("htps://"));
+        assert!(!is_absolute_url("https://"));
+        assert!(!is_absolute_url("https://   "));
+        assert!(!is_absolute_url("://foo"));
+        assert!(!is_absolute_url("1http://foo"));
+        assert!(!is_absolute_url("mailto:user@example.com"));
     }
 
     #[test]
@@ -728,12 +892,19 @@ mod tests {
             &["lint", "--format", "xml"][..],
             &["lint", "-x"],
             &["lint", "--encoding"],
+            &["lint", "--encoding", "bogus"],
         ] {
             assert_eq!(
                 try_run(bad).map(|_| ()).map_err(|e| e.help),
                 Err("domq lint --help")
             );
         }
+        let err = try_run(&["lint", "--encoding", "bogus"]).unwrap_err();
+        assert_eq!(
+            err.message,
+            "unknown or unsupported encoding 'bogus' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
+        );
+        assert_eq!(err.help, "domq lint --help");
         // Only the first argument names the subcommand.
         assert_eq!(run(&["-c", "lint"]).selector, "lint");
     }

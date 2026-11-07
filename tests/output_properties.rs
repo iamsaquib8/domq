@@ -41,8 +41,12 @@ fn html_soup() -> impl Strategy<Value = String> {
         "<del>",
         "<a href='/x y'>",
         "<a href=u>",
+        "<a href='ééé'>",
+        "<a href='data:text/plain,hi'>",
         "</a>",
         "<img src=i alt='a*'>",
+        "<img src='ééé' alt='m'>",
+        "<img src='data:image/png;base64,xx' alt='d'>",
         "<br>",
         "<hr>",
         "<h1>",
@@ -61,6 +65,12 @@ fn html_soup() -> impl Strategy<Value = String> {
         "&nbsp;",
         "text",
         "1.",
+        "1",
+        ".",
+        ")",
+        "<span>",
+        "</span>",
+        "<!---->",
         " ",
         "\n",
         "\t",
@@ -100,6 +110,23 @@ fn serialize_all(dom: &Dom) -> (String, String) {
         let _ = node.to_text();
         #[cfg(feature = "markdown")]
         let _ = node.to_markdown();
+    }
+    #[cfg(feature = "markdown")]
+    {
+        use domq::{ImageStyle, LinkStyle, MarkdownOptions};
+        // Exercise option combinations, including drop_data_uris on non-ASCII
+        // and data: URLs from the soup generator (#88).
+        for drop in [false, true] {
+            for link in [LinkStyle::Inline, LinkStyle::Reference, LinkStyle::Footer] {
+                for image in [ImageStyle::Keep, ImageStyle::AltOnly, ImageStyle::Drop] {
+                    let opts = MarkdownOptions::default()
+                        .drop_data_uris(drop)
+                        .link_style(link)
+                        .image_style(image);
+                    let _ = dom.to_markdown_with(&opts);
+                }
+            }
+        }
     }
     #[cfg(feature = "markdown")]
     let md = dom.to_markdown();
@@ -224,10 +251,11 @@ fn deep_mixed_structures() {
 
 #[test]
 fn deep_inline_marks() {
-    let dom = parse(&nested("<b><i><a href=/x><span>", "x"));
+    // (Not `<a>`: a link inside a link closes it, so they would not nest.)
+    let dom = parse(&nested("<b><i><del><span>", "x"));
     assert_eq!(dom.to_text(), "x");
     #[cfg(feature = "markdown")]
-    assert_eq!(dom.to_markdown(), "***[x](/x)***");
+    assert_eq!(dom.to_markdown(), "***~~x~~***");
 }
 
 #[test]
@@ -256,4 +284,30 @@ fn wide_ragged_tables_stay_linear() {
     let md = parse(&html).to_markdown();
     assert!(md.len() < 20 * n * 3, "{} bytes", md.len());
     assert_eq!(md.matches('r').count(), n);
+}
+
+#[cfg(feature = "markdown")]
+#[test]
+fn many_distinct_links_stay_linear_in_every_link_style() {
+    // `Reference` and `Footer` look each link up among the definitions so far;
+    // a linear search made 40,000 distinct links take seconds (#95). The
+    // ceiling is far above a slow machine and far below the quadratic cost.
+    use domq::{LinkStyle, MarkdownOptions};
+    let n = 40_000;
+    let html: String = (0..n)
+        .map(|i| format!("<p><a href=\"https://example.com/articles/page-{i}\">link {i}</a></p>"))
+        .collect();
+    let dom = parse(&html);
+    for style in [LinkStyle::Reference, LinkStyle::Footer] {
+        let start = std::time::Instant::now();
+        let md = dom.to_markdown_with(&MarkdownOptions::new().link_style(style));
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "{style:?} took {:?}",
+            start.elapsed()
+        );
+        // Every link got its own definition, numbered in order of use.
+        assert!(md.contains(&format!("{n}")), "{style:?}");
+        assert_eq!(md.matches("https://example.com/articles/page-").count(), n);
+    }
 }

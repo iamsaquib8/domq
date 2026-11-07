@@ -31,6 +31,11 @@ fuzz_target!(|data: &[u8]| {
         }
     }
 
+    // Metadata, and its JSON-LD reader on the input as the content of a block.
+    let _ = dom.metadata();
+    let ld = format!("<script type=application/ld+json>{s}</script>");
+    let _ = domq::parse(&ld).metadata();
+
     // The selector engine must also be panic-free on arbitrary trees.
     let _ = dom.select("div > p.x, #id [data-y=z]").count();
 });

@@ -5,8 +5,11 @@ actually report and ask for. It is organised around **the people who reach for
 a tiny HTML parser** and the job each of them is trying to finish, not around
 parser internals. Issues and PRs that fit the principles below are very welcome.
 
-**Where we are:** 0.5.0 shipped on 2026-10-25 on crates.io, npm, PyPI,
-Homebrew and the release page. It added `domq mcp` (an MCP server for agents),
+**Where we are:** 0.6.0 shipped on 2026-11-03 on crates.io, npm, PyPI,
+Homebrew and the release page. It brought reader mode, metadata, links, chunks
+and tables to Python and JavaScript, configurable Markdown (`MarkdownOptions`:
+link style, images, `data:` URIs, base URL) and a page outline for agents
+(`Dom::outline`, `domq --outline`, MCP `outline`). 0.5.0 added `domq mcp`,
 browser-style recovery for the common mis-nesting cases, and published numbers:
 **61.8%** of the 1,959 html5lib tree-construction tests match a browser's tree
 structure (0 panics), and reader mode scores **0.898 F1 on the AEB article
@@ -30,7 +33,7 @@ The [guide](https://iamsaquib8.github.io/domq/docs/) covers every surface. See
    chunks for a prompt or an index, at the edge, on a server or as an agent's
    MCP tool, without a headless browser.
 4. **JavaScript on the edge** `js` — Workers, Deno, Bun, the browser: no DOM
-   needed, and a ~43 KB gzipped wasm module.
+   needed, and a ~57 KB gzipped wasm module (~78 KB with extraction).
 5. **Python scraping and data code** `py` — where most scraping and RAG code
    lives; a fast, never-panicking parser with selectors and Markdown.
 6. **People who ship HTML** `ship` — docs sites, static-site generators, email
@@ -50,20 +53,24 @@ gap (— means no plan yet).
 |---|---|---|---|---|---|
 | CSS selectors | ✅ | ✅ | ✅ | ✅ | ✅ |
 | readable text, Markdown | ✅ | ✅ `-t` `-m` | ✅ | ✅ | ✅ |
-| Markdown / text options (link style, images, frontmatter, LLM preset) | 0.7 | 0.7 | 0.7 | 0.7 | 0.7 |
-| reader mode (main content) | ✅ | ✅ `--main` | ✅ | 0.6 | 0.6 |
+| Markdown options (link style, images, `data:` URIs, base URL) | ✅ | ✅ `--markdown-*` | ✅ | 0.7 | ✅ |
+| more Markdown / text options (frontmatter, LLM preset, styles) | 0.7 | 0.7 | 0.7 | 0.7 | 0.7 |
+| reader mode (main content) | ✅ | ✅ `--main` | ✅ | ✅ | ✅ |
 | article metadata and a confidence score | 0.7 | 0.7 | 0.7 | 0.7 | 0.7 |
-| RAG chunks | ✅ | 0.7 `--chunks` | ✅ | 0.6 | 0.6 |
-| metadata (OpenGraph, JSON-LD, …) | ✅ | ✅ `--meta` | ✅ | 0.6 | 0.6 |
-| links and resources | ✅ | ✅ `--links` | ✅ | 0.6 | 0.6 |
-| tables, CSV | ✅ | ✅ `--csv` | ✅ | 0.6 | 0.6 |
-| declarative extraction | ✅ derive | ✅ `-e` | ✅ | 0.6 | ✅ dataclasses |
-| bytes in, encoding detection | 0.6 | ✅ | — | 0.6 | 0.6 |
-| page outline for agents (roles, names, refs) | 0.8 | 0.8 | 0.8 | 0.8 | 0.8 |
-| editing | ✅ | `-r` only | — | 0.11 | 0.11 |
-| streaming events | ✅ | 0.11 `--stream` | — | 0.11 | 0.11 |
-| accessibility and markup lint | 0.10 | ✅ | ✅ | 0.10 | 0.10 |
+| RAG chunks | ✅ | 0.7 `--chunks` | ✅ | ✅ | ✅ |
+| metadata (OpenGraph, JSON-LD, …) | ✅ | ✅ `--meta` | ✅ | ✅ | ✅ |
+| links and resources | ✅ | ✅ `--links` | ✅ | ✅ | ✅ |
+| tables, CSV | ✅ | ✅ `--csv` | ✅ | ✅ | ✅ |
+| declarative extraction | ✅ derive | ✅ `-e` | ✅ | 0.7 | ✅ dataclasses |
+| bytes in, encoding detection | 0.7 | ✅ | — | 0.7 | 0.7 |
+| page outline for agents (roles, names, refs) | ✅ | ✅ `--outline` | ✅ | 0.7 | ✅ |
+| editing | ✅ | `-r` only | — | 0.10 | 0.10 |
+| streaming events | ✅ | 0.10 `--stream` | — | 0.10 | 0.10 |
+| accessibility and markup lint | 0.9 | ✅ | ✅ | 0.9 | 0.9 |
 | parse errors with positions | ✅ | via lint | via lint | ✅ | ✅ |
+
+In JavaScript, reader mode, chunks, metadata, links and tables come from the
+`domq-wasm/extract` entry; plain `domq-wasm` is the smaller core without them.
 
 ## Principles
 
@@ -86,7 +93,8 @@ Numbers we hold ourselves to (✅ = enforced in CI):
 | budget | limit | today |
 |---|---|---|
 | runtime dependencies, default build | **0** ✅ | 0 |
-| gzipped wasm, all bindings | **< 45 KiB** ✅ | ~42.9 KB (0.5.0: +1.5 KB browser-style recovery, +0.4 KB reader tuning) |
+| gzipped wasm, core (`domq-wasm`) | **< 60,000 bytes** ✅ (was a 45 KiB promise; see below) | 56,647 B (55.3 KiB) |
+| gzipped wasm, extract (`domq-wasm/extract`: the core plus extraction) | **< 80,000 bytes** ✅ (temporary) | 77,769 B (75.9 KiB) (0.6.0: 64.5 KB, +21.4 KB for reader mode, metadata, links, chunks, tables and Markdown options; since then bytes-in and tokenizer fixes) |
 | panics or hangs on any input (HTML, selectors, edits) | **none** ✅ proptest + fuzz | none known |
 | stack use on deeply nested input | **bounded** ✅ 100k-deep tests | bounded |
 | super-linear time on adversarial input | **none** — every fix gets a timing test | none known |
@@ -96,10 +104,21 @@ Numbers we hold ourselves to (✅ = enforced in CI):
 | HTML → Markdown time | to be published (0.9), against mdream and htmd on the same pages | not measured |
 | CLI binary size, wheel size | to be set (0.9) | ~0.9 MB CLI (Apple Silicon) |
 
-The wasm budget leaves little room for bringing reader mode, chunks and the
-data helpers to JavaScript (0.6). Rather than raise it, those may ship as a
-second, optional wasm module, so the core stays small for people who only
-select and convert.
+Bringing reader mode, chunks and the data helpers to JavaScript (0.6) took the
+single module from 43.1 KB to 64.5 KB, and the 0.7 correctness fixes, bytes-in
+decoding and JSON-LD added more. The 0.7 split ([#111](https://github.com/iamsaquib8/domq/issues/111))
+builds two modules from one crate: the **core**, which people who only select
+and convert import, and **extract**, the core plus the extraction helpers
+(`mainContent`, `metadata`, `links`, `resources`, `toMarkdownChunks`, `tables`,
+`toCsv`).
+
+The old "45 KiB" promise is **not** met: the core is 55.3 KiB, about 10 KiB
+over it, because it now also carries bytes-in decoding (`decode`, ~5.4 KB
+gzipped when it landed), configurable Markdown options and the script-data
+tokenizer states, which were not in 0.5's 43 KB. Extraction costs another
+~21 KB (77,769 B vs 56,647 B). The extract gate stays at a temporary 80,000
+bytes; the core gate (60,000 bytes) is the one to keep tight. Raise either on
+purpose, never by accident.
 
 ## Non-goals
 
@@ -137,7 +156,7 @@ In short:
 
 - **Where domq leads:** one zero-dependency, never-panicking core that does
   selectors, reader mode, Markdown, chunks, metadata, links, tables, lint and
-  MCP, on every surface, in ~43 KB of gzipped wasm; the only forgiving parser
+  MCP, on every surface, in ~57 KB of gzipped wasm (~78 KB with extraction); the only forgiving parser
   with a published conformance report; an MCP server with no network or file
   access; the maintained successor to htmlq and pup.
 - **Where it's behind:** reader-mode quality is measured only as agreement
@@ -151,8 +170,9 @@ In short:
   and Cloudflare's Markdown for Agents.
 
 The releases below are shaped by this: honest quality numbers first, then
-the bindings, then Markdown built for models, then what agents need to act
-on a page without a browser.
+the bindings (0.6), then correct trees and Markdown built for models (0.7),
+then drop-in compatibility and what agents need to act on a page without a
+browser (0.8).
 
 ## How releases are ordered
 
@@ -166,6 +186,49 @@ first issues. Every item is tagged with its size and with who it's for:
 - **S**: small, a contained change in one area.
 - **M**: medium, touches several areas or a binding.
 - **L**: large, new infrastructure, a new crate, or a research-style project.
+
+**Epics.** Every open issue is a sub-issue of exactly one epic, so progress
+shows on the epic itself. Each release has an epic and a milestone; the other
+epics are themes that cut across releases:
+
+| epic | what it holds |
+|---|---|
+| [#249](https://github.com/iamsaquib8/domq/issues/249) 0.7 · [#250](https://github.com/iamsaquib8/domq/issues/250) 0.8 · [#251](https://github.com/iamsaquib8/domq/issues/251) 0.9 · [#252](https://github.com/iamsaquib8/domq/issues/252) 0.10 · [#253](https://github.com/iamsaquib8/domq/issues/253) 0.11 · [#254](https://github.com/iamsaquib8/domq/issues/254) 1.0 | the release's roadmap items and their issues |
+| [#255](https://github.com/iamsaquib8/domq/issues/255) Next in line | committed, placed in 0.8–0.10 as room allows |
+| [#256](https://github.com/iamsaquib8/domq/issues/256) Agents, bindings and distribution | open 0.5.x and 0.6 items |
+| [#257](https://github.com/iamsaquib8/domq/issues/257) Bugs and performance traps | correctness and super-linear cases to clear by 0.7 |
+| [#258](https://github.com/iamsaquib8/domq/issues/258) Tests, CI and release engineering | fuzz targets, hardening, release automation |
+| [#259](https://github.com/iamsaquib8/domq/issues/259) Docs and the guide | README, guide, contributor docs |
+| [#260](https://github.com/iamsaquib8/domq/issues/260) Anytime | small items for whichever release is next |
+| [#261](https://github.com/iamsaquib8/domq/issues/261) Community | maintainers, review speed, adoption, credit |
+| [#262](https://github.com/iamsaquib8/domq/issues/262) Exploring | proposals not yet committed to a release |
+
+An issue not under an epic is a bug in this table's logic: open one.
+
+## Path to 1.0
+
+1.0 is the promise that what people script against stops breaking: the
+crate API, CLI flags and output formats, the MCP tools and their schemas, and
+the JavaScript and Python APIs. So the plan front-loads the breaking work and
+the evidence: features first (0.7–0.10), then one release that makes every
+remaining breaking change and publishes the comparisons (0.11), then release
+candidates.
+
+| release | theme | what it settles | target | tracking |
+|---|---|---|---|---|
+| 0.7 | Correct trees, Markdown built for models | the parser fixes real pages need, the wasm budget, Markdown that renders as written | Dec 2026 | [#249](https://github.com/iamsaquib8/domq/issues/249) · [milestone](https://github.com/iamsaquib8/domq/milestone/1) |
+| 0.8 | Drop-in, and agents that act on the page | BeautifulSoup / cheerio compatibility, `Dom::article()`, forms, selectors agents reuse | Jan 2027 | [#250](https://github.com/iamsaquib8/domq/issues/250) · [milestone](https://github.com/iamsaquib8/domq/milestone/2) |
+| 0.9 | Lint for teams | more rules, suppressions, SARIF, the linter in the library, a GitHub Action | Feb 2027 | [#251](https://github.com/iamsaquib8/domq/issues/251) · [milestone](https://github.com/iamsaquib8/domq/milestone/3) |
+| 0.10 | Huge documents and full trees | streaming selectors, a streaming rewriter, `domq diff`, editing in Python and JS | Apr 2027 | [#252](https://github.com/iamsaquib8/domq/issues/252) · [milestone](https://github.com/iamsaquib8/domq/milestone/4) |
+| 0.11 | Trust, compared, and the API frozen | every planned breaking change made, same-harness comparisons published, CI that catches API breaks | May 2027 | [#253](https://github.com/iamsaquib8/domq/issues/253) · [milestone](https://github.com/iamsaquib8/domq/milestone/5) |
+| 1.0-rc | Nothing new | release candidates on every registry; fuzzing, docs and the upgrade guide only | Jun 2027 | [#254](https://github.com/iamsaquib8/domq/issues/254) |
+| 1.0 | Stable | the criteria in [1.0](#10--stable) all hold | Q3 2027 | [#254](https://github.com/iamsaquib8/domq/issues/254) · [milestone](https://github.com/iamsaquib8/domq/milestone/6) |
+
+Targets are where we aim, not promises; 1.0 ships when its criteria hold.
+Two clocks start now because 1.0 waits on them: continuous fuzzing
+([#212](https://github.com/iamsaquib8/domq/issues/212); "months with no open crashers") and the output-stability policy
+holding across at least two minor releases. Anything that would break an API after 0.11 waits
+for 2.0, or ships as a new name next to the old one.
 
 ## Ongoing — Launch feedback and honest numbers
 
@@ -215,6 +278,8 @@ an `html` argument, so the agent re-types the whole page as output tokens:
 tens of thousands for an ordinary article, which is slower and costlier than
 reading the HTML. This release makes the MCP server cheap to use on real pages.
 
+**Tracking:** [#256](https://github.com/iamsaquib8/domq/issues/256) (carry-over epic).
+
 - [x] **L** `ai` `domq mcp`: an MCP server over stdio exposing select, text,
       Markdown, chunks, links, metadata, tables, extract and lint on HTML the
       agent provides (still no fetching). Speaks MCP 2026-07-28 and the
@@ -222,28 +287,28 @@ reading the HTML. This release makes the MCP server cheap to use on real pages.
 - [ ] **M** `ai` `domq mcp --allow-read DIR`: every tool accepts a `path`
       instead of `html`, restricted to files under DIR (no `..` or symlink
       escapes), off by default. Documented recipe: a fetch tool that saves the
-      page to disk, then domq on the file.
+      page to disk, then domq on the file. ([#44](https://github.com/iamsaquib8/domq/issues/44))
 - [ ] **S** `ai` Bounded responses on every tool: `max_chars` and an
       `offset` on `markdown` and `text` (returning `truncated` and
       `next_offset`, as the official fetch server's `max_length` /
       `start_index` do), a cursor for `chunks`, `select`, `links` and
       `tables`, and an `estimated_tokens` field, so one big page can't flood
-      the context window.
+      the context window. ([#33](https://github.com/iamsaquib8/domq/issues/33))
 - [ ] **S** `ai` `domq mcp` in the official MCP Registry (a `server.json`
-      published from the release workflow) and the MCP client directories.
+      published from the release workflow) and the MCP client directories. ([#165](https://github.com/iamsaquib8/domq/issues/165))
 - [ ] **M** `ai` `shell` Install with tools people already have: the native
       `domq` binary in a PyPI package and in npm packages with per-platform
       binaries (the ruff / biome model; names to be confirmed), so
       `uvx … mcp` and `npx -y … mcp` work in MCP client configs and shell users
-      get a one-line install on every OS.
+      get a one-line install on every OS. ([#181](https://github.com/iamsaquib8/domq/issues/181))
 - [ ] **S** `ai` Input budgets: `ParseOptions { max_input_bytes, max_nodes,
       max_depth }` with a `truncated` flag, and defaults in `domq mcp`, so one
       hostile page can't exhaust a server (Readability's `maxElemsToParse`,
-      lol_html's `MemorySettings`).
+      lol_html's `MemorySettings`). ([#182](https://github.com/iamsaquib8/domq/issues/182))
 - [ ] **S** `ai` Agent Skills and one-click installs: a `SKILL.md` that
       teaches Claude Code, Codex, Cursor and Gemini CLI to use the `domq` CLI
       directly (no MCP needed), and install links for MCP clients that support
-      them. xberg's html-to-markdown already ships skills.
+      them. xberg's html-to-markdown already ships skills. ([#183](https://github.com/iamsaquib8/domq/issues/183))
 
 ## 0.6 — "Where people are: Python and JavaScript"
 
@@ -252,208 +317,301 @@ today they exist only in Rust, the CLI and MCP. In Python, turbohtml and
 justhtml now pitch the same "replace readability + markdownify" story; in JS,
 defuddle and mdream. Bring everything to the bindings before anything else.
 
-- [ ] **M** `py` Python: `main_content()`, `metadata()`, `links()` /
+**Tracking:** [#256](https://github.com/iamsaquib8/domq/issues/256) (open items). Shipped in [0.6.0](#060--2026-11-03--where-people-are).
+
+- [x] **M** `py` Python: `main_content()`, `metadata()`, `links()` /
       `resources()`, `to_markdown_chunks()`, `table_rows()` and CSV,
-      `resolve_url`, and reusable `Selector` objects.
+      `resolve_url`, and reusable `Selector` objects. *Shipped in 0.6.0.*
 - [ ] **S** `py` `js` `rust` Bytes in, everywhere: `domq::decode(&[u8])` in
       the library (the CLI's sniffing: BOM, `<meta charset>`, UTF-8,
       Windows-1252, reporting which rule decided), `domq.parse(bytes)` in
       Python (`requests`' `r.content`, Scrapy's `response.body`) and
-      `Uint8Array` in JS (cheerio's `loadBuffer`).
-- [ ] **M** `js` JavaScript: `mainContent()`, `metadata()`, `links()`,
-      `toMarkdownChunks()` and `tables()`, inside the size budget, as a
-      second, optional wasm module if the core can't hold them.
+      `Uint8Array` in JS (cheerio's `loadBuffer`). ([#46](https://github.com/iamsaquib8/domq/issues/46))
+- [x] **M** `js` JavaScript: `mainContent()`, `metadata()`, `links()`,
+      `toMarkdownChunks()` and `tables()`. *Shipped in 0.6.0* in the one
+      module; since 0.7 they are the optional `domq-wasm/extract` entry, so
+      the core module no longer carries them
+      ([#111](https://github.com/iamsaquib8/domq/issues/111)).
 - [ ] **S** `js` `extract(html, spec)`: cheerio's `extract()` descriptor maps
       (a selector string, `[selector]` for all matches, `{selector, value}`,
-      nested maps), so cheerio code ports one-to-one.
+      nested maps), so cheerio code ports one-to-one. ([#184](https://github.com/iamsaquib8/domq/issues/184))
 - [ ] **S** `py` `shell` `ai` Scrapy-style pseudo-elements: `a::attr(href)`
       and `h2::text` in `select` (Python, CLI, MCP), labelled non-standard
-      like `:contains`, so parsel selectors work unchanged.
+      like `:contains`, so parsel selectors work unchanged. ([#185](https://github.com/iamsaquib8/domq/issues/185))
 - [ ] **M** `py` `ai` Integrations: a LangChain document transformer and a
       LlamaIndex reader (in a companion package, or as documented recipes),
-      and tables into pandas.
+      and tables into pandas. ([#186](https://github.com/iamsaquib8/domq/issues/186))
 - [ ] **S** `py` More wheels: musllinux x86_64 / aarch64 (Alpine images),
-      Windows arm64, free-threaded CPython 3.14t; and conda-forge.
+      Windows arm64, free-threaded CPython 3.14t; and conda-forge. ([#135](https://github.com/iamsaquib8/domq/issues/135))
 - [ ] **S** `js` Publish to JSR for Deno; Cloudflare Workers and Deno
-      examples, and when to use domq rather than Workers' `HTMLRewriter`.
+      examples, and when to use domq rather than Workers' `HTMLRewriter`. ([#187](https://github.com/iamsaquib8/domq/issues/187))
 - [ ] **M** `py` `js` Benchmarks where people choose: selectolax's
       754-domain harness for Python (selectolax, lxml, BeautifulSoup,
       html5-parser, justhtml, turbohtml) and htmlparser-benchmark for JS
       (htmlparser2, node-html-parser, parse5, cheerio), plus gzipped bundle
-      size and cold start in Workers, Deno and Bun.
+      size and cold start in Workers, Deno and Bun. ([#188](https://github.com/iamsaquib8/domq/issues/188))
 - [ ] **M** Playground "copy as Rust / JS / Python / CLI" for the current
-      selector, so it doubles as a code generator.
+      selector, so it doubles as a code generator. ([#189](https://github.com/iamsaquib8/domq/issues/189))
 - [ ] **M** More package managers: Scoop / winget (Windows), Nix, AUR, and a
-      tiny Docker image.
+      tiny Docker image. ([#190](https://github.com/iamsaquib8/domq/issues/190))
 
-## 0.7 — "Markdown built for models"
+## 0.7 — "Correct trees, Markdown built for models"
 
-LLM and RAG pipelines are the fastest-growing group, and every converter they
-compare us with lets them shape the output. One options type, exposed the same
-way in every surface (library, CLI flags, MCP arguments, JS, Python).
+Before adding surface, make what's there right: the parser cases real pages
+hit most (each prototyped against the conformance suite and 2,050 real
+pages), the reader-mode gap on non-article pages, Markdown that renders as
+written, and the first Markdown features models need. The wasm budget is
+decided first, because every JavaScript item after it depends on the answer.
 
-- [ ] **M** `ai` `MarkdownOptions` / `to_markdown_with()`: link style (inline,
+**Tracking:** epic [#249](https://github.com/iamsaquib8/domq/issues/249) · [milestone](https://github.com/iamsaquib8/domq/milestone/1) · bugs and performance traps to clear alongside: [#257](https://github.com/iamsaquib8/domq/issues/257).
+
+- [x] **S** `js` Decide the wasm budget: split the extraction helpers into a
+      second, optional module (`domq-wasm/extract`; the core is 56,647 B
+      gzipped, extract 77,769 B) with a CI gate on each, and make every size
+      claim agree ([#111](https://github.com/iamsaquib8/domq/issues/111)).
+      The old 45 KiB promise is restated, not met: see [Budgets](#budgets).
+- [ ] **M** `rust` Trees that match browsers where real pages differ: stray
+      end tags inside table cells, mismatched heading end tags, nested `<a>`
+      / `<button>`, the newline after `<pre>`, stray `<` in text, non-ASCII
+      tag names, script double-escaping and `<div =x>`
+      ([#67](https://github.com/iamsaquib8/domq/issues/67), [#68](https://github.com/iamsaquib8/domq/issues/68), [#69](https://github.com/iamsaquib8/domq/issues/69), [#75](https://github.com/iamsaquib8/domq/issues/75), [#76](https://github.com/iamsaquib8/domq/issues/76), [#84](https://github.com/iamsaquib8/domq/issues/84), [#234](https://github.com/iamsaquib8/domq/issues/234), [#235](https://github.com/iamsaquib8/domq/issues/235)). Listed under "Output changes".
+- [ ] **S** `ai` Reader mode on listings, products, collections and service
+      pages: widen a winner that holds under 10% of the page's text, WCXB dev
+      0.745 → 0.794 with AEB unchanged in the prototype ([#91](https://github.com/iamsaquib8/domq/issues/91)).
+- [ ] **S** `ai` Markdown that renders as written: markers split across
+      nodes, nested ordered lists, reference links in chunks, the links
+      footer, table spans and character references in URLs
+      ([#92](https://github.com/iamsaquib8/domq/issues/92), [#93](https://github.com/iamsaquib8/domq/issues/93), [#94](https://github.com/iamsaquib8/domq/issues/94), [#97](https://github.com/iamsaquib8/domq/issues/97), [#98](https://github.com/iamsaquib8/domq/issues/98), [#105](https://github.com/iamsaquib8/domq/issues/105)).
+- [ ] **S** `ai` `rust` Metadata from JSON-LD: valid JSON out of CDATA
+      wrappers, then `datePublished`, `author` and `headline` as sources
+      (published-date agreement 48.5% → 97% in the prototype) ([#99](https://github.com/iamsaquib8/domq/issues/99), [#100](https://github.com/iamsaquib8/domq/issues/100)).
+- [x] **M** `ai` `MarkdownOptions` / `to_markdown_with()`: link style (inline,
       reference, or a links footer like Jina's `X-With-Links-Summary`),
-      images (keep, alt text only, drop; drop `data:` URIs), heading, bullet,
-      emphasis and fence style, tags to skip or keep as HTML, absolute URLs
-      from a base, wrap width, maximum blank lines. Folds in the old "links
-      as footnotes" item. (turndown, htmd, markdownify, html2text.)
+      images (keep, alt text only, drop; drop `data:` URIs), absolute URLs
+      from a base. *Shipped in 0.6.0* in Rust, the CLI (`--markdown-*`), MCP
+      and Python.
+- [ ] **M** `ai` More `MarkdownOptions`: heading, bullet, emphasis and fence
+      style, tags to skip or keep as HTML, wrap width, and the options in
+      JavaScript. (turndown, htmd, markdownify, html2text.) ([#191](https://github.com/iamsaquib8/domq/issues/191))
 - [ ] **S** `ai` An LLM preset and a token estimate: `--llm` drops empty and
       redundant links, self-link headings, fragment-only links, tracking
       parameters (utm_*, fbclid, gclid), SVG and data URIs, and keeps image
       alt text; `--tokens` and an `estimated_tokens` field, labelled a
-      heuristic. (mdream's minimal preset, Cloudflare's `x-markdown-tokens`.)
+      heuristic. (mdream's minimal preset, Cloudflare's `x-markdown-tokens`.) ([#192](https://github.com/iamsaquib8/domq/issues/192))
 - [ ] **S** `ai` `shell` YAML frontmatter: `--frontmatter`,
       `to_markdown_document()`, MCP `frontmatter: true` (title, canonical,
-      author, date, description, language, site, image, word count).
+      author, date, description, language, site, image, word count). ([#193](https://github.com/iamsaquib8/domq/issues/193))
 - [ ] **M** `ai` A standardization pass before conversion: code-block
       languages from Prism, Shiki, highlight.js and `data-lang` (line-number
       gutters stripped), footnotes to `[^n]`, MathJax/KaTeX to `$…$`, lazy
       images (`data-src`, `<noscript>`) to `src`, heading permalinks dropped,
       a first H1 that repeats the title de-duplicated, callouts to
       `> [!NOTE]`. (defuddle, readabilityrs.) Scored with WebMainBench's
-      code, formula and table subset.
+      code, formula and table subset. ([#194](https://github.com/iamsaquib8/domq/issues/194))
+
+## 0.8 — "Drop-in, and agents that act on the page"
+
+Two jobs. Lower the cost of switching: BeautifulSoup and cheerio code should
+run on domq with one changed import. And give browser-free agents what they
+need to *find* things (the article and how sure we are, the login form, the
+content links, the next page) the way an accessibility tree does, with
+selectors they can reuse.
+
+**Tracking:** epic [#250](https://github.com/iamsaquib8/domq/issues/250) · [milestone](https://github.com/iamsaquib8/domq/milestone/2).
+
+- [ ] **M** `py` `js` Drop-in compatibility layers: a `domq.bs4` subset of
+      BeautifulSoup and a cheerio-style `$` for JavaScript, read-only first,
+      clear errors for anything unsupported ([#236](https://github.com/iamsaquib8/domq/issues/236)).
 - [ ] **M** `ai` `rust` `Dom::article()`: the main node with a 0–1
       confidence score and reasons, `is_probably_readable()`, and the
       article's title (site suffix stripped), byline (also from "By …" text),
       date, excerpt, language, word count and reading time. CLI
       `--main --json`; `--main` exits non-zero below a threshold if asked.
       Absorbs the metadata-vs-Readability item; dates measured on htmldate's
-      1,000-page set.
+      1,000-page set. ([#195](https://github.com/iamsaquib8/domq/issues/195))
 - [ ] **M** `ai` Extraction knobs on reader mode: a content hint or root,
       include and exclude selectors, a precision / recall bias, keep or drop
       comments, tables and images, and a debug log of what was removed and
-      why. (defuddle, trafilatura, legible.)
-- [ ] **S** `ai` Token-aware chunking with your own tokenizer
-      (`to_markdown_chunks_by(max, |s| tokens(s))`), overlap, stable chunk ids
-      for incremental re-indexing, table headers repeated in every chunk of a
-      split table, small sibling chunks merged; CLI `--chunks --jsonl`.
-      (docling's HybridChunker, mdream's splitter.)
-- [ ] **M** `ai` Query-focused relevance: rank chunks or prune a page for a
-      question (`--query "…"`, BM25 plus density filters, no stemming by
-      default), so an agent reads only what answers it. (Crawl4AI's
-      `fit_markdown`.)
-- [ ] **M** `ai` `rust` Output mapped back to the source: `to_text_with_map()`
-      and per-chunk source ranges, for citations and highlighting. domq
-      already records spans; inscriptis and turbohtml offer annotated text.
-- [ ] **M** `shell` `ai` `to_text` options: wrap width, tables as aligned
-      grids (colspan-aware), form fields as `[ value ]`, a `noscript` toggle.
-- [ ] **M** `rust` Custom Markdown handlers for chosen tags (closures), and
-      keep / skip lists in the bindings.
-- [ ] **M** `ai` Comments and replies extracted separately from the article.
-
-## 0.8 — "Agents that act on the page"
-
-Browser-free agents still need to *find* things: the login form, the price,
-the "next page" link. Give them the page's structure the way an accessibility
-tree does, and selectors they can reuse.
-
-- [ ] **L** `ai` `ship` A page outline: `Dom::outline()`, `domq --outline`
+      why. (defuddle, trafilatura, legible.) ([#196](https://github.com/iamsaquib8/domq/issues/196))
+- [x] **L** `ai` `ship` A page outline: `Dom::outline()`, `domq --outline`
       and an MCP `outline` tool listing landmarks, headings, links, buttons
       and form controls with their implicit ARIA roles and accessible names,
       each with a short ref that resolves to a unique selector and a source
       span. URLs are returned by ref, so a model never writes one it could
       hallucinate (Stagehand's approach). Static semantics only: no CSS, no
-      script, said plainly.
+      script, said plainly. *Shipped in 0.6.0* (Rust, CLI, MCP, Python);
+      unique selectors and linear time are
+      [#89](https://github.com/iamsaquib8/domq/issues/89) and
+      [#90](https://github.com/iamsaquib8/domq/issues/90).
+- [ ] **S** `ai` `ship` Playwright-compatible ARIA snapshots
+      (`--aria-snapshot`), so agents and test suites read the outline in a
+      format they already use ([#239](https://github.com/iamsaquib8/domq/issues/239)).
+- [ ] **M** `ai` Link regions (navigation, content, footer, pagination) and
+      next-page detection, for crawlers and agents that want the content
+      links and the next page ([#240](https://github.com/iamsaquib8/domq/issues/240)).
 - [ ] **S** `ai` `rust` `shell` `NodeRef::unique_selector()` (preferring `id`,
       `data-testid` and stable classes over `:nth-child`), `find_text("Add to
-      cart")`, and `domq --selector-for TEXT`; MCP results carry selectors.
+      cart")`, and `domq --selector-for TEXT`; MCP results carry selectors. ([#203](https://github.com/iamsaquib8/domq/issues/203))
+- [ ] **S** `ai` Forms: `Dom::forms()` with action, method, fields, labels,
+      types and current values, for agents that fill them in elsewhere. ([#206](https://github.com/iamsaquib8/domq/issues/206))
 - [ ] **M** `ai` `shell` `py` `js` Schema files: `domq -E spec.json` and the
       same schema in MCP `extract`, JS and Python: a base selector, typed
       fields (text, attribute, HTML, Markdown, number, boolean, date), nested
       and list fields, defaults, sibling and parent navigation (`+ tr`),
       trimming and number parsing. An agent writes the schema once and reruns
-      it with no LLM. (Crawl4AI's JsonCss, orf/hq, xidel.)
+      it with no LLM. (Crawl4AI's JsonCss, orf/hq, xidel.) ([#204](https://github.com/iamsaquib8/domq/issues/204))
+- [ ] **M** `ai` MCP over Streamable HTTP (`domq mcp --http`) and a small
+      `domq serve` REST endpoint for hosted agents and languages without
+      bindings; still no fetching ([#238](https://github.com/iamsaquib8/domq/issues/238)).
+
+## Next in line
+
+Committed for 1.0 but not yet placed: each lands in 0.8, 0.9 or 0.10,
+whichever has room, in this order, so its API is settled by the 0.11 freeze.
+Anything still open then ships after 1.0 as an additive feature.
+
+**Tracking:** epic [#255](https://github.com/iamsaquib8/domq/issues/255).
+
+- [ ] **S** `ai` Token-aware chunking with your own tokenizer
+      (`to_markdown_chunks_by(max, |s| tokens(s))`), overlap, stable chunk ids
+      for incremental re-indexing, table headers repeated in every chunk of a
+      split table, small sibling chunks merged; CLI `--chunks --jsonl`.
+      (docling's HybridChunker, mdream's splitter.) ([#197](https://github.com/iamsaquib8/domq/issues/197))
+- [ ] **M** `ai` Query-focused relevance: rank chunks or prune a page for a
+      question (`--query "…"`, BM25 plus density filters, no stemming by
+      default), so an agent reads only what answers it. (Crawl4AI's
+      `fit_markdown`.) ([#198](https://github.com/iamsaquib8/domq/issues/198))
+- [ ] **M** `ai` `rust` Output mapped back to the source: `to_text_with_map()`
+      and per-chunk source ranges, for citations and highlighting. domq
+      already records spans; inscriptis and turbohtml offer annotated text. ([#199](https://github.com/iamsaquib8/domq/issues/199))
+- [ ] **M** `ai` Comments and replies extracted separately from the article. ([#202](https://github.com/iamsaquib8/domq/issues/202))
 - [ ] **M** `ai` `rust` Complete structured data: Microdata and RDFa next to
       JSON-LD, with typed views for Article, Product/Offer, Recipe,
       BreadcrumbList, FAQPage and Event. (xberg, turbohtml, Firecrawl's
-      `product` format.)
-- [ ] **S** `ai` Forms: `Dom::forms()` with action, method, fields, labels,
-      types and current values, for agents that fill them in elsewhere.
+      `product` format.) ([#205](https://github.com/iamsaquib8/domq/issues/205))
+- [ ] **M** `shell` `ai` `to_text` options: wrap width, tables as aligned
+      grids (colspan-aware), form fields as `[ value ]`, a `noscript` toggle. ([#200](https://github.com/iamsaquib8/domq/issues/200))
+- [ ] **M** `rust` Custom Markdown handlers for chosen tags (closures), and
+      keep / skip lists in the bindings. ([#201](https://github.com/iamsaquib8/domq/issues/201))
 
-## 0.9 — "Trust, compared"
-
-The remaining measurement work, against the tools people would otherwise pick.
-
-- [ ] **L** `rust` Reopen formatting elements (a bounded "adoption agency
-      lite"): `<p><b>x<p>y` keeps `y` bold, `<b><i>x</b>y</i>` keeps `y`
-      italic. The weakest area in the conformance report (26.7%).
-- [ ] **M** `ai` Reader mode and Markdown next to trafilatura, Readability.js,
-      defuddle, markdownify, turndown, htmd and mdream on the same corpora
-      (AEB, WCXB, trafilatura's set, WebMainBench), published either way.
-- [ ] **M** `rust` Close the real-page parsing gap: profile domq on the five
-      real pages (25–48% behind `tl`, more behind astral-html) and fix what
-      generated inputs hid (attribute-heavy markup, scripts, long URLs).
-- [ ] **M** `rust` `shell` Speed where people choose: HTML → Markdown against
-      mdream, htmd and html-to-markdown-rs on mdream's pages; parsing against
-      astral-html, tl, lol_html, html5gum and scraper on real pages; reader
-      mode in ms/page against dom_smoothie and rs-trafilatura; the CLI
-      (hyperfine) against htmlq, pup, xq and the Markdown CLIs; tokens saved,
-      counted with a fixed offline tokenizer.
-- [ ] **S** `rust` A robustness matrix: panics and timeouts on adversarial
-      inputs (100k-deep nesting, attribute floods, huge unclosed documents)
-      across the Rust crates above.
-- [ ] **S** Tokenizer-suite and serializer conformance numbers next to the
-      tree-construction report (html5gum and astral-html publish theirs).
-- [ ] **M** Apply to OSS-Fuzz once eligible, and run ClusterFuzzLite on every
-      PR and nightly in the meantime; crashers become regression tests.
-- [ ] **S** More budgets: CLI binary size, wheel size, Markdown time, and a
-      regression threshold on the weekly benchmark instead of a report only.
-
-## 0.10 — "Lint for teams"
+## 0.9 — "Lint for teams"
 
 Everything a team needs to put `domq lint` in CI and keep it there, in one
 release.
 
+**Tracking:** epic [#251](https://github.com/iamsaquib8/domq/issues/251) · [milestone](https://github.com/iamsaquib8/domq/milestone/3).
+
 - [ ] **S** `ship` `--allow` / `--deny` per rule, a summary line, and
-      `--format sarif` for GitHub code scanning.
+      `--format sarif` for GitHub code scanning. ([#162](https://github.com/iamsaquib8/domq/issues/162), [#50](https://github.com/iamsaquib8/domq/issues/50))
 - [ ] **S** `ship` Inline suppressions (`<!-- domq-disable-next-line img-alt -->`)
-      and a config file, so a team can adopt the linter on an existing site.
+      and a config file, so a team can adopt the linter on an existing site. ([#163](https://github.com/iamsaquib8/domq/issues/163))
 - [ ] **M** `ship` More rules people expect: `html-lang`, `missing-title`,
       `form-label`, `iframe-title`, nested interactive elements (an `<a>` in a
       `<button>`), in-page anchors that point at no `id`, `target=_blank`
       without `rel=noopener`, images without dimensions, positive `tabindex`,
       invalid ARIA roles and attributes, buttons without `type` in forms,
       deprecated elements, and tables without headers (markuplint, HTMLHint,
-      html-validate, axe-core's static subset).
+      html-validate, axe-core's static subset). ([#214](https://github.com/iamsaquib8/domq/issues/214), [#155](https://github.com/iamsaquib8/domq/issues/155))
 - [ ] **M** `ship` `js` `py` The linter in the library (a `lint` feature), so
-      the JS and Python packages and editors can use it.
+      the JS and Python packages and editors can use it. ([#215](https://github.com/iamsaquib8/domq/issues/215))
 - [ ] **S** `ship` `ai` `domq llms-txt public/`: `llms.txt` and
-      `llms-full.txt` from a built static site, locally, with no crawling.
+      `llms-full.txt` from a built static site, locally, with no crawling. ([#216](https://github.com/iamsaquib8/domq/issues/216))
 - [ ] **M** `ship` `rust` Local link checking: relative `href` / `src` that
-      point at files that don't exist, for static sites (no network).
+      point at files that don't exist, for static sites (no network). ([#217](https://github.com/iamsaquib8/domq/issues/217))
 - [ ] **M** `ship` A reusable GitHub Action for `domq lint` that annotates pull
-      requests.
-- [ ] **S** `ship` A pre-commit hook for `domq lint`.
+      requests. ([#218](https://github.com/iamsaquib8/domq/issues/218))
+- [ ] **S** `ship` A pre-commit hook for `domq lint`. ([#164](https://github.com/iamsaquib8/domq/issues/164))
 
-## 0.11 — "Huge documents and full trees"
+## 0.10 — "Huge documents and full trees"
 
 For inputs too big to hold as a tree, for comparing documents in tests, and
 for the rest of the binding parity.
 
+**Tracking:** epic [#252](https://github.com/iamsaquib8/domq/issues/252) · [milestone](https://github.com/iamsaquib8/domq/milestone/4).
+
 - [ ] **L** `rust` `shell` Streaming selectors: run a `Selector` over
       `domq::events` for multi-gigabyte dumps without building a tree; CLI
-      `--stream`.
+      `--stream`. ([#219](https://github.com/iamsaquib8/domq/issues/219))
 - [ ] **L** `js` `rust` A streaming rewriter: `domq::rewrite(src, rules)` over
       the event stream (set or remove attributes, remove, insert, replace
       text) with a JS API for Workers, Deno and Bun, behind a feature and
       inside the wasm budget. (lol_html, `HTMLRewriter`, parse5's rewriting
-      stream.)
+      stream.) ([#220](https://github.com/iamsaquib8/domq/issues/220))
 - [ ] **L** `rust` `shell` `domq diff a.html b.html`: a structural diff
-      (node-level, whitespace-insensitive) for snapshot tests of rendered pages.
-- [ ] **M** `py` Python: editing API and `events()`.
+      (node-level, whitespace-insensitive) for snapshot tests of rendered pages. ([#221](https://github.com/iamsaquib8/domq/issues/221))
+- [ ] **M** `py` Python: editing API and `events()`. ([#222](https://github.com/iamsaquib8/domq/issues/222))
 - [ ] **M** `js` JavaScript: editing on `Document` and `events()` in the wasm
-      package, inside the size budget.
+      package, inside the size budget. ([#223](https://github.com/iamsaquib8/domq/issues/223))
 - [ ] **M** `rust` Optional `<tbody>`/`<colgroup>` insertion: a builder option
-      for browser-identical table structure.
+      for browser-identical table structure. ([#224](https://github.com/iamsaquib8/domq/issues/224))
 - [ ] **M** `rust` Context-aware fragments: `append_html` and
       `parse_fragment_in("tr", …)` parse in the parent's context (a `<td>`
-      inside a `<tr>`).
+      inside a `<tr>`). ([#225](https://github.com/iamsaquib8/domq/issues/225), [#65](https://github.com/iamsaquib8/domq/issues/65))
+
+## 0.11 — "Trust, compared, and the API frozen"
+
+The remaining measurement work, against the tools people would otherwise pick,
+and every breaking change 1.0 needs, made in one release so there's a single
+upgrade to plan. It comes last because 0.9 and 0.10 add API too (the linter
+in the library, editing in the bindings, the rewriter), and all of it should
+be settled together. After 0.11, only additive changes until 1.0.
+
+**Tracking:** epic [#253](https://github.com/iamsaquib8/domq/issues/253) · [milestone](https://github.com/iamsaquib8/domq/milestone/5); CI and release engineering: [#258](https://github.com/iamsaquib8/domq/issues/258).
+
+**The API freeze**
+
+- [ ] **M** `rust` Shrink and settle the public surface: what stays public
+      (`tokenize`, `Token`, `Tokenizer`, `AttrValue`), common traits,
+      `#[non_exhaustive]` and Send/Sync guarantees, named iterator types,
+      `parse_fragment()` deprecated, and `NodeRef::text()` renamed or
+      documented to match the bindings
+      ([#57](https://github.com/iamsaquib8/domq/issues/57), [#82](https://github.com/iamsaquib8/domq/issues/82), [#83](https://github.com/iamsaquib8/domq/issues/83), [#65](https://github.com/iamsaquib8/domq/issues/65), [#66](https://github.com/iamsaquib8/domq/issues/66)).
+- [ ] **S** `py` `js` Bindings that agree with their languages: positions and
+      lengths in `str` units in Python, camelCase parameters and a `.d.ts`
+      that compiles everywhere in JS, structured `SelectorError`s
+      ([#118](https://github.com/iamsaquib8/domq/issues/118), [#120](https://github.com/iamsaquib8/domq/issues/120), [#126](https://github.com/iamsaquib8/domq/issues/126)).
+- [ ] **S** `shell` `ai` One shape everywhere: the CLI's `--json` matches JS,
+      Python and MCP; `<base href>` is honoured the same way on every surface;
+      invalid base URLs are errors ([#58](https://github.com/iamsaquib8/domq/issues/58), [#59](https://github.com/iamsaquib8/domq/issues/59), [#151](https://github.com/iamsaquib8/domq/issues/151)).
+- [ ] **S** `ai` MCP limits settled before they are API: input and response
+      budgets and pagination ([#33](https://github.com/iamsaquib8/domq/issues/33), [#182](https://github.com/iamsaquib8/domq/issues/182)).
+- [ ] **M** CI that catches what 1.0 promises: semver checks, docs.rs and
+      packaging builds, `.d.ts` and `.pyi` snapshots, required checks, and
+      hardened workflows ([#129](https://github.com/iamsaquib8/domq/issues/129), [#123](https://github.com/iamsaquib8/domq/issues/123), [#116](https://github.com/iamsaquib8/domq/issues/116), [#119](https://github.com/iamsaquib8/domq/issues/119)).
+
+**Trust, compared**
+
+- [ ] **L** `rust` Reopen formatting elements (a bounded "adoption agency
+      lite"): `<p><b>x<p>y` keeps `y` bold, `<b><i>x</b>y</i>` keeps `y`
+      italic. The weakest area in the conformance report (26.7%). ([#207](https://github.com/iamsaquib8/domq/issues/207))
+- [ ] **M** `ai` Reader mode and Markdown next to trafilatura, Readability.js,
+      defuddle, markdownify, turndown, htmd and mdream on the same corpora
+      (AEB, WCXB, trafilatura's set, WebMainBench), published either way. ([#208](https://github.com/iamsaquib8/domq/issues/208))
+- [ ] **M** `rust` Close the real-page parsing gap: profile domq on the five
+      real pages (22–35% behind `tl`, more behind astral-html) and fix what
+      generated inputs hid (attribute-heavy markup, scripts, long URLs). ([#73](https://github.com/iamsaquib8/domq/issues/73))
+- [ ] **M** `rust` `shell` Speed where people choose: HTML → Markdown against
+      mdream, htmd and html-to-markdown-rs on mdream's pages; parsing against
+      astral-html, tl, lol_html, html5gum and scraper on real pages; reader
+      mode in ms/page against dom_smoothie and rs-trafilatura; the CLI
+      (hyperfine) against htmlq, pup, xq and the Markdown CLIs; tokens saved,
+      counted with a fixed offline tokenizer. ([#209](https://github.com/iamsaquib8/domq/issues/209))
+- [ ] **S** `rust` A robustness matrix: panics and timeouts on adversarial
+      inputs (100k-deep nesting, attribute floods, huge unclosed documents)
+      across the Rust crates above. ([#210](https://github.com/iamsaquib8/domq/issues/210))
+- [ ] **S** Tokenizer-suite and serializer conformance numbers next to the
+      tree-construction report (html5gum and astral-html publish theirs). ([#211](https://github.com/iamsaquib8/domq/issues/211))
+- [ ] **M** Apply to OSS-Fuzz once eligible, and run ClusterFuzzLite on every
+      PR and nightly in the meantime; crashers become regression tests. ([#212](https://github.com/iamsaquib8/domq/issues/212))
+- [ ] **S** More budgets: CLI binary size, wheel size, Markdown time, and a
+      regression threshold on the weekly benchmark instead of a report only. ([#213](https://github.com/iamsaquib8/domq/issues/213))
 
 ## Anytime — small and welcome
 
 Small, high-value polish that doesn't need a release of its own. Most items are
 good first issues; each lands in whichever release is next.
+
+**Tracking:** epic [#260](https://github.com/iamsaquib8/domq/issues/260).
 
 - [ ] **S** `shell` Several inputs in one run (`-f` repeatable, globs), with
       grep-style `FILE:` prefixes and a `file` field in `--jsonl`; batch output
@@ -468,58 +626,62 @@ good first issues; each lands in whichever release is next.
       UTF-8, instead of silent mojibake. (Already in the CLI's
       `encoding.rs`.)
 - [ ] **S** `rust` `Selection` helpers, chainable and allocation-light:
-      `dom.select("a").attrs("href")`, `.texts()`, `.first()`, `.len()`.
+      `dom.select("a").attrs("href")`, `.texts()`, `.first()`, `.len()`. ([#226](https://github.com/iamsaquib8/domq/issues/226))
 - [ ] **S** `rust` Reusable parser: `Dom::parse_into(&mut self, html)` reuses
       the arenas, so a crawler parsing millions of pages stops allocating per
-      page.
+      page. ([#227](https://github.com/iamsaquib8/domq/issues/227))
 - [ ] **S** `rust` Cookbook: fetching with `reqwest` / `ureq`, and parsing
       pages in parallel with rayon. ([#28](https://github.com/iamsaquib8/domq/issues/28))
 - [ ] **S** A counting-allocator test, so the allocations-per-parse budget is
       enforced in CI. ([#27](https://github.com/iamsaquib8/domq/issues/27))
 - [ ] **S** Release automation: one command bumps every version in lock-step
       (crate, CLI, wasm, Python) and drafts the changelog; the release workflow
-      updates the Homebrew tap itself (token scoped to the tap repo).
+      updates the Homebrew tap itself (token scoped to the tap repo). ([#122](https://github.com/iamsaquib8/domq/issues/122))
 - [ ] **S** Supply chain: signed build provenance (GitHub artifact attestations)
-      and an SBOM attached to every release.
+      and an SBOM attached to every release. ([#133](https://github.com/iamsaquib8/domq/issues/133))
 - [ ] **M** Playground: reader-mode, chunks, metadata and lint tabs, within the
-      wasm size budget.
+      wasm size budget. ([#141](https://github.com/iamsaquib8/domq/issues/141))
 - [ ] **S** `shell` A pup migration guide in the docs (pup's `text{}`,
       `attr{}`, `json{}` and `:parent-of()` map to `-t`, `-a`, `-j` and
       `:has()`). ([#25](https://github.com/iamsaquib8/domq/issues/25))
 - [ ] **S** `shell` Shell niceties: `--shell` for `eval`-able `NAME=…` output
       (xidel), coloured HTML with a pager (pup, xq), and `-i` to format a file
-      in place (xq; the start of `domq fmt`).
+      in place (xq; the start of `domq fmt`). ([#228](https://github.com/iamsaquib8/domq/issues/228))
 - [ ] **S** `rust` `shell` A URL pass: `absolutize_urls(base)` over `href`,
       `src`, `srcset`, `poster`, `action`, `data-src`, CSS `url()` and meta
       refresh; `rewrite_urls(|u| …)`; `strip_tracking_params()`; CLI
-      `--absolute` for HTML output.
+      `--absolute` for HTML output. ([#229](https://github.com/iamsaquib8/domq/issues/229))
 - [ ] **S** `rust` `py` Text matchers: `:has-text()`, `:only-text`,
       case-insensitive `:contains("x" i)`, and `NodeRef::own_text()` (direct
       text only), as dom_query and selectolax have. ([#24](https://github.com/iamsaquib8/domq/issues/24))
 - [ ] **S** `rust` Editing conveniences: `replace_with_html`, `remove_attrs` /
-      `remove_all_attrs`, `strip_tags` (unwrap by selector).
+      `remove_all_attrs`, `strip_tags` (unwrap by selector). ([#230](https://github.com/iamsaquib8/domq/issues/230))
 
 ## 1.0 — "Stable"
 
-1.0 ships when all of these hold, not on a date:
+1.0 ships when all of these hold, not on a date. Before it, `1.0.0-rc.N`
+goes out on crates.io, npm and PyPI with an upgrade guide from 0.x, and stays
+out for at least four weeks with no breaking change.
+
+**Tracking:** epic [#254](https://github.com/iamsaquib8/domq/issues/254) · [milestone](https://github.com/iamsaquib8/domq/milestone/6).
 
 - [ ] The public API is reviewed against the Rust API Guidelines, with
       `#[non_exhaustive]` where growth is expected and no known breaking
-      changes pending.
+      changes pending. ([#82](https://github.com/iamsaquib8/domq/issues/82), [#57](https://github.com/iamsaquib8/domq/issues/57))
 - [x] A written MSRV policy (see [Budgets](#budgets)).
 - [ ] Conformance and reader-mode numbers are published and tracked, including
       reader mode on held-out, human-labelled corpora (AEB, WCXB).
-- [ ] Months of continuous fuzzing with no open crashers.
-- [ ] Used by real projects (a "used by" list in the README).
+- [ ] Months of continuous fuzzing with no open crashers. ([#212](https://github.com/iamsaquib8/domq/issues/212))
+- [ ] Used by real projects (a "used by" list in the README). ([#233](https://github.com/iamsaquib8/domq/issues/233))
 - [ ] SemVer covers everything people script against: the crate API, CLI
       flags, output formats and exit codes, the MCP tools and their schemas,
-      and the JS and Python APIs.
+      and the JS and Python APIs. ([#231](https://github.com/iamsaquib8/domq/issues/231))
 - [ ] The output-stability policy (see Ongoing) has held for at least two
       minor releases.
 - [ ] A deprecation policy: anything removed is deprecated, with a warning,
-      for at least one minor release first.
-- [ ] A written support policy for Python, Node and Deno versions.
-- [ ] A security response target in [SECURITY.md](./SECURITY.md).
+      for at least one minor release first. ([#232](https://github.com/iamsaquib8/domq/issues/232))
+- [ ] A written support policy for Python, Node and Deno versions. ([#131](https://github.com/iamsaquib8/domq/issues/131))
+- [ ] A security response target in [SECURITY.md](./SECURITY.md). ([#112](https://github.com/iamsaquib8/domq/issues/112))
 
 ---
 
@@ -540,22 +702,32 @@ project meets its notability bar.
 
 ## Community
 
+**Tracking:** epic [#261](https://github.com/iamsaquib8/domq/issues/261).
+
 - [ ] `good first issue`s kept stocked; first response on issues within 48
       hours.
-- [ ] A "used by" section and credit for every contributor in release notes.
+- [ ] A "used by" section and credit for every contributor in release notes. ([#233](https://github.com/iamsaquib8/domq/issues/233))
 - [ ] GitHub Discussions for questions and show-and-tell, so issues stay
       actionable.
+- [ ] A second maintainer with release rights, `MAINTAINERS.md` and
+      `CODEOWNERS` by area, so reviews stay fast as contributions grow
+      ([#246](https://github.com/iamsaquib8/domq/issues/246)).
+- [ ] A weekly adoption report (downloads per registry, dependents), so we
+      can tell which release or integration moved adoption ([#247](https://github.com/iamsaquib8/domq/issues/247)).
 
 ## Exploring
 
 Ideas we like but haven't committed to. Prototypes and use-cases welcome.
 
+**Tracking:** epic [#262](https://github.com/iamsaquib8/domq/issues/262).
+
 - **More encodings in the CLI** (Shift_JIS, GBK, EUC-KR, ISO-8859-x) through
   an optional `encoding_rs` feature, used in the release binaries.
 - **WASI component (WIT)** so any component runtime can call the parser.
-- **More bindings** (C ABI, Ruby, PHP, Go via wasm) if there's demand.
+- **More bindings** (C ABI, Ruby, PHP, Go via wasm) if there's demand
+  ([#237](https://github.com/iamsaquib8/domq/issues/237)).
 - **Language-server-lite** — lint diagnostics in editors, using source spans;
-  a natural follow-up to lint for teams (0.7).
+  a natural follow-up to lint for teams (0.9).
 - **`domq fmt`** — an HTML formatter built on the pretty-printer and spans.
 - **XPath subset** — parsel, lxml, xq and turbohtml users ask for it; still
   only with strong demand, since CSS covers most real queries.
@@ -568,11 +740,17 @@ Ideas we like but haven't committed to. Prototypes and use-cases welcome.
 - **Site extractors** (GitHub, Hacker News, Reddit, Wikipedia, Discourse,
   Stack Overflow, …) behind an `Extractor` trait in a companion crate
   (`domq-sites`), as defuddle and article-extractor do; too much churn for
-  the core.
+  the core ([#242](https://github.com/iamsaquib8/domq/issues/242)).
 - **Simplified semantic HTML** (`to_clean_html()`: semantic tags only, no
   classes, styles or handlers), as mdream and Firecrawl offer. Only as
   formatting simplification, never as a security boundary.
-- **Near-duplicate chunk detection** (simhash) for RAG indexes.
+- **Near-duplicate chunk detection** (simhash) for RAG indexes, and a page
+  fingerprint for crawls ([#241](https://github.com/iamsaquib8/domq/issues/241)).
+- **`domq::testing`** — structural HTML assertions and snapshots for Rust web
+  apps testing what their handlers render ([#243](https://github.com/iamsaquib8/domq/issues/243)).
+- **A browser extension** — "copy this page as Markdown" and reader view on
+  the wasm module ([#244](https://github.com/iamsaquib8/domq/issues/244)); and a **Workers / Deno Deploy template** for a
+  self-hosted HTML-to-Markdown API ([#245](https://github.com/iamsaquib8/domq/issues/245)).
 
 ## Considered and declined
 
@@ -592,6 +770,22 @@ Ideas we like but haven't committed to. Prototypes and use-cases welcome.
 ---
 
 ## Shipped
+
+### 0.6.0 — 2026-11-03 · "Where people are"
+
+Details in the [changelog](./CHANGELOG.md#060--2026-11-03).
+
+- [x] Python and JavaScript: reader mode, metadata, links and resources,
+      RAG chunks, tables and CSV, `resolve_url`; reusable `Selector` objects
+      and a page outline in Python.
+- [x] `MarkdownOptions` / `to_markdown_with()`: link style (inline,
+      reference, links footer), images (keep, alt, drop), dropping `data:`
+      URIs and a base URL, in Rust, the CLI, MCP and Python.
+- [x] A page outline for agents: `Dom::outline()`, `domq --outline` and an
+      MCP `outline` tool, with roles, accessible names, refs and selectors.
+- [x] Reader mode on human-labelled benchmarks (AEB, WCXB) and a real-page
+      parsing benchmark next to astral-html, `tl` and `scraper`.
+- [x] `<noscript>` content shown when it holds the page; `--exit-status`.
 
 ### 0.5.0 — 2026-10-25 · "Trust, measured"
 

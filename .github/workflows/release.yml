@@ -155,11 +155,12 @@ jobs:
         run: |
           VERSION=$(grep -m1 '^version' wasm/Cargo.toml | cut -d'"' -f2)
           test "v$VERSION" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != v$VERSION"; exit 1; }
+      # The one package holds two builds: the core (`domq-wasm`) and the
+      # superset with extraction (`domq-wasm/extract`).
       - name: Build
         working-directory: wasm
         run: |
-          wasm-pack build --target web --release
-          node npm/finish.mjs
+          node npm/build.mjs
           sh npm/smoke-test.sh
       # Re-runs and a manually published first release (npm only allows
       # trusted publishing for packages that already exist) must not fail.

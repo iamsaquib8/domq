@@ -44,19 +44,26 @@ jobs:
           workspaces: wasm
       - uses: taiki-e/install-action@v2
         with:
-          tool: wasm-pack,mdbook
+          tool: wasm-pack@0.15.0,mdbook@0.5.4
+      # The full build (the default `extract` feature, what the npm package
+      # ships as `domq-wasm/extract`): the playground shows the extraction API.
       - name: Build the wasm module into playground/pkg
         working-directory: wasm
         run: wasm-pack build --target web --release --no-pack --out-dir ../playground/pkg
       - name: Report the module size
         run: |
-          echo "wasm: $(wc -c < playground/pkg/domq_wasm_bg.wasm) bytes," \
+          echo "wasm (extract build): $(wc -c < playground/pkg/domq_wasm_bg.wasm) bytes," \
                "$(gzip -9 -c playground/pkg/domq_wasm_bg.wasm | wc -c) gzipped"
       - name: Assemble the site (playground at /, guide at /docs/)
         run: |
           mkdir -p _site
           cp -R playground/. _site/
-          mdbook build book --dest-dir ../_site/docs
+          # An absolute path: mdBook 0.5 resolves --dest-dir against the
+          # current directory, not the book, so ../_site/docs landed outside
+          # the workspace and the guide was never deployed.
+          mdbook build book --dest-dir "$GITHUB_WORKSPACE/_site/docs"
+          test -f _site/index.html
+          test -f _site/docs/index.html
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:

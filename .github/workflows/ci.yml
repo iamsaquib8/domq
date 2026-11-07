@@ -70,6 +70,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
+      - name: Changelog fragments
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_changelog.py'
+          python3 scripts/changelog.py check
 
   no_std:
     name: no_std (thumbv7em)
@@ -107,33 +111,45 @@ jobs:
           cargo fmt --check
           # Library and tests separately: built together (--all-targets), the
           # test-only deps switch on wasm-bindgen's `std`, which clashes with the
-          # library's own no_std panic handler.
-          cargo clippy --target wasm32-unknown-unknown --release -- -D warnings
-          cargo clippy --target wasm32-unknown-unknown --tests -- -D warnings
-      # The published feature set (json + query + markdown) is fixed in
-      # wasm/Cargo.toml, so this builds exactly what goes to npm.
-      - name: Build the npm package
+          # library's own no_std panic handler. Both feature sets: the full
+          # build (default `extract`) and the core one.
+          for features in "" "--no-default-features"; do
+            cargo clippy --target wasm32-unknown-unknown --release $features -- -D warnings
+            cargo clippy --target wasm32-unknown-unknown --tests $features -- -D warnings
+          done
+      # One crate, two modules: the core (`--no-default-features`, the package
+      # root) and the full build with extraction (`domq-wasm/extract`). The
+      # feature set of each is fixed by wasm/Cargo.toml and npm/build.mjs, so
+      # this builds exactly what goes to npm.
+      - name: Build the npm package (core and extract)
+        working-directory: wasm
+        run: node npm/build.mjs
+      - name: Test the bindings (wasm-bindgen-test, Node), both builds
         working-directory: wasm
         run: |
-          wasm-pack build --target web --release
-          node npm/finish.mjs
-      - name: Test the bindings (wasm-bindgen-test, Node)
-        working-directory: wasm
-        run: wasm-pack test --node
+          wasm-pack test --node
+          wasm-pack test --node -- --no-default-features
       - name: Smoke-test the packed npm package in Node
         working-directory: wasm
         run: sh npm/smoke-test.sh
-      - name: Gzipped size gate (< 45 KiB)
+      - name: Gzipped size gates (core < 60,000 bytes, extract < 80,000 bytes)
         working-directory: wasm
         run: |
-          # Measured ~40,800-41,000 bytes (gzip -9) after the review hardening
-          # (raw-text escaping, name validation, bounded selector memo), and
-          # ~42,450 after the 0.5 spec-aligned recovery (legacy entities,
-          # scoped implicit closes); the budget is the first rounded up to the
-          # next 5 KiB. Raise it on purpose, never by accident.
-          SIZE=$(gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c)
-          echo "gzipped wasm: $SIZE bytes (budget 46080)"
-          test "$SIZE" -lt 46080
+          # Core (`domq-wasm`): parser, selectors, text/Markdown/JSON/HTML.
+          # Measured 56,647 bytes (gzip -9). Extract (`domq-wasm/extract`): the
+          # core plus mainContent, metadata, links, resources,
+          # toMarkdownChunks, tables and toCsv. Measured 77,769 bytes, up from
+          # ~40,800 (0.4) as extraction, bytes-in, encoding detection and the
+          # script-data tokenizer states landed in the one module. #111 split
+          # the module in two so that parsing alone is no longer 78 KB. The
+          # extract budget stays at the temporary 80,000. Raise either on
+          # purpose, never by accident.
+          CORE=$(gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c)
+          EXTRACT=$(gzip -9 -c pkg/extract/domq_wasm_bg.wasm | wc -c)
+          echo "gzipped wasm, core:    $CORE bytes (budget 60000)"
+          echo "gzipped wasm, extract: $EXTRACT bytes (budget 80000)"
+          test "$CORE" -lt 60000
+          test "$EXTRACT" -lt 80000
 
   conformance:
     name: conformance (html5lib tests, Readability, AEB, WCXB)
@@ -177,10 +193,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            wasm
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
       - uses: taiki-e/install-action@v2
         with:
-          tool: mdbook
+          tool: mdbook@0.5.4,wasm-pack
       # The book's Rust examples link against the library alone, built into
       # its own target dir so exactly one `domq` rlib is on the path.
       - name: Test the book's Rust examples
@@ -189,6 +214,13 @@ jobs:
           mdbook test book -L target/book/debug/deps
       - name: Build the book
         run: mdbook build book
+      # The JavaScript and Python reference pages must list every public name:
+      # the .d.ts files come from the npm build, the Python names from the stub.
+      - name: Build the npm package (for its .d.ts files)
+        working-directory: wasm
+        run: node npm/build.mjs
+      - name: Check the reference pages against the package APIs
+        run: python3 book/check-api.py
 
   fuzz:
     name: fuzz (build + smoke)

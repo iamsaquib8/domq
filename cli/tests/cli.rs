@@ -190,6 +190,32 @@ fn base_rewrites_the_attribute_that_counts() {
 }
 
 #[test]
+fn base_url_must_be_absolute() {
+    for bad in ["/relative/", "not a url", "htps://", "https://"] {
+        let (out, err, code) = domq(&["-b", bad, "-a", "href", "a"], "<a href=\"b\">B</a>");
+        assert_eq!(code, 2, "exit code for -b {bad}");
+        assert!(out.is_empty(), "stdout for -b {bad}: {out:?}");
+        assert!(
+            err.contains("--base must be an absolute URL (scheme://…)")
+                && err.contains("domq --help"),
+            "stderr for -b {bad}: {err}"
+        );
+
+        let (out, err, code) = domq(
+            &[&format!("--base={bad}"), "-a", "href", "a"],
+            "<a href=\"b\">B</a>",
+        );
+        assert_eq!(code, 2, "exit code for --base={bad}");
+        assert!(out.is_empty(), "stdout for --base={bad}: {out:?}");
+        assert!(
+            err.contains("--base must be an absolute URL (scheme://…)")
+                && err.contains("domq --help"),
+            "stderr for --base={bad}: {err}"
+        );
+    }
+}
+
+#[test]
 fn remove_nodes_before_selecting() {
     assert_eq!(
         ok(&["-r", "nav", "-r", "footer", "-a", "href", "a"], PAGE),
@@ -210,9 +236,107 @@ fn markdown_output() {
 }
 
 #[test]
+fn markdown_options_cli_flags() {
+    let html = "<article><p>See <a href='https://example.com' title='Home'>Example</a> and <img src='logo.png' alt='Logo'>.</p></article>";
+
+    // --markdown-links reference
+    let md_ref = ok(&["-m", "--markdown-links", "reference"], html);
+    assert!(md_ref.contains("[Example][1]"));
+    assert!(md_ref.contains("[1]: https://example.com \"Home\""));
+
+    // --markdown-links footer
+    let md_footer = ok(&["-m", "--markdown-links", "footer"], html);
+    assert!(md_footer.contains("Example [1]"));
+    assert!(md_footer.contains("### Links\n\n1. [Example](https://example.com \"Home\")"));
+
+    // --markdown-images alt
+    let md_alt = ok(&["-m", "--markdown-images", "alt"], html);
+    assert!(md_alt.contains("Logo"));
+    assert!(!md_alt.contains("![Logo]"));
+
+    // --markdown-images drop
+    let md_drop = ok(&["-m", "--markdown-images", "drop"], html);
+    assert!(!md_drop.contains("Logo"));
+    assert!(!md_drop.contains("logo.png"));
+
+    // --markdown-drop-data-uris
+    let data_html = "<p><img src='data:image/png;base64,abc' alt='Dot'> <a href='data:text/plain,hi'>link</a></p>";
+    let md_data = ok(&["-m", "--markdown-drop-data-uris"], data_html);
+    assert_eq!(md_data, "Dot link\n");
+}
+
+#[test]
+fn markdown_options_reject_other_modes_in_either_order() {
+    let options: &[&[&str]] = &[
+        &["--markdown-links", "reference"],
+        &["--markdown-images", "drop"],
+        &["--markdown-drop-data-uris"],
+    ];
+    for option in options {
+        for (mode, name) in [
+            ("-t", "--text"),
+            ("-j", "--json"),
+            ("--jsonl", "--jsonl"),
+            ("--csv", "--csv"),
+            ("-c", "--count"),
+        ] {
+            let mut before = option.to_vec();
+            before.extend([mode, "article"]);
+            let mut after = vec![mode];
+            after.extend_from_slice(option);
+            after.push("article");
+
+            let expected = format!("{} needs -m/--markdown (got {name})", option[0]);
+            for args in [before, after] {
+                let (out, err, code) = domq(&args, PAGE);
+                assert_eq!(code, 2, "{args:?}: {err}");
+                assert!(out.is_empty(), "{args:?}: {out}");
+                assert!(err.contains(&expected), "{args:?}: {err}");
+            }
+        }
+    }
+}
+
+#[test]
+fn markdown_options_still_imply_markdown() {
+    let options: &[&[&str]] = &[
+        &["--markdown-links", "reference"],
+        &["--markdown-images", "drop"],
+        &["--markdown-drop-data-uris"],
+    ];
+    for option in options {
+        let implied = ok(option, PAGE);
+        let mut explicit = option.to_vec();
+        explicit.push("-m");
+        assert_eq!(implied, ok(&explicit, PAGE), "{option:?}");
+        assert_ne!(implied, ok(&[], PAGE), "{option:?}");
+    }
+}
+
+#[test]
 fn count_and_first() {
     assert_eq!(ok(&["-c", "a"], PAGE), "3\n");
     assert_eq!(ok(&["-1", "-t", "li"], PAGE), "one\n");
+}
+
+#[test]
+fn first_applies_after_attribute_and_whitespace_filtering() {
+    let html = "<a name=top>x</a><a href=/a>y</a><a href=/b>z</a>";
+    assert_eq!(ok(&["-1", "-a", "href", "a"], html), "/a\n");
+
+    let p = "<p>   </p><p>x</p><p>y</p>";
+    assert_eq!(ok(&["-1", "-w", "-t", "p"], p), "x\n");
+    assert_eq!(ok(&["-1", "-w", "-m", "p"], p), "x\n");
+
+    assert_eq!(ok(&["-w", "-c", "p"], p), "2\n");
+    assert_eq!(ok(&["-c", "p"], p), "3\n");
+    assert_eq!(ok(&["-1", "-w", "-c", "p"], p), "1\n");
+
+    let blank = "<p> </p><p>\t\n</p>";
+    assert_eq!(ok(&["-w", "-c", "p"], blank), "0\n");
+    assert_eq!(domq(&["--exit-status", "-w", "-c", "p"], blank).2, 1);
+    assert_eq!(domq(&["--exit-status", "-1", "-w", "-t", "p"], blank).2, 1);
+    assert_eq!(domq(&["--exit-status", "-1", "-w", "-t", "p"], p).2, 0);
 }
 
 #[test]
@@ -540,6 +664,13 @@ fn csv_output() {
     assert_eq!(ok(&["--csv", "p, #empty"], TABLES), "");
     assert_eq!(ok(&["--csv"], PAGE), "");
     assert!(usage_error(&["--csv", "-a", "href"], TABLES).contains("--csv"));
+
+    let single_empty_cell =
+        "<table><tr><td>a</td></tr><tr><td></td></tr><tr><td>b</td></tr></table>";
+    assert_eq!(ok(&["--csv"], single_empty_cell), "a\r\n\"\"\r\nb\r\n");
+
+    let wrapped = "<div id=r><table><tr><td>1</td></tr></table></div>";
+    assert_eq!(ok(&["--csv", "#r"], wrapped), "1\r\n");
 }
 
 // --- --main ------------------------------------------------------------------
@@ -681,12 +812,73 @@ fn meta_output() {
     assert!(usage_error(&["--meta", "p"], html).contains("SELECTOR"));
 }
 
+#[test]
+fn outline_output() {
+    let html = r#"<nav><a href="/">Home</a></nav><main><h1>Title</h1><button type="submit">Send</button></main>"#;
+    assert_eq!(
+        ok(&["--outline"], html),
+        "[1] navigation\n[2]   link \"Home\" -> nav > a\n[3] main\n[4]   heading 1 \"Title\"\n[5]   button \"Send\" -> button[type=\"submit\"]\n"
+    );
+    assert_eq!(ok(&["--outline", "-c"], html), "5\n");
+    assert_eq!(ok(&["--outline", "-1"], html), "[1] navigation\n");
+
+    let json_out = ok(&["--outline", "-j"], html);
+    assert!(json_out.starts_with("[{\"ref\":1,\"role\":\"navigation\""));
+    assert!(json_out.contains("\"role\":\"button\""));
+    assert!(json_out.contains("\"selector\":\"button[type=\\\"submit\\\"]\""));
+
+    let jsonl_out = ok(&["--outline", "--jsonl"], html);
+    let lines: Vec<&str> = jsonl_out.lines().collect();
+    assert_eq!(lines.len(), 5);
+    assert!(lines[0].contains("\"role\":\"navigation\""));
+    assert!(lines[4].contains("\"role\":\"button\""));
+
+    // Scoped outline
+    assert_eq!(
+        ok(&["--outline", "main"], html),
+        "[1] main\n[2]   heading 1 \"Title\"\n[3]   button \"Send\" -> button[type=\"submit\"]\n"
+    );
+    // Nested matches list each control once.
+    assert_eq!(
+        ok(
+            &["--outline", "div"],
+            "<div><div><button>X</button></div></div>"
+        ),
+        "[1] button \"X\" -> div > div > button\n"
+    );
+
+    // Conflicting flags
+    assert!(usage_error(&["--outline", "--links"], html).contains("cannot be combined"));
+    assert!(usage_error(&["--outline", "-m"], html).contains("--markdown"));
+    assert!(usage_error(&["--outline", "-a", "href"], html).contains("--attribute"));
+}
+
 // --- encoding ----------------------------------------------------------------
 
 #[test]
 fn non_utf8_input_falls_back_to_windows_1252() {
-    let (out, _, code) = domq_bytes(&["-t", "p"], b"<p>caf\xe9 \x93q\x94</p>");
+    let (out, err, code) = domq_bytes(&["-t", "p"], b"<p>caf\xe9 \x93q\x94</p>");
     assert_eq!((out.as_str(), code), ("caf\u{e9} \u{201c}q\u{201d}\n", 0));
+    assert!(
+        err.contains("warning: <stdin>: no charset declared") && err.contains("--encoding"),
+        "{err}"
+    );
+}
+
+#[test]
+fn stray_invalid_byte_recovers_utf8_repro() {
+    let mut input = Vec::new();
+    for _ in 0..50 {
+        input.extend_from_slice("<p>café naïve — “quotes” 日本語</p>".as_bytes());
+    }
+    input.extend_from_slice(b"<p>stray \xa0 byte</p>");
+    let (out, err, code) = domq_bytes(&["-t", "-1", "p"], &input);
+    assert_eq!(code, 0);
+    assert_eq!(out, "café naïve — “quotes” 日本語\n");
+    assert!(
+        err.contains("warning: <stdin>: 1 invalid UTF-8 sequence replaced with U+FFFD"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -708,10 +900,23 @@ fn utf16_input() {
 }
 
 #[test]
-fn unknown_encoding_warns() {
+fn unknown_encoding_is_usage_error() {
     let (out, err, code) = domq_bytes(&["--encoding=klingon", "-t"], b"<p>caf\xe9</p>");
-    assert_eq!((out.as_str(), code), ("caf\u{fffd}\n", 0));
-    assert!(err.contains("warning") && err.contains("klingon"), "{err}");
+    assert_eq!(code, 2);
+    assert!(out.is_empty(), "expected empty stdout, got {out:?}");
+    assert!(
+        err.contains("unknown or unsupported encoding 'klingon'") && err.contains("domq --help"),
+        "{err}"
+    );
+
+    let (out, err, code) = domq(&["lint", "--encoding=klingon"], "<p>x</p>");
+    assert_eq!(code, 2);
+    assert!(out.is_empty(), "expected empty stdout, got {out:?}");
+    assert!(
+        err.contains("unknown or unsupported encoding 'klingon'")
+            && err.contains("domq lint --help"),
+        "{err}"
+    );
 }
 
 // --- deep documents ----------------------------------------------------------
@@ -806,6 +1011,53 @@ fn closed_stdout_pipe_is_not_an_error() {
     let out = child.wait_with_output().expect("wait");
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(String::from_utf8_lossy(&out.stderr), "");
+}
+
+#[test]
+fn closed_stderr_pipe_does_not_panic_on_warning() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_domq"))
+        .args(["-t", "p"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    drop(child.stderr.take());
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"<p>hello \xff world</p>")
+        .expect("write");
+    let out = child.wait_with_output().expect("wait");
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("world"));
+}
+
+fn closed_stderr() -> Stdio {
+    let (reader, writer) = std::io::pipe().expect("pipe");
+    drop(reader);
+    Stdio::from(writer)
+}
+
+#[test]
+fn closed_stderr_pipe_does_not_panic_on_error() {
+    let out = Command::new(env!("CARGO_BIN_EXE_domq"))
+        .args(["lint", "nonexist.html"])
+        .stderr(closed_stderr())
+        .output()
+        .expect("output");
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn closed_stderr_pipe_does_not_panic_on_usage_error() {
+    let out = Command::new(env!("CARGO_BIN_EXE_domq"))
+        .args(["--encoding", "bogus", "-t", "p"])
+        .stderr(closed_stderr())
+        .output()
+        .expect("output");
+    assert_eq!(out.status.code(), Some(2));
 }
 
 // --- lint --------------------------------------------------------------------
@@ -976,11 +1228,14 @@ fn mcp_server_over_stdio() {
         r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
         r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"markdown","arguments":{"html":"<h1>Hi</h1><p>A <a href=x>link</a>"}}}"#,
         r#"{"jsonrpc":"2.0","id":2,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#,
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"markdown","arguments":{"html":"<p>A <a href=x>link</a> and <img src=y.png alt=cat></p>","links":"reference","images":"alt"}}}"#,
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"chunks","arguments":{"html":"<h1>Guide</h1><p><a href=/page>Link</a></p>","base_url":"https://example.com/","links":"footer"}}}"#,
+        r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"outline","arguments":{"html":"<nav><a href=/>Home</a></nav>"}}}"#,
     ];
     let (out, err, code) = domq(&["mcp"], &(requests.join("\n") + "\n"));
     assert_eq!(code, 0, "stderr: {err}");
     let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines.len(), 3, "{out}");
+    assert_eq!(lines.len(), 6, "{out}");
     assert!(
         lines[0].starts_with(r#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-11-25""#),
         "{}",
@@ -995,6 +1250,24 @@ fn mcp_server_over_stdio() {
         lines[2].contains(r#""resultType":"complete","supportedVersions":["2026-07-28""#),
         "{}",
         lines[2]
+    );
+    assert!(
+        lines[3].contains(r##""text":"A [link][1] and cat\n\n[1]: x""##),
+        "{}",
+        lines[3]
+    );
+    assert!(
+        // `chunks` ignores the link style: a chunk stands alone.
+        lines[4].contains(r##"[Link](https://example.com/page)"##),
+        "{}",
+        lines[4]
+    );
+    assert!(
+        lines[5].contains("navigation")
+            && lines[5].contains("structuredContent")
+            && lines[5].contains("link"),
+        "{}",
+        lines[5]
     );
 }
 

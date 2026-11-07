@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 use core::mem;
 
 use super::is_space;
+use super::markdown::{LinkStyle, MarkdownOptions};
 use crate::tree::{Dom, NodeRef};
 
 /// The longest heading title kept in a [`Chunk::heading_path`], in characters;
@@ -52,6 +53,21 @@ impl Chunk {
     /// ```
     pub fn context(&self) -> String {
         self.heading_path.join(" > ")
+    }
+
+    /// Split Markdown into chunks of at most `max_chars` characters, each
+    /// carrying its heading path; see [`Dom::to_markdown_chunks`].
+    ///
+    /// ```
+    /// use domq::Chunk;
+    ///
+    /// let md = "# Guide\n\nWelcome.\n\n## Install\n\nRun it.";
+    /// let chunks = Chunk::from_markdown(md, 1000);
+    /// assert_eq!(chunks[0].context(), "Guide");
+    /// assert_eq!(chunks[1].context(), "Guide > Install");
+    /// ```
+    pub fn from_markdown(markdown: &str, max_chars: usize) -> Vec<Chunk> {
+        chunk_markdown(markdown, max_chars)
     }
 }
 
@@ -105,9 +121,55 @@ impl Dom {
     pub fn to_markdown_chunks(&self, max_chars: usize) -> Vec<Chunk> {
         chunk_markdown(&self.to_markdown(), max_chars)
     }
+
+    /// Split the document into Markdown chunks using custom options; see [`Dom::to_markdown_chunks`].
+    ///
+    /// Every chunk stands alone, so links are always written inline,
+    /// whatever [`MarkdownOptions::link_style`] says: a reference
+    /// (`[text][1]`) points at a definition (`[1]: url`) or a footer list at
+    /// the end of the document, which would leave every other chunk with
+    /// links that go nowhere. The other options apply.
+    ///
+    /// ```
+    /// use domq::{LinkStyle, MarkdownOptions};
+    ///
+    /// let dom = domq::parse("<h1>Guide</h1><p><a href='/x'>Link</a></p>");
+    /// let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
+    /// let chunks = dom.to_markdown_chunks_with(500, &opts);
+    /// assert_eq!(chunks[0].markdown, "# Guide\n\n[Link](/x)");
+    /// ```
+    pub fn to_markdown_chunks_with(
+        &self,
+        max_chars: usize,
+        options: &MarkdownOptions,
+    ) -> Vec<Chunk> {
+        let options = options.clone().link_style(LinkStyle::Inline);
+        chunk_markdown(&self.to_markdown_with(&options), max_chars)
+    }
 }
 
 impl NodeRef<'_> {
+    /// This node's subtree as Markdown chunks with custom options; see
+    /// [`Dom::to_markdown_chunks_with`] (links are always written inline).
+    ///
+    /// ```
+    /// use domq::{LinkStyle, MarkdownOptions};
+    ///
+    /// let dom = domq::parse("<article><h1>Guide</h1><p><a href='/x'>Link</a></p></article>");
+    /// let article = dom.find_by_tag("article").next().unwrap();
+    /// let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
+    /// let chunks = article.to_markdown_chunks_with(500, &opts);
+    /// assert_eq!(chunks[0].markdown, "# Guide\n\n[Link](/x)");
+    /// ```
+    pub fn to_markdown_chunks_with(
+        &self,
+        max_chars: usize,
+        options: &MarkdownOptions,
+    ) -> Vec<Chunk> {
+        let options = options.clone().link_style(LinkStyle::Inline);
+        chunk_markdown(&self.to_markdown_with(&options), max_chars)
+    }
+
     /// This node's subtree as Markdown chunks; see [`Dom::to_markdown_chunks`].
     ///
     /// ```
@@ -478,6 +540,14 @@ fn heading_text(line: &str) -> String {
                 rest = skip_destination(after);
                 continue;
             }
+            // A reference label (`[text][1]`, `[text][]`): not part of the title.
+            ']' if after.starts_with('[') => {
+                rest = match after.find(']') {
+                    Some(end) => after.get(end + 1..).unwrap_or(""),
+                    None => after,
+                };
+                continue;
+            }
             ']' => {}
             c => out.push(c),
         }
@@ -532,21 +602,58 @@ fn code_span(body: &str, n: usize) -> Option<(&str, &str)> {
 
 /// Skip a link destination and title, `(…)`, returning what follows.
 fn skip_destination(rest: &str) -> &str {
+    let mut dest_started = false;
     let mut angle = false;
-    let mut quote = false;
+    let mut quote: Option<char> = None;
+    let mut parens = 0u32;
     let mut escaped = false;
     for (i, c) in rest.char_indices().skip(1) {
         if escaped {
             escaped = false;
             continue;
         }
-        match c {
-            '\\' => escaped = true,
-            '<' if !quote && i == 1 => angle = true,
-            '>' if angle => angle = false,
-            '"' if !angle => quote = !quote,
-            ')' if !angle && !quote => return rest.get(i + 1..).unwrap_or(""),
-            _ => {}
+        if c == '\\' {
+            escaped = true;
+            continue;
+        }
+        if !dest_started {
+            if is_space(c) {
+                continue;
+            }
+            dest_started = true;
+            if c == '<' {
+                angle = true;
+                continue;
+            }
+            if c == ')' {
+                return rest.get(i + 1..).unwrap_or("");
+            }
+        }
+        if angle {
+            if c == '>' {
+                angle = false;
+            }
+        } else {
+            match quote {
+                Some(q) if c == q => quote = None,
+                Some(_) => {}
+                None => match c {
+                    '"' | '\'' => quote = Some(c),
+                    '(' => {
+                        if parens < 32 {
+                            parens += 1;
+                        }
+                    }
+                    ')' => {
+                        if parens > 0 {
+                            parens -= 1;
+                        } else {
+                            return rest.get(i + 1..).unwrap_or("");
+                        }
+                    }
+                    _ => {}
+                },
+            }
         }
     }
     ""
@@ -560,5 +667,44 @@ impl serde::Serialize for Chunk {
         st.serialize_field("heading_path", &self.heading_path)?;
         st.serialize_field("markdown", &self.markdown)?;
         st.end()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skip_destination_balanced_parens_and_titles() {
+        assert_eq!(
+            skip_destination("(https://en.wikipedia.org/wiki/Rust_(programming_language)) Guide"),
+            " Guide"
+        );
+        assert_eq!(
+            skip_destination("(https://example.com/a 'Doc (v1)') Section"),
+            " Section"
+        );
+        assert_eq!(
+            skip_destination("(https://example.com/a \"Doc (v1)\") Section"),
+            " Section"
+        );
+        assert_eq!(
+            skip_destination("(<https://en.wikipedia.org/wiki/Rust_(programming_language)>) Guide"),
+            " Guide"
+        );
+    }
+
+    #[test]
+    fn heading_text_strips_links_with_parens_and_quotes() {
+        assert_eq!(
+            heading_text(
+                "# [Rust](https://en.wikipedia.org/wiki/Rust_(programming_language)) Guide"
+            ),
+            "Rust Guide"
+        );
+        assert_eq!(
+            heading_text("# [Link](https://example.com/a 'Doc (v1)') Section"),
+            "Link Section"
+        );
     }
 }

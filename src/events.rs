@@ -17,6 +17,7 @@ use core::ops::Range;
 use crate::builder::{Sink, TreeBuilder, lower};
 use crate::entities;
 use crate::error::ParseError;
+use crate::tags::Tag;
 use crate::tokenizer::Tokenizer;
 
 /// One step of a document as the tree builder sees it, after recovery. See
@@ -50,8 +51,9 @@ pub enum Event<'a> {
     /// (`<script>`, `<style>`, `<xmp>`, `<iframe>`, `<noembed>`, `<noframes>`,
     /// `<plaintext>`).
     /// CDATA sections are text too. Adjacent text can arrive in several
-    /// pieces (a stray `<` is its own piece), exactly like the tree's text
-    /// nodes.
+    /// pieces (the text on either side of a dropped `</>` or a CDATA section
+    /// is its own piece), exactly like the tree's text nodes. A `<` that
+    /// starts no markup (`a < b`) is part of its text.
     Text(Cow<'a, str>),
     /// The body of a comment (or of a bogus comment like `<?xml …>`).
     Comment(&'a str),
@@ -122,7 +124,8 @@ impl<'a> Iterator for Events<'a> {
             match self.tokenizer.next_token() {
                 Some((tok, pos)) => {
                     let end = self.tokenizer.offset();
-                    self.builder.token(tok, self.tokenizer.attrs(), pos, end);
+                    self.builder
+                        .token(tok, self.tokenizer.tag(), self.tokenizer.attrs(), pos, end);
                 }
                 None => {
                     self.builder.finish(self.len, &mut self.tokenizer.errors);
@@ -161,6 +164,7 @@ impl<'a> Sink<'a> for Queue<'a> {
         &mut self,
         _parent: Option<&Cow<'a, str>>,
         name: Cow<'a, str>,
+        _tag: Tag,
         _attrs: usize,
         start: usize,
         end: usize,

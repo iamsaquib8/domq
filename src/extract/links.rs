@@ -132,31 +132,7 @@ impl Dom {
     /// ```
     pub fn links(&self, base: Option<&str>) -> Vec<Link<'_>> {
         let base = self.base_url(base);
-        let base = base.as_deref().unwrap_or("");
-        let mut links: Vec<Link<'_>> = Vec::new();
-        let mut collector = TextCollector {
-            noscript: crate::serialize::noscript_is_content(self),
-            ..TextCollector::default()
-        };
-        for root in self.roots() {
-            walk(root, |node, enter| {
-                collector.visit(node, enter, |node, href| {
-                    links.push(Link {
-                        node,
-                        href,
-                        url: resolve_url(base, href),
-                        text: String::new(),
-                    });
-                    links.len() - 1
-                })
-            });
-        }
-        for (i, state) in collector.done.into_iter().enumerate() {
-            if let Some(link) = links.get_mut(i) {
-                link.text = state.finish(link.node);
-            }
-        }
-        links
+        collect_links(self, None, base.as_deref().unwrap_or(""))
     }
 
     /// Every embedded resource URL in the document, in document order:
@@ -190,35 +166,173 @@ impl Dom {
     /// ```
     pub fn resources(&self, base: Option<&str>) -> Vec<Resource<'_>> {
         let base = self.base_url(base);
-        let base = base.as_deref().unwrap_or("");
-        let mut out = Vec::new();
-        for node in document_order(self) {
-            let Some(tag) = node.tag_name() else {
-                continue;
-            };
-            let mut attrs: [Option<&'static str>; 5] =
-                [None, Some("src"), Some("srcset"), Some("poster"), None];
-            if tag == "link" {
-                attrs[0] = Some("href");
-            }
-            if tag == "object" {
-                attrs[4] = Some("data");
-            }
-            for attr in attrs.into_iter().flatten() {
-                let Some(value) = node.attr(attr) else {
-                    continue;
-                };
-                if attr == "srcset" {
-                    for (url, _) in srcset_candidates(value) {
-                        add_resource(&mut out, base, node, attr, url);
-                    }
-                } else {
-                    add_resource(&mut out, base, node, attr, value);
-                }
+        collect_resources(document_order(self), base.as_deref().unwrap_or(""))
+    }
+}
+
+impl<'a> NodeRef<'a> {
+    /// The hyperlinks inside this node's subtree (the node itself included),
+    /// in document order: what [`Dom::links`] returns for the links under
+    /// this node, with the same URLs and text, found by walking only the
+    /// subtree, so the cost follows its size and not the document's.
+    ///
+    /// URLs resolve against [`Dom::base_url`]`(base)`. Finding a `<base>`
+    /// element scans the document, so calling this for many nodes of a big
+    /// document costs one scan per call; compute [`Dom::base_url`] once and
+    /// use [`NodeRef::links_resolved`] instead.
+    ///
+    /// ```
+    /// let dom = domq::parse(
+    ///     r#"<div id=a><a href="/x">X</a></div><div id=b><a href="y">Y</a></div>"#,
+    /// );
+    /// let b = dom.find_by_tag("div").nth(1).unwrap();
+    /// let links = b.links(Some("https://example.com/dir/"));
+    /// assert_eq!(links.len(), 1);
+    /// assert_eq!(links[0].url, "https://example.com/dir/y");
+    /// assert_eq!(links[0].text, "Y");
+    /// ```
+    pub fn links(&self, base: Option<&str>) -> Vec<Link<'a>> {
+        let base = self.dom().base_url(base);
+        self.links_resolved(base.as_deref())
+    }
+
+    /// [`NodeRef::links`] with the base URL already worked out: `base` is the
+    /// result of [`Dom::base_url`] (`None` when there is none), used as is.
+    /// Nothing outside the subtree is scanned, apart from the node's
+    /// ancestors, which decide whether it is inside hidden content.
+    ///
+    /// ```
+    /// let dom = domq::parse(r#"<base href=/docs/><ul><li><a href=a.html>A</a></li></ul>"#);
+    /// let base = dom.base_url(Some("https://example.com/"));
+    /// let li = dom.find_by_tag("li").next().unwrap();
+    /// let links = li.links_resolved(base.as_deref());
+    /// assert_eq!(links[0].url, "https://example.com/docs/a.html");
+    /// ```
+    pub fn links_resolved(&self, base: Option<&str>) -> Vec<Link<'a>> {
+        collect_links(self.dom(), Some(*self), base.unwrap_or(""))
+    }
+
+    /// The embedded resource URLs inside this node's subtree (the node itself
+    /// included), in document order: what [`Dom::resources`] returns for the
+    /// resources under this node, found by walking only the subtree. The
+    /// base URL is found as in [`NodeRef::links`]; use
+    /// [`NodeRef::resources_resolved`] to skip that scan.
+    ///
+    /// ```
+    /// let dom = domq::parse(r#"<p id=a><img src=a.png></p><p id=b><img src=b.png></p>"#);
+    /// let b = dom.find_by_tag("p").nth(1).unwrap();
+    /// let found = b.resources(Some("https://example.com/"));
+    /// assert_eq!(found.len(), 1);
+    /// assert_eq!(found[0].url, "https://example.com/b.png");
+    /// ```
+    pub fn resources(&self, base: Option<&str>) -> Vec<Resource<'a>> {
+        let base = self.dom().base_url(base);
+        self.resources_resolved(base.as_deref())
+    }
+
+    /// [`NodeRef::resources`] with the base URL already worked out: `base` is
+    /// the result of [`Dom::base_url`], used as is.
+    ///
+    /// ```
+    /// let dom = domq::parse(r#"<p><img src=a.png></p>"#);
+    /// let base = dom.base_url(Some("https://example.com/"));
+    /// let p = dom.find_by_tag("p").next().unwrap();
+    /// assert_eq!(p.resources_resolved(base.as_deref())[0].url, "https://example.com/a.png");
+    /// ```
+    pub fn resources_resolved(&self, base: Option<&str>) -> Vec<Resource<'a>> {
+        collect_resources(
+            core::iter::once(*self).chain(self.descendants()),
+            base.unwrap_or(""),
+        )
+    }
+}
+
+/// The links of the whole document (`under` is `None`) or of the subtree of
+/// `under`, with the text and state the document-wide walk would have: the
+/// subtree's ancestors are entered first, in order, so a link nested in
+/// another link or in hidden content reads as it does there.
+fn collect_links<'a>(dom: &'a Dom, under: Option<NodeRef<'a>>, base: &str) -> Vec<Link<'a>> {
+    let mut links: Vec<Link<'a>> = Vec::new();
+    let mut collector = TextCollector {
+        noscript: dom.noscript_is_content(),
+        ..TextCollector::default()
+    };
+    let push = |links: &mut Vec<Link<'a>>, node: NodeRef<'a>, href: &'a str| {
+        links.push(Link {
+            node,
+            href,
+            url: resolve_url(base, href),
+            text: String::new(),
+        });
+        links.len() - 1
+    };
+    let mut skip = 0;
+    match under {
+        None => {
+            for root in dom.roots() {
+                walk(root, |node, enter| {
+                    collector.visit(node, enter, |node, href| push(&mut links, node, href))
+                });
             }
         }
-        out
+        Some(node) => {
+            let ancestors: Vec<NodeRef<'a>> = node.ancestors().collect();
+            for ancestor in ancestors.into_iter().rev() {
+                let open =
+                    collector.visit(ancestor, true, |node, href| push(&mut links, node, href));
+                if !open {
+                    // Inside an element whose content is not walked.
+                    return Vec::new();
+                }
+            }
+            // The ancestors that are links are not part of the subtree.
+            skip = links.len();
+            walk(node, |node, enter| {
+                collector.visit(node, enter, |node, href| push(&mut links, node, href))
+            });
+        }
     }
+    for (i, state) in collector.done.into_iter().enumerate().skip(skip) {
+        if let Some(link) = links.get_mut(i) {
+            link.text = state.finish(link.node);
+        }
+    }
+    links.drain(..skip);
+    links
+}
+
+/// The resources of `nodes`, in order, resolved against `base`.
+fn collect_resources<'a>(
+    nodes: impl Iterator<Item = NodeRef<'a>>,
+    base: &str,
+) -> Vec<Resource<'a>> {
+    let mut out = Vec::new();
+    for node in nodes {
+        let Some(tag) = node.tag_name() else {
+            continue;
+        };
+        let mut attrs: [Option<&'static str>; 5] =
+            [None, Some("src"), Some("srcset"), Some("poster"), None];
+        if tag == "link" {
+            attrs[0] = Some("href");
+        }
+        if tag == "object" {
+            attrs[4] = Some("data");
+        }
+        for attr in attrs.into_iter().flatten() {
+            let Some(value) = node.attr(attr) else {
+                continue;
+            };
+            if attr == "srcset" {
+                for (url, _) in srcset_candidates(value) {
+                    add_resource(&mut out, base, node, attr, url);
+                }
+            } else {
+                add_resource(&mut out, base, node, attr, value);
+            }
+        }
+    }
+    out
 }
 
 fn add_resource<'a>(

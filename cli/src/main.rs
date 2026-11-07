@@ -3,8 +3,15 @@
 //! A thin, zero-dependency wrapper over the `domq` library. Flags mirror
 //! `htmlq` where they overlap; see `domq --help`.
 
+#![warn(clippy::print_stderr)]
+
+macro_rules! warn {
+    ($($arg:tt)*) => {
+        $crate::emit_warn(format_args!($($arg)*))
+    };
+}
+
 mod args;
-mod encoding;
 mod extract;
 mod json;
 mod lint;
@@ -18,6 +25,16 @@ use std::process::ExitCode;
 use domq::{Dom, NodeRef, Selector};
 
 use args::{Command, Mode, Options};
+
+/// Write a message to stderr, ignoring any write failure (such as a closed
+/// pipe).
+pub(crate) fn emit_warn(args: std::fmt::Arguments<'_>) {
+    let mut stderr = io::stderr().lock();
+    let _ = stderr
+        .write_fmt(args)
+        .and_then(|()| stderr.write_all(b"\n"))
+        .and_then(|()| stderr.flush());
+}
 
 /// Attributes holding a single URL, rewritten by `--base`.
 const URL_ATTRS: &[&str] = &["href", "src", "action", "cite", "poster", "formaction"];
@@ -35,7 +52,7 @@ fn main() -> ExitCode {
             return match write_output(None, &report) {
                 Ok(()) => ExitCode::from(code),
                 Err(e) => {
-                    eprintln!("domq: {e}");
+                    warn!("domq: {e}");
                     ExitCode::from(2)
                 }
             };
@@ -48,7 +65,7 @@ fn main() -> ExitCode {
             return emit(None, &format!("domq {}\n", env!("CARGO_PKG_VERSION")));
         }
         Err(e) => {
-            eprintln!("domq: {e}\nTry '{}' for more information.", e.help);
+            warn!("domq: {e}\nTry '{}' for more information.", e.help);
             return ExitCode::from(2);
         }
     };
@@ -57,12 +74,12 @@ fn main() -> ExitCode {
             Ok(()) if opts.exit_status && !out.matched => ExitCode::FAILURE,
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
-                eprintln!("domq: {e}");
+                warn!("domq: {e}");
                 ExitCode::FAILURE
             }
         },
         Err(e) => {
-            eprintln!("domq: {e}");
+            warn!("domq: {e}");
             ExitCode::FAILURE
         }
     }
@@ -108,6 +125,9 @@ fn run(opts: &Options) -> Result<Output, String> {
     if opts.links {
         return Ok(links_output(&dom, scope.as_ref(), base.as_deref(), opts));
     }
+    if opts.outline {
+        return Ok(outline_output(&dom, scope.as_ref(), opts));
+    }
 
     let selector = match (scope, &opts.attribute, opts.mode) {
         (Some(sel), _, _) => Some(sel),
@@ -122,12 +142,9 @@ fn run(opts: &Options) -> Result<Output, String> {
             matched: true,
         });
     };
-    let mut matches: Vec<NodeRef<'_>> = dom.select(&selector).collect();
+    let matches: Vec<NodeRef<'_>> = dom.select(&selector).collect();
     if opts.mode == Mode::Csv {
         return Ok(csv_output(&matches, opts.first));
-    }
-    if opts.first {
-        matches.truncate(1);
     }
     Ok(match_output(&matches, opts))
 }
@@ -144,7 +161,7 @@ fn document_output(dom: &Dom, opts: &Options) -> String {
         }
         Mode::Html => dom.to_html(),
         Mode::Text => dom.to_text(),
-        Mode::Markdown => dom.to_markdown(),
+        Mode::Markdown => dom.to_markdown_with(&opts.markdown_options()),
         Mode::Json | Mode::Jsonl => dom.to_json(),
         // Both always have a selector (see `run`).
         Mode::Count | Mode::Csv => String::new(),
@@ -155,11 +172,14 @@ fn document_output(dom: &Dom, opts: &Options) -> String {
 /// Output for a list of selected elements.
 fn match_output(matches: &[NodeRef<'_>], opts: &Options) -> Output {
     if let Some(name) = &opts.attribute {
-        let values: Vec<&str> = matches
+        let mut values: Vec<&str> = matches
             .iter()
             .filter_map(|m| m.attr(name))
             .filter(|v| !(opts.ignore_whitespace && v.trim().is_empty()))
             .collect();
+        if opts.first {
+            values.truncate(1);
+        }
         let matched = !values.is_empty();
         let text = match opts.mode {
             Mode::Count => format!("{}\n", values.len()),
@@ -169,41 +189,72 @@ fn match_output(matches: &[NodeRef<'_>], opts: &Options) -> Output {
         };
         return Output { text, matched };
     }
-    let mut matched = !matches.is_empty();
-    let text = match opts.mode {
-        Mode::Count => format!("{}\n", matches.len()),
-        Mode::Json => format!("{}\n", json::array(matches.iter().map(|m| m.to_json()))),
-        Mode::Jsonl => lines(matches.iter().map(|m| m.to_json()), "\n"),
+    let (text, matched) = match opts.mode {
+        Mode::Count => {
+            let count = if opts.ignore_whitespace {
+                matches
+                    .iter()
+                    .filter(|m| !m.to_text().trim().is_empty())
+                    .take(if opts.first { 1 } else { usize::MAX })
+                    .count()
+            } else if opts.first {
+                matches.len().min(1)
+            } else {
+                matches.len()
+            };
+            (format!("{count}\n"), count > 0)
+        }
         Mode::Text => {
-            let values: Vec<String> =
+            let mut values: Vec<String> =
                 non_blank(matches.iter().map(|m| m.to_text()), opts).collect();
-            matched = !values.is_empty();
-            lines(values.into_iter(), "\n")
+            if opts.first {
+                values.truncate(1);
+            }
+            let matched = !values.is_empty();
+            (lines(values.into_iter(), "\n"), matched)
         }
         Mode::Markdown => {
-            let values: Vec<String> =
-                non_blank(matches.iter().map(|m| m.to_markdown()), opts).collect();
-            matched = !values.is_empty();
-            lines(values.into_iter(), "\n\n")
-        }
-        Mode::Html if opts.pretty => {
-            let mut out = String::new();
-            for m in matches {
-                pretty::write(*m, &mut out);
+            let md_opts = opts.markdown_options();
+            let mut values: Vec<String> =
+                non_blank(matches.iter().map(|m| m.to_markdown_with(&md_opts)), opts).collect();
+            if opts.first {
+                values.truncate(1);
             }
-            out
+            let matched = !values.is_empty();
+            (lines(values.into_iter(), "\n\n"), matched)
         }
-        Mode::Html | Mode::Csv => lines(matches.iter().map(|m| m.to_html()), "\n"),
+        _ => {
+            let selected = if opts.first {
+                &matches[..matches.len().min(1)]
+            } else {
+                matches
+            };
+            let matched = !selected.is_empty();
+            let text = match opts.mode {
+                Mode::Json => format!("{}\n", json::array(selected.iter().map(|m| m.to_json()))),
+                Mode::Jsonl => lines(selected.iter().map(|m| m.to_json()), "\n"),
+                Mode::Html if opts.pretty => {
+                    let mut out = String::new();
+                    for m in selected {
+                        pretty::write(*m, &mut out);
+                    }
+                    out
+                }
+                Mode::Html | Mode::Csv => lines(selected.iter().map(|m| m.to_html()), "\n"),
+                // Handled above.
+                Mode::Count | Mode::Text | Mode::Markdown => String::new(),
+            };
+            (text, matched)
+        }
     };
     Output { text, matched }
 }
 
 /// `--csv`: each matched `<table>` with rows as RFC 4180 CSV, separated by a
-/// blank line. Other matches and tables without rows are skipped.
+/// blank line. For non-table matches, the outermost tables inside them are used.
 fn csv_output(matches: &[NodeRef<'_>], first: bool) -> Output {
-    let tables: Vec<String> = matches
-        .iter()
-        .filter(|m| m.tag_name() == Some("table"))
+    let tables: Vec<String> = matched_tables(matches)
+        .into_iter()
         .map(|t| t.table_rows())
         .filter(|rows| !rows.is_empty())
         .take(if first { 1 } else { usize::MAX })
@@ -213,6 +264,43 @@ fn csv_output(matches: &[NodeRef<'_>], first: bool) -> Output {
         matched: !tables.is_empty(),
         text: tables.join("\r\n"),
     }
+}
+
+/// The tables to extract from a list of matched elements: for each element,
+/// the element itself if it is a `<table>`, or the outermost `<table>`s
+/// inside it in document order.
+pub(crate) fn matched_tables<'a>(matches: &[NodeRef<'a>]) -> Vec<NodeRef<'a>> {
+    let mut tables = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for &m in matches {
+        for table in outermost_tables(m) {
+            if seen.insert(table.id()) {
+                tables.push(table);
+            }
+        }
+    }
+    tables
+}
+
+/// The element itself if it is a `<table>`, or every outermost `<table>` descendant.
+/// Does not descend into nested `<table>`s.
+fn outermost_tables<'a>(node: NodeRef<'a>) -> Vec<NodeRef<'a>> {
+    if node.tag_name() == Some("table") {
+        return vec![node];
+    }
+    let mut tables = Vec::new();
+    let mut stack: Vec<NodeRef<'a>> = node.child_elements().collect();
+    stack.reverse();
+    while let Some(current) = stack.pop() {
+        if current.tag_name() == Some("table") {
+            tables.push(current);
+        } else {
+            let mut children: Vec<_> = current.child_elements().collect();
+            children.reverse();
+            stack.extend(children);
+        }
+    }
+    tables
 }
 
 /// `-e`: one object, or one per match of the scope selector.
@@ -277,6 +365,67 @@ fn links_output(dom: &Dom, scope: Option<&Selector>, base: Option<&str>, opts: &
                 .map(|(url, text)| format!("{}\t{}", one_field(url), one_field(text))),
             "\n",
         ),
+    };
+    Output { text, matched }
+}
+
+/// The outline of every match of `sel`, renumbered from 1. Matches inside
+/// another match are skipped, so nested matches (`div` on nested `<div>`s)
+/// list each control once instead of once per enclosing match.
+pub(crate) fn scoped_outline(dom: &Dom, sel: &Selector) -> domq::PageOutline {
+    let mut marks = vec![false; dom.len()];
+    let matches: Vec<_> = dom.select(sel).collect();
+    for m in &matches {
+        if let Some(mark) = marks.get_mut(m.id().index()) {
+            *mark = true;
+        }
+    }
+    // Parents come before their children in `nodes()`, so one pass marks
+    // everything inside a match.
+    for node in dom.nodes() {
+        let parent_inside = node
+            .parent()
+            .is_some_and(|p| marks.get(p.id().index()).copied().unwrap_or(false));
+        if let Some(mark) = marks.get_mut(node.id().index()) {
+            *mark |= parent_inside;
+        }
+    }
+    let mut combined = domq::PageOutline::default();
+    for m in matches {
+        let nested = m
+            .parent()
+            .is_some_and(|p| marks.get(p.id().index()).copied().unwrap_or(false));
+        if !nested {
+            combined.nodes.extend(m.outline().nodes);
+        }
+    }
+    for (i, node) in combined.nodes.iter_mut().enumerate() {
+        node.ref_id = i + 1;
+    }
+    combined
+}
+
+fn outline_output(dom: &Dom, scope: Option<&Selector>, opts: &Options) -> Output {
+    let mut outline = match scope {
+        Some(sel) => scoped_outline(dom, sel),
+        None => dom.outline(),
+    };
+    if opts.first {
+        outline.nodes.truncate(1);
+    }
+    let matched = !outline.nodes.is_empty();
+    let text = match opts.mode {
+        Mode::Count => format!("{}\n", outline.nodes.len()),
+        Mode::Json => with_newline(outline.to_json()),
+        Mode::Jsonl => {
+            let mut out = String::new();
+            for node in &outline.nodes {
+                out.push_str(&node.to_json());
+                out.push('\n');
+            }
+            out
+        }
+        _ => with_newline(outline.to_text()),
     };
     Output { text, matched }
 }
@@ -450,13 +599,13 @@ fn read_input(path: Option<&str>, encoding: Option<&str>) -> Result<String, Stri
         }
         Some(p) => fs::read(p).map_err(|e| format!("reading {p}: {e}"))?,
     };
-    let decoded = encoding::decode(bytes, encoding);
+    let decoded = domq::decode_with(&bytes, encoding);
     if let Some(warning) = &decoded.warning {
         let name = match path {
             None | Some("-") => "<stdin>",
             Some(p) => p,
         };
-        eprintln!("domq: warning: {name}: {warning}");
+        warn!("domq: warning: {name}: {warning}");
     }
     Ok(decoded.text)
 }
@@ -484,7 +633,7 @@ fn emit(path: Option<&str>, out: &str) -> ExitCode {
     match write_output(path, out) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("domq: {e}");
+            warn!("domq: {e}");
             ExitCode::FAILURE
         }
     }

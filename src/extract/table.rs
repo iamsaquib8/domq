@@ -10,17 +10,17 @@ use crate::tree::{Dom, NodeRef};
 
 /// `colspan` and `rowspan` above this are clamped (HTML clamps `colspan` at
 /// 1000 too).
-const MAX_SPAN: usize = 1000;
+pub(crate) const MAX_SPAN: usize = 1000;
 
 /// Cells that spans (and the padding a `rowspan` forces into a short row) may
 /// add beyond the table's own cells: this plus [`SPAN_FACTOR`] per cell.
-const SPAN_CELLS: usize = 100_000;
+pub(crate) const SPAN_CELLS: usize = 100_000;
 
 /// Bytes of cell text that spans may duplicate: this plus [`SPAN_FACTOR`]
 /// times the table's own text.
 const SPAN_BYTES: usize = 1 << 22;
 
-const SPAN_FACTOR: usize = 4;
+pub(crate) const SPAN_FACTOR: usize = 4;
 
 impl NodeRef<'_> {
     /// The rows of a `<table>` as cell text, with `colspan` and `rowspan`
@@ -179,6 +179,8 @@ impl NodeRef<'_> {
 ///     "Name,Note\r\nAnn,\"says \"\"hi\"\", twice\"\r\n",
 /// );
 /// assert_eq!(domq::to_csv([["a", "b\nc"]]), "a,\"b\nc\"\r\n");
+/// // A single empty cell in a row is written as `""` so it is not a blank line:
+/// assert_eq!(domq::to_csv([["a"], [""], ["b"]]), "a\r\n\"\"\r\nb\r\n");
 /// ```
 pub fn to_csv<R, C, S>(rows: R) -> String
 where
@@ -188,9 +190,13 @@ where
 {
     let mut out = String::new();
     for row in rows {
+        let mut single_empty = false;
         for (i, field) in row.into_iter().enumerate() {
             if i > 0 {
+                single_empty = false;
                 out.push(',');
+            } else if field.as_ref().is_empty() {
+                single_empty = true;
             }
             let field = field.as_ref();
             if field.contains([',', '"', '\r', '\n']) {
@@ -205,6 +211,9 @@ where
             } else {
                 out.push_str(field);
             }
+        }
+        if single_empty {
+            out.push_str("\"\"");
         }
         out.push_str("\r\n");
     }
@@ -388,7 +397,7 @@ fn take_pending(line: &mut Vec<String>, pending: &mut [Option<(usize, String)>])
 /// integers: leading ASCII whitespace is skipped, then an optional `+` (or a
 /// `-`, valid only before zero), then the leading digits (`"2px"` is 2).
 /// Missing or invalid: 1.
-fn span(value: Option<&str>) -> usize {
+pub(crate) fn span(value: Option<&str>) -> usize {
     let Some(value) = value else {
         return 1;
     };

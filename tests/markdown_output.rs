@@ -240,6 +240,62 @@ fn ordered_lists() {
 }
 
 #[test]
+fn a_nested_ordered_list_not_starting_at_1_follows_a_blank_line() {
+    // An ordered list can only interrupt a paragraph when it starts at 1, so
+    // anything else after the item's text would be swallowed into it.
+    for (html, want) in [
+        (
+            "<ul><li>Item<ol start=5><li>five</li><li>six</li></ol></li></ul>",
+            "- Item\n\n  5. five\n  6. six",
+        ),
+        (
+            "<ul><li>Item<ol start=0><li>zero</li></ol></li></ul>",
+            "- Item\n\n  0. zero",
+        ),
+        (
+            "<ol><li>One<ol start=3><li>three</li></ol></li></ol>",
+            "1. One\n\n   3. three",
+        ),
+        (
+            "<ul><li>Item<ol reversed><li>a</li><li>b</li><li>c</li></ol></li></ul>",
+            "- Item\n\n  3. a\n  2. b\n  1. c",
+        ),
+        (
+            "<ol><li>One<ol reversed><li>a</li><li>b</li></ol></li></ol>",
+            "1. One\n\n   2. a\n   1. b",
+        ),
+        // The first item's own number counts.
+        (
+            "<ul><li>Item<ol><li value=7>a</li></ol></li></ul>",
+            "- Item\n\n  7. a",
+        ),
+        (
+            "<ul><li>Item<ol start=7><li value=1>a</li></ol></li></ul>",
+            "- Item\n  1. a",
+        ),
+        // Starting at 1 (the default), or a bullet list, stays tight.
+        (
+            "<ul><li>Item<ol><li>a</li></ol></li></ul>",
+            "- Item\n  1. a",
+        ),
+        (
+            "<ul><li>Item<ol start=1><li>a</li></ol></li></ul>",
+            "- Item\n  1. a",
+        ),
+        (
+            "<ol start=5><li>Item<ul><li>a</li></ul></li></ol>",
+            "5. Item\n   - a",
+        ),
+        (
+            "<ol reversed><li>Item<ol reversed><li>a</li></ol></li></ol>",
+            "1. Item\n   1. a",
+        ),
+    ] {
+        assert_eq!(md(html), want, "{html}");
+    }
+}
+
+#[test]
 fn list_item_values_and_reversed_lists() {
     // Numbers are what a browser shows (renderers only honour the first).
     assert_eq!(md("<ol><li>a<li value=7>b<li>c</ol>"), "1. a\n7. b\n8. c");
@@ -521,6 +577,47 @@ fn escapes_line_start_syntax() {
 }
 
 #[test]
+fn escapes_block_syntax_formed_across_nodes() {
+    // `<span>1</span>. x` and React's `1<!-- -->. x` read as an ordered list
+    // once the nodes are joined (checked with markdown-it and cmark-gfm).
+    assert_eq!(
+        md("<p><span>1</span>. Introduction</p>"),
+        r"1\. Introduction"
+    );
+    assert_eq!(md("<p>1<!-- -->. Introduction</p>"), r"1\. Introduction");
+    assert_eq!(md("<p>2024<!-- -->) was a year</p>"), r"2024\) was a year");
+    assert_eq!(
+        md("<p><b>1</b>. Not at the start</p>"),
+        "**1**. Not at the start"
+    );
+    // After a hard break, and as the first thing in an item or a quote.
+    assert_eq!(md("<p>a<br><i></i>3<!-- -->. b</p>"), "a\\\n3\\. b");
+    assert_eq!(md("<ul><li>1<!-- -->. x</li></ul>"), r"- 1\. x");
+    assert_eq!(md("<blockquote>1<!-- -->. x</blockquote>"), r"> 1\. x");
+    // Not a marker: a decimal, a longer run, no space, a heading's text.
+    assert_eq!(md("<p>1<!-- -->.5 apples</p>"), "1.5 apples");
+    assert_eq!(md("<p>1234567890<!-- -->. x</p>"), "1234567890. x");
+    assert_eq!(md("<h2><span>1</span>. Intro</h2>"), "## 1. Intro");
+    assert_eq!(md("<p>x<!-- -->1. y</p>"), "x1. y");
+    // A delimiter-row lookalike after a hard break would turn the line above
+    // into a table header.
+    assert_eq!(md("<p>a|b<br>|---|---|</p>"), "a|b\\\n\\|---\\|---\\|");
+    assert_eq!(md("<p>a|b<br>:-:|--</p>"), "a|b\\\n:-:\\|--");
+    assert_eq!(md("<p>|---|---|</p>"), "|---|---|");
+    assert_eq!(md("<p>a|b<br>x|---|</p>"), "a|b\\\nx|---|");
+}
+
+#[test]
+fn a_rule_first_in_a_bullet_item_stays_in_its_item() {
+    // `- ---` is one thematic break, and the list would be gone.
+    assert_eq!(md("<ul><li><hr></li></ul>"), "- ***");
+    assert_eq!(md("<ul><li><ul><li><hr></li></ul></li></ul>"), "- - ***");
+    assert_eq!(md("<ol><li><hr>x</li></ol>"), "1. ---\n\n   x");
+    assert_eq!(md("<ul><li>a<hr>b</li></ul>"), "- a\n\n  ---\n\n  b");
+    assert_eq!(md("<blockquote><hr></blockquote>"), "> ---");
+}
+
+#[test]
 fn does_not_over_escape_prose() {
     let prose = "Hello, world. It costs $3.50 - or 3.5 - and a-b is fine (really!) #hashtag C# 100% #1: ok?";
     assert_eq!(md(&format!("<p>{prose}</p>")), prose);
@@ -605,3 +702,424 @@ macro_rules! page_snapshot {
 page_snapshot!(page_blog, "blog.html");
 page_snapshot!(page_docs, "docs.html");
 page_snapshot!(page_messy, "messy.html");
+
+// --- MarkdownOptions tests ----------------------------------------------------
+
+use domq::{ImageStyle, LinkStyle, MarkdownOptions};
+
+#[test]
+fn markdown_options_link_style_reference() {
+    let html = "<p>Visit <a href='https://example.com' title='Home'>Example</a> and \
+                <a href='https://example.com' title='Home'>again</a>, then \
+                <a href='/about'>About</a>.</p>";
+    let dom = parse(html);
+    let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
+    assert_eq!(
+        dom.to_markdown_with(&opts),
+        "Visit [Example][1] and [again][1], then [About][2].\n\n\
+         [1]: https://example.com \"Home\"\n\
+         [2]: /about"
+    );
+}
+
+#[test]
+fn markdown_options_link_style_footer() {
+    let html = "<p>Visit <a href='https://example.com' title='Home'>Example</a> and \
+                <a href='https://example.com' title='Home'>again</a>, then \
+                <a href='https://rust-lang.org'>Rust</a>.</p>";
+    let dom = parse(html);
+    let opts = MarkdownOptions::default().link_style(LinkStyle::Footer);
+    assert_eq!(
+        dom.to_markdown_with(&opts),
+        "Visit Example [1] and again [1], then Rust [2].\n\n\
+         ### Links\n\n\
+         1. [Example](https://example.com \"Home\")\n\
+         2. [Rust](https://rust-lang.org)"
+    );
+}
+
+#[test]
+fn markdown_options_image_styles() {
+    let html = "<p>Photo: <img src='photo.jpg' alt='A cat' title='Cute cat'> end</p>";
+    let dom = parse(html);
+
+    // Keep (default)
+    let opts_keep = MarkdownOptions::default().image_style(ImageStyle::Keep);
+    assert_eq!(
+        dom.to_markdown_with(&opts_keep),
+        "Photo: ![A cat](photo.jpg \"Cute cat\") end"
+    );
+
+    // AltOnly
+    let opts_alt = MarkdownOptions::default().image_style(ImageStyle::AltOnly);
+    assert_eq!(dom.to_markdown_with(&opts_alt), "Photo: A cat end");
+
+    // Drop
+    let opts_drop = MarkdownOptions::default().image_style(ImageStyle::Drop);
+    assert_eq!(dom.to_markdown_with(&opts_drop), "Photo: end");
+}
+
+#[test]
+fn markdown_options_drop_data_uris() {
+    let html = "<p>An <img src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' alt='Red dot'> \
+                and a <a href='data:text/plain;charset=utf-8,hello'>data link</a>.</p>";
+    let dom = parse(html);
+
+    // Default retains data: URIs
+    let md_default = dom.to_markdown();
+    assert!(md_default.contains("![Red dot](data:image/png;base64,"));
+    assert!(md_default.contains("[data link](data:text/plain;charset=utf-8,hello)"));
+
+    // drop_data_uris = true strips them
+    let opts = MarkdownOptions::default().drop_data_uris(true);
+    assert_eq!(dom.to_markdown_with(&opts), "An Red dot and a data link.");
+}
+
+#[test]
+fn drop_data_uris_does_not_panic_on_multibyte_urls() {
+    // Byte index 5 falls inside 'é' for "ééé"; slicing by chars would panic (#88).
+    let html = "<p><a href=\"ééé\">x</a> <img src=\"ééé\" alt=\"y\"></p>";
+    let dom = parse(html);
+    let opts = MarkdownOptions::default().drop_data_uris(true);
+    let md = dom.to_markdown_with(&opts);
+    assert!(md.contains("[x]("), "{md}");
+    assert!(md.contains("![y]("), "{md}");
+    assert!(!md.contains("data:"), "{md}");
+
+    // Every MarkdownOptions combination must stay panic-free on these hrefs.
+    for drop in [false, true] {
+        for link in [LinkStyle::Inline, LinkStyle::Reference, LinkStyle::Footer] {
+            for image in [ImageStyle::Keep, ImageStyle::AltOnly, ImageStyle::Drop] {
+                let o = MarkdownOptions::default()
+                    .drop_data_uris(drop)
+                    .link_style(link)
+                    .image_style(image);
+                let _ = dom.to_markdown_with(&o);
+            }
+        }
+    }
+}
+
+#[test]
+fn markdown_options_base_url() {
+    let html =
+        "<p>Read <a href='post.html'>post</a> and see <img src='../img/logo.png' alt='Logo'>.</p>";
+    let dom = parse(html);
+
+    let opts = MarkdownOptions::default().base_url("https://example.com/blog/2026/");
+    assert_eq!(
+        dom.to_markdown_with(&opts),
+        "Read [post](https://example.com/blog/2026/post.html) and see ![Logo](https://example.com/blog/img/logo.png)."
+    );
+
+    // Combined with LinkStyle::Reference
+    let opts_ref = MarkdownOptions::default()
+        .base_url("https://example.com/blog/2026/")
+        .link_style(LinkStyle::Reference);
+    assert_eq!(
+        dom.to_markdown_with(&opts_ref),
+        "Read [post][1] and see ![Logo](https://example.com/blog/img/logo.png).\n\n\
+         [1]: https://example.com/blog/2026/post.html"
+    );
+}
+
+#[test]
+fn markdown_options_chunks() {
+    let html = "<h1>Title</h1><p>Visit <a href='/page'>Page</a>.</p>";
+    let dom = parse(html);
+
+    let opts = MarkdownOptions::default()
+        .base_url("https://example.com/")
+        .link_style(LinkStyle::Reference);
+    // The base URL applies; the reference style does not (a chunk stands
+    // alone, so its links are inline).
+    let chunks = dom.to_markdown_chunks_with(1000, &opts);
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(
+        chunks[0].markdown,
+        "# Title\n\nVisit [Page](https://example.com/page)."
+    );
+}
+
+// The footer link style (#97): `text [1]` with a list, no dangling references.
+
+#[test]
+fn footer_links_are_citations_and_entries_keep_their_markup() {
+    use domq::{LinkStyle, MarkdownOptions};
+    let opts = MarkdownOptions::default().link_style(LinkStyle::Footer);
+    let md = |html: &str| parse(html).to_markdown_with(&opts);
+    // The repro: an image-only link and a link with emphasis and underscores.
+    assert_eq!(
+        md("<p><a href=\"/x\"><img src=\"i.png\" alt=\"Logo\"></a> \
+            <a href=\"/y\"><b>bold *x*</b> text_with_under</a></p>"),
+        "![Logo](i.png) [1] **bold \\*x\\*** text_with_under [2]\n\n\
+         ### Links\n\n\
+         1. [![Logo](i.png)](/x)\n\
+         2. [**bold \\*x\\*** text_with_under](/y)"
+    );
+    // Link text is escaped in the list, like the text itself.
+    assert_eq!(
+        md("<p>See <a href=/a>A *star*</a>, <a href=/b title=T>[B]</a>.</p>"),
+        "See A \\*star\\* [1], \\[B\\] [2].\n\n\
+         ### Links\n\n\
+         1. [A \\*star\\*](/a)\n\
+         2. [\\[B\\]](/b \"T\")"
+    );
+    // Hidden content is not link text; a hard break is a space; an empty
+    // link reads as its URL, inline and in the list.
+    assert_eq!(
+        md(
+            "<p><a href=/x><span hidden>hid</span>shown</a> <a href=/z>a<br>b</a> <a href=/q></a></p>"
+        ),
+        "shown [1] a\\\nb [2] /q [3]\n\n\
+         ### Links\n\n\
+         1. [shown](/x)\n\
+         2. [a b](/z)\n\
+         3. [/q](/q)"
+    );
+    // The same link twice shares its number.
+    assert_eq!(
+        md("<p><a href=/x>A</a> and <a href=/x>again</a></p>"),
+        "A [1] and again [1]\n\n### Links\n\n1. [A](/x)"
+    );
+    // Without links there is no footer.
+    assert_eq!(md("<p>plain</p>"), "plain");
+}
+
+// Tables with colspan and rowspan (#98).
+
+/// The cells of a Markdown table's rows (the delimiter row skipped), split at
+/// unescaped pipes.
+fn md_table(md: &str) -> Vec<Vec<String>> {
+    md.lines()
+        .filter(|l| l.starts_with('|') && !l.starts_with("| ---"))
+        .map(|l| {
+            let inner = l.trim_start_matches('|').trim_end_matches('|');
+            inner.split(" |").map(|c| c.trim().to_string()).collect()
+        })
+        .collect()
+}
+
+#[test]
+fn spanned_cells_keep_their_columns() {
+    // The repro: `Rank` sat over column 3 and its value under column 4.
+    assert_eq!(
+        md(
+            "<table><tr><th>Name</th><th colspan=\"2\">Score</th><th>Rank</th></tr>\
+            <tr><td>A</td><td>1</td><td>2</td><td>3</td></tr></table>"
+        ),
+        "| Name | Score | | Rank |\n| --- | --- | --- | --- |\n| A | 1 | 2 | 3 |"
+    );
+    // A rowspan leaves empty cells below its anchor; row groups end it.
+    assert_eq!(
+        md(
+            "<table><thead><tr><th>Region</th><th>Q1</th><th>Q2</th></tr></thead>\
+            <tbody><tr><td rowspan=2>EU</td><td>10</td><td>12</td></tr>\
+            <tr><td colspan=2>n/a</td></tr></tbody></table>"
+        ),
+        "| Region | Q1 | Q2 |\n| --- | --- | --- |\n| EU | 10 | 12 |\n| | n/a | |"
+    );
+    assert_eq!(
+        md(
+            "<table><thead><tr><th rowspan=3>H</th><th>a</th></tr></thead>\
+            <tbody><tr><td>1</td><td>2</td></tr></tbody></table>"
+        ),
+        "| H | a |\n| --- | --- |\n| 1 | 2 |"
+    );
+    // `rowspan=0` covers the rest of its group.
+    assert_eq!(
+        md(
+            "<table><tr><td rowspan=0>a</td><td>b</td></tr><tr><td>c</td></tr><tr><td>d</td></tr></table>"
+        ),
+        "| a | b |\n| --- | --- |\n| | c |\n| | d |"
+    );
+    // Both at once, and a rowspan reaching past a short row.
+    assert_eq!(
+        md(
+            "<table><tr><td>x</td><td rowspan=2 colspan=2>big</td></tr><tr><td>y</td></tr>\
+            <tr><td>1</td><td>2</td><td>3</td></tr></table>"
+        ),
+        "| x | big | |\n| --- | --- | --- |\n| y | | |\n| 1 | 2 | 3 |"
+    );
+    // Invalid or missing spans are 1; formatting stays in the cell.
+    assert_eq!(
+        md("<table><tr><td colspan=x rowspan=-2><b>a</b></td><td colspan=' 2'>b</td></tr></table>"),
+        "| **a** | b | |\n| --- | --- | --- |"
+    );
+}
+
+#[test]
+fn the_markdown_grid_matches_table_rows() {
+    for html in [
+        "<table><tr><th>Name</th><th colspan=2>Score</th><th>Rank</th></tr><tr><td>A</td><td>1</td><td>2</td><td>3</td></tr></table>",
+        "<table><thead><tr><th>R</th><th>Q1</th><th>Q2</th></tr></thead><tbody><tr><td rowspan=2>EU</td><td>10</td><td>12</td></tr><tr><td colspan=2>n/a</td></tr></tbody></table>",
+        "<table><tr><td rowspan=0>a</td><td>b</td></tr><tr><td>c</td></tr><tr><td>d</td></tr></table>",
+        "<table><tr><td>x</td><td rowspan=2 colspan=2>big</td></tr><tr><td>y</td></tr><tr><td>1</td><td>2</td><td>3</td></tr></table>",
+        "<table><tr><td rowspan=4>a</td></tr><tr><td>b</td></tr></table>",
+        "<table><tr><td colspan=3>wide</td></tr><tr><td>1</td><td rowspan=2>2</td><td>3</td></tr><tr><td>4</td><td>5</td></tr></table>",
+        "<table><tbody><tr><td rowspan=5>a</td><td>b</td></tr></tbody><tbody><tr><td>c</td></tr><tr><td>d</td><td>e</td></tr></tbody></table>",
+    ] {
+        let dom = parse(html);
+        let table = dom.find_by_tag("table").next().unwrap();
+        let rows = table.table_rows();
+        let grid = md_table(&dom.to_markdown());
+        assert_eq!(grid.len(), rows.len(), "{html}");
+        let width = rows.iter().map(Vec::len).max().unwrap();
+        for (g, r) in grid.iter().zip(&rows) {
+            // The same number of columns in every row, and each cell either
+            // the text of its slot or empty (a slot a span covers).
+            assert_eq!(g.len(), width, "{html}: {grid:?}");
+            for (i, cell) in g.iter().enumerate() {
+                if let Some(want) = r.get(i) {
+                    assert!(
+                        cell.is_empty() || cell == want,
+                        "{html}: {grid:?} vs {rows:?}"
+                    );
+                }
+            }
+        }
+        // Every slot's text appears at its anchor: the first slot of each
+        // distinct run of equal cells in table_rows.
+        let texts = |rows: &[Vec<String>]| {
+            let mut all: Vec<String> = rows
+                .iter()
+                .flatten()
+                .filter(|c| !c.is_empty())
+                .cloned()
+                .collect();
+            all.dedup();
+            all
+        };
+        let anchors: Vec<String> = grid
+            .iter()
+            .flatten()
+            .filter(|c| !c.is_empty())
+            .cloned()
+            .collect();
+        for t in texts(&rows) {
+            assert!(anchors.contains(&t), "{html}: {t} missing from {grid:?}");
+        }
+    }
+}
+
+#[test]
+fn hostile_spans_are_bounded() {
+    // Every cell asks for 1000 x 1000; the budget turns most into 1 x 1.
+    let cell = "<td colspan=1000 rowspan=1000>x</td>";
+    let html = format!(
+        "<table>{}</table>",
+        format!("<tr>{}</tr>", cell.repeat(50)).repeat(50)
+    );
+    let start = std::time::Instant::now();
+    let out = md(&html);
+    assert!(start.elapsed().as_secs() < 5, "took {:?}", start.elapsed());
+    // Bounded by a fixed allowance plus a multiple of the table's own cells.
+    assert!(out.len() < 8_000_000, "{} bytes", out.len());
+    let html = format!(
+        "<table><tr>{}</tr></table>",
+        "<td colspan=1000>x</td>".repeat(5000)
+    );
+    let out = md(&html);
+    assert!(out.len() < 8_000_000, "{} bytes", out.len());
+}
+
+// Character references in link destinations and titles (#105).
+
+/// What a CommonMark parser makes of a link destination: its backslash
+/// escapes and the few character references these tests use, decoded.
+fn commonmark_destination(dest: &str) -> String {
+    let dest = dest
+        .strip_prefix('<')
+        .and_then(|d| d.strip_suffix('>'))
+        .unwrap_or(dest);
+    let mut out = String::new();
+    let mut rest = dest;
+    while let Some(c) = rest.chars().next() {
+        rest = &rest[c.len_utf8()..];
+        match c {
+            '\\' if rest.starts_with(|n: char| n.is_ascii_punctuation()) => {
+                out.push_str(&rest[..1]);
+                rest = &rest[1..];
+            }
+            '&' => {
+                let end = rest.find(';').filter(|&e| e <= 32);
+                let decoded = end.and_then(|e| match &rest[..e] {
+                    "amp" => Some(('&', e)),
+                    "lt" => Some(('<', e)),
+                    "gt" => Some(('>', e)),
+                    "quot" => Some(('"', e)),
+                    n => n
+                        .strip_prefix('#')
+                        .and_then(|n| match n.strip_prefix(['x', 'X']) {
+                            Some(h) => u32::from_str_radix(h, 16).ok(),
+                            None => n.parse().ok(),
+                        })
+                        .and_then(char::from_u32)
+                        .map(|ch| (ch, e)),
+                });
+                match decoded {
+                    Some((ch, e)) => {
+                        out.push(ch);
+                        rest = &rest[e + 1..];
+                    }
+                    None => out.push('&'),
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+#[test]
+fn character_references_in_destinations_keep_the_url() {
+    for href in [
+        "/x?a=1&amp;b=2",
+        "/search?q=&lt;b&gt;",
+        "/x?a=1&b=2&c=3",
+        "/x?a=1&#38;b",
+        "/x&#x26;y;",
+        "/x?q=a&amp;amp;amp;b",
+        "/a&b;c",
+        "/a&copy=1&notin=2",
+        "/p&amp;",
+        "/&",
+        "/x y&amp;z",
+        "/x(1)&lt;",
+    ] {
+        // The attribute is decoded once by the HTML parser, then written.
+        let html = format!("<a href=\"{}\">t</a>", href.replace('&', "&amp;"));
+        let dom = parse(&html);
+        let want = dom.root().unwrap().attr("href").unwrap().to_string();
+        let out = dom.to_markdown();
+        let dest = out
+            .strip_prefix("[t](")
+            .and_then(|r| r.strip_suffix(')'))
+            .unwrap_or_else(|| panic!("{out}"));
+        assert_eq!(commonmark_destination(dest), want, "{href}: {out}");
+    }
+    assert_eq!(
+        md("<a href=\"/x?a=1&amp;amp;b=2\">q</a>"),
+        "[q](/x?a=1&amp;amp;b=2)"
+    );
+    assert_eq!(
+        md("<a href=\"/search?q=&amp;lt;b&amp;gt;\">x</a>"),
+        "[x](/search?q=&amp;lt;b&amp;gt;)"
+    );
+    // A plain `&` stays as written.
+    assert_eq!(md("<a href=\"/x?a=1&amp;b=2\">q</a>"), "[q](/x?a=1&b=2)");
+    assert_eq!(
+        md("<a href=\"/x?a=1&amp;b=2&amp;c=3\">q</a>"),
+        "[q](/x?a=1&b=2&c=3)"
+    );
+    // Images, titles and reference definitions too.
+    assert_eq!(
+        md("<img src=\"/i.png?x=1&amp;amp;y=2\" alt=a title=\"&amp;copy; &amp;amp; x&amp;y\">"),
+        "![a](/i.png?x=1&amp;amp;y=2 \"&amp;copy; &amp;amp; x&y\")"
+    );
+    let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
+    assert_eq!(
+        parse("<a href=\"/x?a=1&amp;amp;b=2\" title=\"&amp;lt;\">q</a>").to_markdown_with(&opts),
+        "[q][1]\n\n[1]: /x?a=1&amp;amp;b=2 \"&amp;lt;\""
+    );
+}

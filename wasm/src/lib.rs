@@ -20,6 +20,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use domq::{Dom, NodeRef, Selector};
+use js_sys::Uint8Array;
+use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 /// The same allocator Rust's `std` uses on `wasm32-unknown-unknown`.
@@ -99,6 +101,103 @@ export interface SelectorError extends Error {
   /** Index into the selector string where the problem is. */
   position: number;
 }
+
+/** The result of `decode()`. */
+export interface Decoded {
+  /** The decoded text. */
+  text: string;
+  /** The encoding detected or chosen, e.g. "utf-8", "windows-1252". */
+  encoding: string;
+  /** Any warning produced during decoding. */
+  warning: string | null;
+}
+"#;
+
+/// TypeScript types of the extraction API (`domq-wasm/extract` only: the core
+/// build's `.d.ts` must not mention what the core does not export).
+#[cfg(feature = "extract")]
+#[wasm_bindgen(typescript_custom_section)]
+const TS_EXTRACT_TYPES: &str = r#"
+/** The isolated core article content ("reader mode"). */
+export interface MainContent {
+  /** Readable text of the main content. */
+  text: string;
+  /** Markdown of the main content. */
+  markdown: string;
+  /** HTML of the main content. */
+  html: string;
+}
+
+/** Page metadata from title, meta, link tags, OpenGraph, Twitter Cards, and JSON-LD. */
+export interface Metadata {
+  /** Page title (<title>, og:title, or twitter:title). */
+  title: string | null;
+  /** Meta description (description, og:description, or twitter:description). */
+  description: string | null;
+  /** Canonical URL (<link rel="canonical"> or og:url). */
+  canonical: string | null;
+  /** Page language (html[lang] or http-equiv="content-language"). */
+  lang: string | null;
+  /** Alias for `lang`. */
+  language: string | null;
+  /** Site name (og:site_name or meta[name="application-name"]). */
+  siteName: string | null;
+  /** Lead image (og:image, twitter:image, or link[rel="image_src"]). */
+  image: string | null;
+  /** Page author (meta[name="author"], article:author, or a[rel="author"]). */
+  author: string | null;
+  /** Publication date string (e.g. ISO 8601). */
+  published: string | null;
+  /** Keywords from meta[name="keywords"] or article:tag. */
+  keywords: string[];
+  /** OpenGraph key-value pairs in document order. */
+  og: [string, string][];
+  /** Twitter card key-value pairs in document order. */
+  twitter: [string, string][];
+  /** Raw JSON-LD blocks from <script type="application/ld+json">. */
+  jsonLd: string[];
+  /** Alternate feed URLs (RSS, Atom, JSON Feed). */
+  feeds: string[];
+}
+
+/** A hyperlink (`<a href>` or `<area href>`) with its resolved URL and readable text. */
+export interface Link {
+  /** The resolved URL. */
+  url: string;
+  /** The readable text of the link, with whitespace collapsed. */
+  text: string;
+  /** The raw href attribute as written in the markup. */
+  href: string;
+}
+
+/** An embedded resource URL (`<img src>`, `<link href>`, `<script src>`, etc.). */
+export interface Resource {
+  /** The resolved resource URL. */
+  url: string;
+  /** The attribute name (e.g. "href", "src", "srcset", "poster", "data"). */
+  attr: string;
+  /** The raw attribute value as written before resolution. */
+  value: string;
+  /** Lower-cased tag name of the element carrying the resource. */
+  tag: string;
+}
+
+/** A piece of a document's Markdown split at headings under a character/byte budget. */
+export interface Chunk {
+  /** The Markdown text of this chunk. */
+  markdown: string;
+  /** Alias for `markdown`. */
+  text: string;
+  /** Plain-text titles of the headings this chunk sits under, outermost first. */
+  headingPath: string[];
+  /** The heading path joined with " > " for RAG context. */
+  context: string;
+  /** Byte size of the chunk Markdown. */
+  byteSize: number;
+}
+
+/** A table represented as rows of rectangularized cell strings. */
+export type Table = string[][];
 "#;
 
 // --- the Document class ----------------------------------------------------
@@ -114,20 +213,46 @@ pub struct Document {
     errors: Vec<(usize, &'static str)>,
 }
 
-#[wasm_bindgen]
 impl Document {
-    /// Parse `html` (a full page or a fragment). Never throws: broken markup is
-    /// repaired and the repairs are listed by `errors()`.
-    #[wasm_bindgen(constructor)]
-    pub fn new(html: &str) -> Document {
+    fn from_str(html: &str) -> Document {
         let dom = domq::parse(html);
         let errors = js_positions(html, &dom);
         Document { dom, errors }
     }
 
-    /// Same as `new Document(html)`.
-    pub fn parse(html: &str) -> Document {
-        Document::new(html)
+    fn from_bytes(bytes: &[u8]) -> Document {
+        let decoded = domq::decode(bytes);
+        let dom = domq::parse(&decoded.text);
+        let errors = js_positions(&decoded.text, &dom);
+        Document { dom, errors }
+    }
+}
+
+#[wasm_bindgen]
+impl Document {
+    /// Parse `input` (a string or `Uint8Array`, full page or fragment). Never throws
+    /// on markup errors: broken markup is repaired and the repairs are listed by `errors()`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(input: &JsValue) -> Result<Document, JsValue> {
+        if let Some(html) = input.as_string() {
+            Ok(Document::from_str(&html))
+        } else if let Some(arr) = input.dyn_ref::<Uint8Array>() {
+            let bytes = arr.to_vec();
+            Ok(Document::from_bytes(&bytes))
+        } else {
+            Err(JsValue::from_str("expected string or Uint8Array"))
+        }
+    }
+
+    /// Same as `new Document(input)`.
+    pub fn parse(input: &JsValue) -> Result<Document, JsValue> {
+        Document::new(input)
+    }
+
+    /// Parse raw `bytes` (a `Uint8Array`) into a `Document`.
+    #[wasm_bindgen(js_name = parseBytes)]
+    pub fn parse_bytes(bytes: &[u8]) -> Document {
+        Document::from_bytes(bytes)
     }
 
     /// Every element matching a CSS `selector`, in document order. Throws a
@@ -215,6 +340,143 @@ impl Document {
     }
 }
 
+/// The extraction API: `domq-wasm/extract` only (the `extract` cargo feature).
+#[cfg(feature = "extract")]
+#[wasm_bindgen]
+impl Document {
+    /// The element holding the page's main content ("reader mode"), or `undefined`.
+    #[wasm_bindgen(js_name = mainContent, unchecked_return_type = "MainContent | undefined")]
+    pub fn main_content(&self) -> JsValue {
+        match self.dom.main_content() {
+            Some(node) => {
+                let mut out = String::from("{\"text\":");
+                push_str(&mut out, &node.to_text());
+                out.push_str(",\"markdown\":");
+                push_str(&mut out, &node.to_markdown());
+                out.push_str(",\"html\":");
+                push_str(&mut out, &node.outer_html());
+                out.push('}');
+                json(&out)
+            }
+            None => JsValue::UNDEFINED,
+        }
+    }
+
+    /// Page metadata: title, description, canonical URL, language, OpenGraph,
+    /// Twitter Cards, feeds, and JSON-LD blocks.
+    #[wasm_bindgen(unchecked_return_type = "Metadata")]
+    pub fn metadata(&self, base_url: Option<String>) -> JsValue {
+        let base = self.dom.base_url(base_url.as_deref());
+        let mut meta = self.dom.metadata();
+        if let Some(b) = base.as_deref() {
+            if let Some(c) = meta.canonical.as_mut() {
+                *c = domq::resolve_url(b, c);
+            }
+            if let Some(img) = meta.image.as_mut() {
+                *img = domq::resolve_url(b, img);
+            }
+            for f in &mut meta.feeds {
+                *f = domq::resolve_url(b, f);
+            }
+        }
+        let mut out = String::new();
+        push_metadata(&mut out, &meta);
+        json(&out)
+    }
+
+    /// Every hyperlink (`<a href>` and `<area href>`) in document order.
+    #[wasm_bindgen(unchecked_return_type = "Link[]")]
+    pub fn links(&self, base_url: Option<String>) -> JsValue {
+        let raw = self.dom.links(base_url.as_deref());
+        let mut out = String::from("[");
+        for (i, link) in raw.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            push_link(&mut out, link);
+        }
+        out.push(']');
+        json(&out)
+    }
+
+    /// Every embedded resource URL in document order.
+    #[wasm_bindgen(unchecked_return_type = "Resource[]")]
+    pub fn resources(&self, base_url: Option<String>) -> JsValue {
+        let raw = self.dom.resources(base_url.as_deref());
+        let mut out = String::from("[");
+        for (i, res) in raw.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            push_resource(&mut out, res);
+        }
+        out.push(']');
+        json(&out)
+    }
+
+    /// CommonMark + GFM Markdown split at headings into chunks under `max_chars`.
+    #[wasm_bindgen(js_name = toMarkdownChunks, unchecked_return_type = "Chunk[]")]
+    pub fn to_markdown_chunks(&self, max_chars: Option<usize>) -> JsValue {
+        let budget = max_chars.unwrap_or(1500);
+        let chunks = self.dom.to_markdown_chunks(budget);
+        let mut out = String::from("[");
+        for (i, chunk) in chunks.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            push_chunk(&mut out, chunk);
+        }
+        out.push(']');
+        json(&out)
+    }
+
+    /// Extract rows of cell text for tables matching `selector` (default `"table"`).
+    #[wasm_bindgen(unchecked_return_type = "Table[]")]
+    pub fn tables(&self, selector: Option<String>) -> Result<JsValue, JsValue> {
+        let sel_str = selector.as_deref().unwrap_or("table");
+        let sel = compile(sel_str)?;
+        let mut out = String::from("[");
+        let mut first = true;
+        for node in self
+            .dom
+            .select(&sel)
+            .filter(|n| n.tag_name() == Some("table"))
+        {
+            if !first {
+                out.push(',');
+            }
+            first = false;
+            let rows = node.table_rows();
+            push_table(&mut out, &rows);
+        }
+        out.push(']');
+        Ok(json(&out))
+    }
+
+    /// Format matched tables as RFC 4180 CSV, separated by `\r\n`.
+    #[wasm_bindgen(js_name = toCsv)]
+    pub fn to_csv(&self, selector: Option<String>) -> Result<String, JsValue> {
+        let sel_str = selector.as_deref().unwrap_or("table");
+        let sel = compile(sel_str)?;
+        let mut out = String::new();
+        for node in self
+            .dom
+            .select(&sel)
+            .filter(|n| n.tag_name() == Some("table"))
+        {
+            let rows = node.table_rows();
+            if rows.is_empty() {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push_str("\r\n");
+            }
+            out.push_str(&domq::to_csv(rows));
+        }
+        Ok(out)
+    }
+}
+
 impl Document {
     /// The whole document through `whole`, or every match of `selector`
     /// through `part`, joined by blank lines (empty results are skipped).
@@ -246,10 +508,40 @@ impl Document {
 
 // --- one-shot functions ----------------------------------------------------
 
-/// Parse `html` into a tree of plain JS objects (see `DomDocument`).
+/// Parse `input` (a string or `Uint8Array`) into a tree of plain JS objects (see `DomDocument`).
 #[wasm_bindgen(unchecked_return_type = "DomDocument")]
-pub fn parse(html: &str) -> JsValue {
-    json(&domq::parse(html).to_json())
+pub fn parse(input: &JsValue) -> Result<JsValue, JsValue> {
+    if let Some(html) = input.as_string() {
+        Ok(json(&domq::parse(&html).to_json()))
+    } else if let Some(arr) = input.dyn_ref::<Uint8Array>() {
+        let bytes = arr.to_vec();
+        Ok(json(&domq::parse_bytes(&bytes).to_json()))
+    } else {
+        Err(JsValue::from_str("expected string or Uint8Array"))
+    }
+}
+
+/// Parse raw `bytes` (a `Uint8Array`) into a tree of plain JS objects (see `DomDocument`).
+#[wasm_bindgen(js_name = parseBytes, unchecked_return_type = "DomDocument")]
+pub fn parse_bytes(bytes: &[u8]) -> JsValue {
+    json(&domq::parse_bytes(bytes).to_json())
+}
+
+/// Decode raw HTML bytes into a string, using WHATWG encoding sniffing.
+#[wasm_bindgen(unchecked_return_type = "Decoded")]
+pub fn decode(bytes: &[u8], label: Option<String>) -> JsValue {
+    let res = domq::decode_with(bytes, label.as_deref());
+    let mut out = String::from("{\"text\":");
+    push_str(&mut out, &res.text);
+    out.push_str(",\"encoding\":");
+    push_str(&mut out, res.encoding.name());
+    out.push_str(",\"warning\":");
+    match &res.warning {
+        Some(w) => push_str(&mut out, w),
+        None => out.push_str("null"),
+    }
+    out.push('}');
+    json(&out)
 }
 
 /// Parse `html` and return the tree as a JSON string (the same shape as
@@ -264,7 +556,7 @@ pub fn parse_json(html: &str) -> String {
 #[wasm_bindgen(unchecked_return_type = "Match[]")]
 pub fn select(html: &str, selector: &str) -> Result<JsValue, JsValue> {
     compile(selector)?;
-    Document::new(html).select(selector)
+    Document::from_str(html).select(selector)
 }
 
 /// The first element of `html` matching a CSS `selector`, or `undefined`.
@@ -272,21 +564,21 @@ pub fn select(html: &str, selector: &str) -> Result<JsValue, JsValue> {
 #[wasm_bindgen(js_name = selectFirst, unchecked_return_type = "Match | undefined")]
 pub fn select_first(html: &str, selector: &str) -> Result<JsValue, JsValue> {
     compile(selector)?;
-    Document::new(html).select_first(selector)
+    Document::from_str(html).select_first(selector)
 }
 
 /// `html` as readable plain text — or, with a `selector`, the text of every
 /// match separated by a blank line.
 #[wasm_bindgen(js_name = toText)]
 pub fn to_text(html: &str, selector: Option<String>) -> Result<String, JsValue> {
-    Document::new(html).to_text(selector)
+    Document::from_str(html).to_text(selector)
 }
 
 /// `html` as Markdown — or, with a `selector`, every match converted and
 /// separated by a blank line.
 #[wasm_bindgen(js_name = toMarkdown)]
 pub fn to_markdown(html: &str, selector: Option<String>) -> Result<String, JsValue> {
-    Document::new(html).to_markdown(selector)
+    Document::from_str(html).to_markdown(selector)
 }
 
 /// `html` parsed and re-serialized: the repaired, well-formed version.
@@ -298,7 +590,69 @@ pub fn to_html(html: &str) -> String {
 /// The problems the parser recovered from while parsing `html`.
 #[wasm_bindgen(unchecked_return_type = "ParseError[]")]
 pub fn errors(html: &str) -> JsValue {
-    Document::new(html).errors()
+    Document::from_str(html).errors()
+}
+
+/// The element holding the page's main content ("reader mode"), or `undefined`.
+#[cfg(feature = "extract")]
+#[wasm_bindgen(js_name = mainContent, unchecked_return_type = "MainContent | undefined")]
+pub fn main_content(html: &str) -> JsValue {
+    Document::from_str(html).main_content()
+}
+
+/// Page metadata: title, description, canonical URL, language, OpenGraph,
+/// Twitter Cards, feeds, and JSON-LD blocks.
+#[cfg(feature = "extract")]
+#[wasm_bindgen(unchecked_return_type = "Metadata")]
+pub fn metadata(html: &str, base_url: Option<String>) -> JsValue {
+    Document::from_str(html).metadata(base_url)
+}
+
+/// Every hyperlink (`<a href>` and `<area href>`) in document order.
+#[cfg(feature = "extract")]
+#[wasm_bindgen(unchecked_return_type = "Link[]")]
+pub fn links(html: &str, base_url: Option<String>) -> JsValue {
+    Document::from_str(html).links(base_url)
+}
+
+/// Every embedded resource URL in document order.
+#[cfg(feature = "extract")]
+#[wasm_bindgen(unchecked_return_type = "Resource[]")]
+pub fn resources(html: &str, base_url: Option<String>) -> JsValue {
+    Document::from_str(html).resources(base_url)
+}
+
+/// CommonMark + GFM Markdown split at headings into chunks under `max_chars`.
+#[cfg(feature = "extract")]
+#[wasm_bindgen(js_name = toMarkdownChunks, unchecked_return_type = "Chunk[]")]
+pub fn to_markdown_chunks(html: &str, max_chars: Option<usize>) -> JsValue {
+    Document::from_str(html).to_markdown_chunks(max_chars)
+}
+
+/// Extract rows of cell text for tables matching `selector` (default `"table"`).
+#[cfg(feature = "extract")]
+#[wasm_bindgen(unchecked_return_type = "Table[]")]
+pub fn tables(html: &str, selector: Option<String>) -> Result<JsValue, JsValue> {
+    Document::from_str(html).tables(selector)
+}
+
+/// Format matched tables as RFC 4180 CSV, separated by `\r\n`.
+#[cfg(feature = "extract")]
+#[wasm_bindgen(js_name = toCsv)]
+pub fn to_csv(html: &str, selector: Option<String>) -> Result<String, JsValue> {
+    Document::from_str(html).to_csv(selector)
+}
+
+/// Resolve `relative` against `base`, following RFC 3986 §5.2.
+#[wasm_bindgen(js_name = resolveUrl)]
+pub fn resolve_url(base: &str, relative: &str) -> String {
+    domq::resolve_url(base, relative)
+}
+
+/// Resolve URLs in a `srcset` attribute string against `base`.
+#[wasm_bindgen(js_name = resolveSrcset)]
+pub fn resolve_srcset(base: &str, srcset: &str) -> String {
+    domq::resolve_srcset(base, srcset)
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -334,6 +688,133 @@ fn compile(selector: &str) -> Result<Selector, JsValue> {
         err.set_position(utf16_len(selector.get(..e.position()).unwrap_or(selector)) as u32);
         err.into()
     })
+}
+
+#[cfg(feature = "extract")]
+fn push_opt_str(out: &mut String, val: Option<&str>) {
+    match val {
+        Some(s) => push_str(out, s),
+        None => out.push_str("null"),
+    }
+}
+
+#[cfg(feature = "extract")]
+fn push_str_array(out: &mut String, list: &[String]) {
+    out.push('[');
+    for (i, s) in list.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        push_str(out, s);
+    }
+    out.push(']');
+}
+
+#[cfg(feature = "extract")]
+fn push_str_pair_array(out: &mut String, list: &[(String, String)]) {
+    out.push('[');
+    for (i, (k, v)) in list.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push('[');
+        push_str(out, k);
+        out.push(',');
+        push_str(out, v);
+        out.push(']');
+    }
+    out.push(']');
+}
+
+#[cfg(feature = "extract")]
+fn push_metadata(out: &mut String, meta: &domq::Metadata) {
+    out.push_str("{\"title\":");
+    push_opt_str(out, meta.title.as_deref());
+    out.push_str(",\"description\":");
+    push_opt_str(out, meta.description.as_deref());
+    out.push_str(",\"canonical\":");
+    push_opt_str(out, meta.canonical.as_deref());
+    out.push_str(",\"lang\":");
+    push_opt_str(out, meta.lang.as_deref());
+    out.push_str(",\"language\":");
+    push_opt_str(out, meta.lang.as_deref());
+    out.push_str(",\"siteName\":");
+    push_opt_str(out, meta.site_name.as_deref());
+    out.push_str(",\"image\":");
+    push_opt_str(out, meta.image.as_deref());
+    out.push_str(",\"author\":");
+    push_opt_str(out, meta.author.as_deref());
+    out.push_str(",\"published\":");
+    push_opt_str(out, meta.published.as_deref());
+    out.push_str(",\"keywords\":");
+    push_str_array(out, &meta.keywords);
+    out.push_str(",\"og\":");
+    push_str_pair_array(out, &meta.og);
+    out.push_str(",\"twitter\":");
+    push_str_pair_array(out, &meta.twitter);
+    out.push_str(",\"jsonLd\":");
+    push_str_array(out, &meta.json_ld);
+    out.push_str(",\"feeds\":");
+    push_str_array(out, &meta.feeds);
+    out.push('}');
+}
+
+#[cfg(feature = "extract")]
+fn push_link(out: &mut String, link: &domq::Link<'_>) {
+    out.push_str("{\"url\":");
+    push_str(out, &link.url);
+    out.push_str(",\"text\":");
+    push_str(out, &link.text);
+    out.push_str(",\"href\":");
+    push_str(out, link.href);
+    out.push('}');
+}
+
+#[cfg(feature = "extract")]
+fn push_resource(out: &mut String, res: &domq::Resource<'_>) {
+    out.push_str("{\"url\":");
+    push_str(out, &res.url);
+    out.push_str(",\"attr\":");
+    push_str(out, res.attr);
+    out.push_str(",\"value\":");
+    push_str(out, res.value);
+    out.push_str(",\"tag\":");
+    push_str(out, res.node.tag_name().unwrap_or(""));
+    out.push('}');
+}
+
+#[cfg(feature = "extract")]
+fn push_chunk(out: &mut String, chunk: &domq::Chunk) {
+    out.push_str("{\"markdown\":");
+    push_str(out, &chunk.markdown);
+    out.push_str(",\"text\":");
+    push_str(out, &chunk.markdown);
+    out.push_str(",\"headingPath\":");
+    push_str_array(out, &chunk.heading_path);
+    out.push_str(",\"context\":");
+    push_str(out, &chunk.context());
+    out.push_str(",\"byteSize\":");
+    push_uint(out, chunk.markdown.len());
+    out.push('}');
+}
+
+#[cfg(feature = "extract")]
+fn push_table(out: &mut String, rows: &[Vec<String>]) {
+    out.push('[');
+    for (r, row) in rows.iter().enumerate() {
+        if r > 0 {
+            out.push(',');
+        }
+        out.push('[');
+        for (c, cell) in row.iter().enumerate() {
+            if c > 0 {
+                out.push(',');
+            }
+            push_str(out, cell);
+        }
+        out.push(']');
+    }
+    out.push(']');
 }
 
 /// Append `{"tag":…,"attrs":{…},"text":…,"html":…,"nodeIndex":N}`.

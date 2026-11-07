@@ -94,7 +94,7 @@ pub fn run(opts: &LintOptions) -> (String, u8) {
         let html = match crate::read_input(Some(file), opts.encoding.as_deref()) {
             Ok(html) => html,
             Err(e) => {
-                eprintln!("domq: {e}");
+                warn!("domq: {e}");
                 unreadable = true;
                 continue;
             }
@@ -224,6 +224,10 @@ fn check_elements(dom: &Dom, order: &[NodeRef<'_>], out: &mut Vec<Raw>) {
                 "img-alt",
                 "<img> has no alt attribute (use alt=\"\" for a decorative image)".to_string(),
             )),
+            "input" if input_type(*node) == "image" && !has_name => Some((
+                "img-alt",
+                "<input type=image> has no alt text or accessible name".to_string(),
+            )),
             "a" | "area" if node.has_attr("href") && !has_name => Some((
                 "empty-link",
                 format!("<{tag}> link has no text or accessible name"),
@@ -288,10 +292,11 @@ fn names_itself(node: NodeRef<'_>) -> bool {
         .any(|a| non_blank(node.attr(a)))
         || match tag {
             "img" | "area" => non_blank(node.attr("alt")),
-            "input" => {
-                matches!(input_type(node).as_str(), "submit" | "reset")
-                    || non_blank(node.attr("value"))
-            }
+            "input" => match input_type(node).as_str() {
+                "image" => non_blank(node.attr("alt")),
+                "submit" | "reset" => true,
+                _ => non_blank(node.attr("value")),
+            },
             _ => false,
         }
 }
@@ -600,6 +605,7 @@ fn other_parse_error(src: &str, e: &ParseError) -> Raw {
         ErrorKind::UnterminatedCdata => (Level::Warning, "unterminated-cdata"),
         ErrorKind::UnexpectedEof => (Level::Warning, "unexpected-eof"),
         ErrorKind::BogusComment => (Level::Warning, "bogus-comment"),
+        ErrorKind::UnexpectedEqualsSign => (Level::Warning, "unexpected-equals-sign"),
         _ => (Level::Warning, "parse-error"),
     };
     let message = match (&e.kind, tag_at(src, e.position)) {
@@ -697,6 +703,28 @@ mod tests {
     }
 
     #[test]
+    fn image_inputs_need_a_name_and_name_their_parent() {
+        for html in [
+            "<input type=image src=button.png>",
+            "<input type=image alt=''>",
+            "<input type=image alt='  '>",
+            "<input type=image value=Submit>",
+        ] {
+            assert_eq!(rules(html), [(1, 1, "img-alt")], "{html}");
+        }
+        for html in [
+            "<input type=image alt=Search>",
+            "<input type=IMAGE alt=Search>",
+            "<input type=image aria-label=Search>",
+            "<input type=image title=Search>",
+            "<a href=/><input type=image alt=Search></a>",
+            "<button><input type=image alt=Search></button>",
+        ] {
+            assert_eq!(rules(html), [], "{html}");
+        }
+    }
+
+    #[test]
     fn links_and_buttons() {
         assert_eq!(
             rules("<a href=/>\n</a> <a href=/><img alt=''></a> <button></button>"),
@@ -732,10 +760,11 @@ mod tests {
 
     #[test]
     fn nested_links_are_linear() {
-        // `<a>` does not close an open `<a>`, so these nest 50,000 deep.
-        let html = "<a href=/>".repeat(50_000) + "x";
+        // An `<a>` closes an open `<a>`, except past a scope boundary such as
+        // `<object>`, so these nest 50,000 deep (100,000 elements).
+        let html = "<a href=/><object>".repeat(50_000) + "x";
         let findings = check(&html);
-        assert_eq!(findings.len(), 50_000);
+        assert_eq!(findings.len(), 100_000);
         assert!(findings.iter().all(|f| f.rule == "unclosed-element"));
     }
 

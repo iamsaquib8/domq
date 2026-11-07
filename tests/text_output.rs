@@ -35,7 +35,7 @@ fn noscript_is_shown_when_it_holds_the_content() {
     let dom = parse(shell);
     assert_eq!(
         dom.to_text(),
-        "Thread\n\nThe first post, with enough words.\nalice"
+        "Thread\n\nThe first post, with enough words.\n\nalice"
     );
     assert_eq!(dom.links(None)[0].text, "alice");
     let page = "<body><noscript>Please enable JavaScript.</noscript>\
@@ -57,9 +57,9 @@ fn hidden_elements_are_skipped() {
     );
     assert_eq!(
         text(
-            "<p>a<script>x()</script><noscript>no js</noscript><template><p>t</p></template>b</p>"
+            "<p>Some text<script>x()</script><noscript>no js</noscript><template><p>t</p></template>more</p>"
         ),
-        "ab"
+        "Some textmore"
     );
     assert_eq!(
         text("<p>x<iframe>frame</iframe><object>obj</object><svg><text>s</text></svg>y</p>"),
@@ -225,7 +225,7 @@ fn node_to_text_on_a_hidden_element_shows_it() {
          <script type=application/ld+json>\n{\"a\":  \"b\n c\"}\n</script>\
          <style>p {  color: red }</style></head>\
          <body><template><p>t1</p><p>t2</p></template>\
-         <p>x<script>inner()</script>y</p><noscript>Enable <b>JS</b></noscript></body>",
+         <p>Visible text<script>inner()</script></p><noscript>Enable <b>JS</b></noscript></body>",
     );
     let first = |tag: &'static str| dom.find_by_tag(tag).next().unwrap();
     // Hidden only applies inside the node, never to the node itself.
@@ -238,9 +238,9 @@ fn node_to_text_on_a_hidden_element_shows_it() {
     // Hidden descendants stay hidden.
     assert_eq!(first("head").to_text(), "");
     let p = dom.find_by_tag("p").nth(2).unwrap();
-    assert_eq!(p.to_text(), "xy");
+    assert_eq!(p.to_text(), "Visible text");
     // The whole document is unchanged.
-    assert_eq!(dom.to_text(), "xy");
+    assert_eq!(dom.to_text(), "Visible text");
     // A top-level hidden element is still hidden in the document's text.
     assert_eq!(text("<title>T</title><script>s()</script>"), "");
 }

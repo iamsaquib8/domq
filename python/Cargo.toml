@@ -2,7 +2,7 @@
 name = "domq-py"
 # The Python package version. Keep it in step with the core crate: the PyPI
 # publish job refuses a `v*` tag that doesn't match it.
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.88"
 authors = ["iamsaquib8 <saquibulhassan6@gmail.com>"]
@@ -23,7 +23,7 @@ crate-type = ["cdylib"]
 # abi3: one wheel per platform works on every CPython >= 3.11 (the oldest
 # version still supported upstream; 3.9 and 3.10 are end of life).
 pyo3 = { version = "0.30", features = ["abi3-py311"] }
-domq = { path = "..", version = "0.5", default-features = false, features = ["json", "query", "markdown", "std"] }
+domq = { path = "..", version = "0.6", default-features = false, features = ["json", "query", "markdown", "std"] }
 
 # Its own workspace root: excluded from the core crate's workspace (see the root
 # Cargo.toml) so PyO3 never enters the core's dependency graph or lockfile.

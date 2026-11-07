@@ -20,6 +20,10 @@ const MIN_PARAGRAPH: usize = 25;
 /// An `<article>`/`<main>` needs this much text (or half the page's).
 const MIN_SEMANTIC: usize = 200;
 
+/// The winner must hold at least `1 / MIN_SHARE_DENOMINATOR` of the page's
+/// text, or it is widened (step 5 of `main_content`).
+const MIN_SHARE_DENOMINATOR: usize = 10;
+
 /// A paragraph's score goes to its parent in full, its grandparent halved, and
 /// three more ancestors with these divisors (as in Readability).
 const DIVIDERS: [f64; 5] = [1.0, 2.0, 6.0, 9.0, 12.0];
@@ -170,6 +174,12 @@ impl Dom {
     ///    as the winner has (a title, a byline) or mostly paragraphs (the rest
     ///    of an article split into blocks), the parent becomes the winner —
     ///    stopping below `<body>`.
+    /// 5. **Widen a tiny winner.** While the winner holds under a tenth of the
+    ///    page's text, the parent becomes the winner, again stopping below
+    ///    `<body>`. A page with no article (a listing, a collection, a
+    ///    product or service page) often scores one stray paragraph, such as a
+    ///    cookie or signup notice, and its cards are links that score
+    ///    nothing; this takes the whole results area instead.
     ///
     /// Returns `None` when no paragraph qualifies even with boilerplate allowed
     /// (an empty, links-only or garbage page), or when the best "container" is the
@@ -199,7 +209,7 @@ impl Dom {
     /// assert!(domq::parse("<nav><a href=/>Home</a></nav>").main_content().is_none());
     /// ```
     pub fn main_content(&self) -> Option<NodeRef<'_>> {
-        let noscript = crate::serialize::noscript_is_content(self);
+        let noscript = self.noscript_is_content();
         let order: Vec<NodeRef<'_>> = document_order(self).collect();
         let size = self.len();
         let mut flags = vec![0u8; size];
@@ -454,6 +464,18 @@ impl Dom {
                     break;
                 }
                 winner = parent;
+            }
+
+            // Step 5: a winner holding under a tenth of the page's text is a
+            // card, a popup or a filter box on a page that has no article
+            // (a listing, a product page): widen it, up to `<body>`.
+            while stat(winner).text.saturating_mul(MIN_SHARE_DENOMINATOR) < total {
+                match winner.parent() {
+                    Some(parent) if !matches!(parent.tag_name(), Some("html" | "body") | None) => {
+                        winner = parent;
+                    }
+                    _ => break,
+                }
             }
             return Some(winner);
         }

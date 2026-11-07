@@ -47,10 +47,11 @@ const TTL_MS: &str = "3600000";
 const INSTRUCTIONS: &str = "domq parses HTML that you pass in the `html` \
 argument; it never fetches URLs, so get the page first (with a fetch tool, \
 for example) and pass its HTML. To read a page, use `markdown` (main=true \
-keeps just the article). To find elements, use `select`; to pull structured \
-fields, such as one object per product card or table row, use `extract`. \
-`chunks` prepares Markdown for embeddings; `links`, `metadata` and `tables` \
-read those parts of a page; `lint` checks HTML for accessibility and markup \
+keeps just the article). To understand page structure, use `outline`; \
+to find elements, use `select`; to pull structured fields, such as one \
+object per product card or table row, use `extract`. `chunks` prepares \
+Markdown for embeddings; `links`, `metadata` and `tables` read those \
+parts of a page; `lint` checks HTML for accessibility and markup \
 problems. Invalid selectors come back as errors that point at the problem.";
 
 /// Serve requests from stdin until it closes.
@@ -65,7 +66,7 @@ pub fn serve() -> ExitCode {
             Ok(_) => {}
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => {
-                eprintln!("domq mcp: reading stdin: {e}");
+                warn!("domq mcp: reading stdin: {e}");
                 return ExitCode::FAILURE;
             }
         }
@@ -153,7 +154,18 @@ fn request(id: &str, method: &str, params: &Value) -> String {
                 &format!("missing _meta \"{VERSION_KEY}\""),
             );
         }
-        None => false,
+        None => {
+            if let Some(caps) = meta.and_then(|m| m.get(CAPABILITIES_KEY))
+                && !matches!(caps, Value::Object(_))
+            {
+                return error(
+                    id,
+                    INVALID_PARAMS,
+                    &format!("_meta \"{CAPABILITIES_KEY}\" must be an object"),
+                );
+            }
+            false
+        }
         Some(Value::String(version)) if !supported(version) => {
             let mut data = json::Object::default();
             data.field("supported", &supported_versions())
@@ -165,15 +177,37 @@ fn request(id: &str, method: &str, params: &Value) -> String {
                 Some(&data.finish()),
             );
         }
+        Some(Value::String(version)) if version == MODERN => {
+            match meta.and_then(|m| m.get(CAPABILITIES_KEY)) {
+                None => {
+                    return error(
+                        id,
+                        INVALID_PARAMS,
+                        &format!("missing _meta \"{CAPABILITIES_KEY}\""),
+                    );
+                }
+                Some(Value::Object(_)) => true,
+                Some(_) => {
+                    return error(
+                        id,
+                        INVALID_PARAMS,
+                        &format!("_meta \"{CAPABILITIES_KEY}\" must be an object"),
+                    );
+                }
+            }
+        }
         Some(Value::String(_)) => {
-            if meta.and_then(|m| m.get(CAPABILITIES_KEY)).is_none() {
+            // A supported legacy version in _meta is served with legacy semantics.
+            if let Some(caps) = meta.and_then(|m| m.get(CAPABILITIES_KEY))
+                && !matches!(caps, Value::Object(_))
+            {
                 return error(
                     id,
                     INVALID_PARAMS,
-                    &format!("missing _meta \"{CAPABILITIES_KEY}\""),
+                    &format!("_meta \"{CAPABILITIES_KEY}\" must be an object"),
                 );
             }
-            true
+            false
         }
         Some(_) => {
             return error(
@@ -407,6 +441,16 @@ impl Args<'_> {
             .ok_or_else(|| format!("missing required argument `{key}`"))
     }
 
+    fn base_url(&self) -> Result<Option<&str>, String> {
+        let Some(url) = self.str("base_url")? else {
+            return Ok(None);
+        };
+        if !crate::args::is_absolute_url(url) {
+            return Err("`base_url` must be an absolute URL (scheme://…)".into());
+        }
+        Ok(Some(url))
+    }
+
     /// A selector argument; blank counts as absent.
     fn selector(&self, key: &str) -> Result<Option<&str>, String> {
         Ok(self.str(key)?.filter(|s| !s.trim().is_empty()))
@@ -491,6 +535,15 @@ macro_rules! base_arg {
         r#""base_url":{"type":"string","description":"The page's URL. Relative links are resolved against it (and against the page's <base href>)."}"#
     };
 }
+macro_rules! markdown_options_args {
+    () => {
+        concat!(
+            r#""links":{"type":"string","enum":["inline","reference","footer"],"default":"inline","description":"Link formatting style: 'inline' ([text](url)), 'reference' ([text][1]), or 'footer' (summary list at end of document). Ignored by `chunks`, which always writes links inline so each chunk stands alone."},"#,
+            r#""images":{"type":"string","enum":["keep","alt","drop"],"default":"keep","description":"Image formatting style: 'keep' (![alt](url)), 'alt' (only alt text), or 'drop' (omit images)."},"#,
+            r#""drop_data_uris":{"type":"boolean","default":false,"description":"Strip data: URIs in links and images to reduce token usage."}"#
+        )
+    };
+}
 
 const TOOLS: &[Tool] = &[
     Tool {
@@ -508,6 +561,8 @@ const TOOLS: &[Tool] = &[
             main_arg!(),
             ",",
             base_arg!(),
+            ",",
+            markdown_options_args!(),
             r#"},"required":["html"],"additionalProperties":false}"#
         ),
         output: None,
@@ -530,6 +585,24 @@ const TOOLS: &[Tool] = &[
         ),
         output: None,
         run: text,
+    },
+    Tool {
+        name: "outline",
+        title: "Page outline",
+        description: "Semantic page outline of landmarks, headings, interactive controls \
+            and forms, with synthesized unique selectors and accessible names. Returns \
+            both a compact indented text outline and structured nodes.",
+        input: concat!(
+            r#"{"type":"object","properties":{"#,
+            html_arg!(),
+            ",",
+            selector_arg!(),
+            r#"},"required":["html"],"additionalProperties":false}"#
+        ),
+        output: Some(
+            r#"{"type":"object","properties":{"count":{"type":"integer"},"outline":{"type":"array","items":{"type":"object","properties":{"ref":{"type":"integer"},"role":{"type":"string"},"name":{"type":["string","null"]},"level":{"type":["integer","null"]},"selector":{"type":"string"},"href":{"type":["string","null"]},"tag":{"type":"string"},"depth":{"type":"integer"},"source_range":{"type":["array","null"],"items":{"type":"integer"}}},"required":["ref","role","selector","tag","depth"]}}},"required":["count","outline"]}"#,
+        ),
+        run: outline,
     },
     Tool {
         name: "select",
@@ -592,6 +665,8 @@ const TOOLS: &[Tool] = &[
             main_arg!(),
             ",",
             base_arg!(),
+            ",",
+            markdown_options_args!(),
             r#"},"required":["html"],"additionalProperties":false}"#
         ),
         output: Some(
@@ -676,7 +751,7 @@ const TOOLS: &[Tool] = &[
 /// narrowed to the main content with `main`.
 fn document(args: &Args<'_>) -> Result<Dom, String> {
     let mut dom = domq::parse(args.required_str("html")?);
-    if let Some(page) = args.str("base_url")?
+    if let Some(page) = args.base_url()?
         && let Some(base) = dom.base_url(Some(page))
     {
         crate::absolutize(&mut dom, &base, Some(page));
@@ -709,12 +784,46 @@ fn join_blocks(parts: impl Iterator<Item = String>) -> String {
         .join("\n\n")
 }
 
+fn parse_markdown_options(args: &Args<'_>) -> Result<domq::MarkdownOptions, String> {
+    let mut opts = domq::MarkdownOptions::default();
+    if let Some(links) = args.str("links")? {
+        opts.link_style = match links.to_ascii_lowercase().as_str() {
+            "inline" => domq::LinkStyle::Inline,
+            "reference" => domq::LinkStyle::Reference,
+            "footer" => domq::LinkStyle::Footer,
+            other => {
+                return Err(format!(
+                    "unknown links style `{other}`; expected inline, reference or footer"
+                ));
+            }
+        };
+    }
+    if let Some(images) = args.str("images")? {
+        opts.image_style = match images.to_ascii_lowercase().as_str() {
+            "keep" => domq::ImageStyle::Keep,
+            "alt" => domq::ImageStyle::AltOnly,
+            "drop" => domq::ImageStyle::Drop,
+            other => {
+                return Err(format!(
+                    "unknown images style `{other}`; expected keep, alt or drop"
+                ));
+            }
+        };
+    }
+    opts.drop_data_uris = args.flag("drop_data_uris")?;
+    if let Some(base) = args.base_url()? {
+        opts.base_url = Some(base.to_string());
+    }
+    Ok(opts)
+}
+
 fn markdown(args: &Args<'_>) -> Result<Output, String> {
     let dom = document(args)?;
+    let opts = parse_markdown_options(args)?;
     Ok(match selected(&dom, args)? {
-        None => Output::text(dom.to_markdown()),
+        None => Output::text(dom.to_markdown_with(&opts)),
         Some(m) if m.is_empty() => no_match(),
-        Some(m) => Output::text(join_blocks(m.iter().map(|n| n.to_markdown()))),
+        Some(m) => Output::text(join_blocks(m.iter().map(|n| n.to_markdown_with(&opts)))),
     })
 }
 
@@ -724,6 +833,24 @@ fn text(args: &Args<'_>) -> Result<Output, String> {
         None => Output::text(dom.to_text()),
         Some(m) if m.is_empty() => no_match(),
         Some(m) => Output::text(join_blocks(m.iter().map(|n| n.to_text()))),
+    })
+}
+
+fn outline(args: &Args<'_>) -> Result<Output, String> {
+    let dom = domq::parse(args.required_str("html")?);
+    // Render the text from the renumbered nodes, so the refs the model reads
+    // are the refs in `structuredContent`.
+    let outline = match args.selector("selector")? {
+        None => dom.outline(),
+        Some(s) => crate::scoped_outline(&dom, &crate::compile(s)?),
+    };
+    let mut out = json::Object::default();
+    out.field("count", &outline.len().to_string())
+        .field("outline", &outline.to_json());
+    let text = outline.to_text();
+    Ok(Output {
+        text,
+        structured: Some(out.finish()),
     })
 }
 
@@ -795,11 +922,13 @@ fn extract_fields(args: &Args<'_>) -> Result<Output, String> {
 fn chunks(args: &Args<'_>) -> Result<Output, String> {
     let max_chars = args.int("max_chars", 2000, 1, 1_000_000)?;
     let dom = document(args)?;
+    let opts = parse_markdown_options(args)?;
     let chunks = match selected(&dom, args)? {
-        None => dom.to_markdown_chunks(max_chars),
+        None => dom.to_markdown_chunks_with(max_chars, &opts),
+        Some(m) if m.is_empty() => return Ok(no_match()),
         Some(m) => m
             .iter()
-            .flat_map(|n| n.to_markdown_chunks(max_chars))
+            .flat_map(|n| n.to_markdown_chunks_with(max_chars, &opts))
             .collect(),
     };
     let items = chunks.iter().map(|c| {
@@ -824,7 +953,7 @@ fn links(args: &Args<'_>) -> Result<Output, String> {
         None => None,
     };
     let links: Vec<String> = dom
-        .links(args.str("base_url")?)
+        .links(args.base_url()?)
         .into_iter()
         .filter(|l| {
             inside
@@ -846,17 +975,19 @@ fn links(args: &Args<'_>) -> Result<Output, String> {
 
 fn metadata(args: &Args<'_>) -> Result<Output, String> {
     let dom = domq::parse(args.required_str("html")?);
-    let base = args
-        .str("base_url")?
-        .and_then(|page| dom.base_url(Some(page)));
+    let base = args.base_url()?.and_then(|page| dom.base_url(Some(page)));
     Ok(Output::json(crate::meta_json(&dom, base.as_deref())))
 }
 
 fn tables(args: &Args<'_>) -> Result<Output, String> {
     let dom = domq::parse(args.required_str("html")?);
-    let selector = crate::compile(args.selector("selector")?.unwrap_or("table"))?;
-    let tables = dom
-        .select(&selector)
+    let tables = match selected(&dom, args)? {
+        Some(m) if m.is_empty() => return Ok(no_match()),
+        Some(m) => crate::matched_tables(&m),
+        None => dom.select("table").collect(),
+    };
+    let tables = tables
+        .into_iter()
         .map(|t| t.table_rows())
         .filter(|rows| !rows.is_empty())
         .map(|rows| {
@@ -1011,6 +1142,24 @@ mod tests {
             Some(&Value::Number("-32602".into()))
         );
 
+        let non_object_caps = send(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":"nope"}}}"#,
+        );
+        assert_eq!(
+            non_object_caps.get("error").and_then(|e| e.get("code")),
+            Some(&Value::Number("-32602".into()))
+        );
+
+        let non_object_legacy_caps = send(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-06-18","io.modelcontextprotocol/clientCapabilities":"nope"}}}"#,
+        );
+        assert_eq!(
+            non_object_legacy_caps
+                .get("error")
+                .and_then(|e| e.get("code")),
+            Some(&Value::Number("-32602".into()))
+        );
+
         let discover_without_meta = send(r#"{"jsonrpc":"2.0","id":1,"method":"server/discover"}"#);
         assert!(discover_without_meta.get("error").is_some());
     }
@@ -1032,6 +1181,26 @@ mod tests {
                 .and_then(|c| c.get("tools"))
                 .is_some()
         );
+
+        // A legacy initialize request carrying _meta is served with legacy semantics.
+        let legacy_with_meta = send(
+            r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-06-18","io.modelcontextprotocol/clientCapabilities":{}}}}"#,
+        );
+        let l_res = legacy_with_meta.get("result").unwrap();
+        assert_eq!(
+            l_res.get("protocolVersion").and_then(Value::as_str),
+            Some("2025-06-18")
+        );
+        assert!(l_res.get("resultType").is_none());
+
+        // A legacy request declaring a legacy version in _meta has no modern result fields.
+        let legacy_tools = send(
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-06-18","io.modelcontextprotocol/clientCapabilities":{}}}}"#,
+        );
+        let t_res = legacy_tools.get("result").unwrap();
+        assert!(t_res.get("resultType").is_none());
+        assert!(t_res.get("_meta").is_none());
+        assert!(t_res.get("tools").is_some());
 
         let newer = send(
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2099-01-01"}}"#,
@@ -1165,6 +1334,27 @@ mod tests {
     }
 
     #[test]
+    fn base_url_errors_are_tool_errors() {
+        for bad in ["not a url", "/relative/", "htps://", "https://"] {
+            for tool in ["links", "metadata", "markdown", "chunks", "extract"] {
+                let args = match tool {
+                    "extract" => {
+                        format!(r#"{{"html":"<p>x</p>","fields":{{"t":"p"}},"base_url":"{bad}"}}"#)
+                    }
+                    _ => format!(r#"{{"html":"<a href=/a>A</a>","base_url":"{bad}"}}"#),
+                };
+                let res = call(tool, &args);
+                assert!(is_error(&res), "{tool} should error on base_url={bad}");
+                assert!(
+                    text_of(&res).contains("`base_url` must be an absolute URL (scheme://…)"),
+                    "unexpected error message for {tool}: {}",
+                    text_of(&res)
+                );
+            }
+        }
+    }
+
+    #[test]
     fn markdown_and_text_tools() {
         let md = call(
             "markdown",
@@ -1182,6 +1372,67 @@ mod tests {
         assert_eq!(text_of(&text), "Widget\n\nGizmo");
         let none = call("text", &page_args(r#","selector":"video""#));
         assert_eq!(text_of(&none), "No elements match the selector.");
+        let none_chunks = call("chunks", &page_args(r#","selector":"video""#));
+        assert_eq!(text_of(&none_chunks), "No elements match the selector.");
+        let none_tables = call("tables", &page_args(r#","selector":"video""#));
+        assert_eq!(text_of(&none_tables), "No elements match the selector.");
+    }
+
+    #[test]
+    fn outline_tool() {
+        let result = call("outline", &page_args(""));
+        assert!(!is_error(&result));
+        let text = text_of(&result);
+        assert!(text.contains("[1] navigation"));
+        assert!(text.contains("link \"Home\" -> nav > a"));
+        assert!(text.contains("heading 1 \"Gadgets\""));
+        assert!(text.contains("heading 2 \"Widget\""));
+
+        let structured = result.get("structuredContent").unwrap();
+        assert_eq!(structured.get("count"), Some(&Value::Number("8".into())));
+        let outline = structured.get("outline").unwrap();
+        match outline {
+            Value::Array(items) => {
+                assert_eq!(items.len(), 8);
+                assert_eq!(items[0].get("ref"), Some(&Value::Number("1".into())));
+                assert_eq!(
+                    items[0].get("role").and_then(Value::as_str),
+                    Some("navigation")
+                );
+                assert_eq!(items[1].get("ref"), Some(&Value::Number("2".into())));
+                assert_eq!(items[1].get("role").and_then(Value::as_str), Some("link"));
+                assert_eq!(items[1].get("name").and_then(Value::as_str), Some("Home"));
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // Scoped outline
+        let scoped = call("outline", &page_args(r#","selector":"nav""#));
+        assert!(!is_error(&scoped));
+        let s_text = text_of(&scoped);
+        assert!(s_text.contains("navigation"));
+        assert!(s_text.contains("link \"Home\""));
+        assert!(!s_text.contains("Gadgets"));
+        let s_structured = scoped.get("structuredContent").unwrap();
+        assert_eq!(s_structured.get("count"), Some(&Value::Number("2".into())));
+        assert_eq!(s_structured.get("nodes"), None);
+
+        // Nested matches: each control once, and the text refs are the
+        // structured refs.
+        let nested = call(
+            "outline",
+            r#"{"html":"<nav><a href=/>Home</a><a href=/b>B</a></nav>","selector":"nav, nav a"}"#,
+        );
+        assert_eq!(
+            text_of(&nested),
+            "[1] navigation\n[2]   link \"Home\" -> nav > a:nth-of-type(1)\n[3]   link \"B\" -> nav > a:nth-of-type(2)"
+        );
+        let n_structured = nested.get("structuredContent").unwrap();
+        assert_eq!(n_structured.get("count"), Some(&Value::Number("3".into())));
+
+        // Invalid selector
+        let bad = call("outline", &page_args(r#","selector":"a:hover""#));
+        assert!(is_error(&bad));
     }
 
     #[test]
@@ -1227,6 +1478,11 @@ mod tests {
             text_of(&tables),
             r#"{"tables":[{"rows":[["A","B"],["x","x"]]}]}"#
         );
+        let wrapper = call(
+            "tables",
+            r##"{"html":"<div id=r><table><tr><td>1</table></div>","selector":"#r"}"##,
+        );
+        assert_eq!(text_of(&wrapper), r#"{"tables":[{"rows":[["1"]]}]}"#);
 
         let chunks = call("chunks", &page_args(r#","main":true,"max_chars":40"#));
         let chunks = chunks

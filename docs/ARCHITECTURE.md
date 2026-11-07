@@ -1,7 +1,8 @@
 # Architecture
 
-A map of the codebase for contributors. The whole library is about 5,000 lines
-of dependency-free Rust; you can read all of it in an afternoon.
+A map of the codebase for contributors. The library is about 14,000 lines of
+dependency-free Rust (plus a 2,100-line character-reference table), in the
+files listed below.
 
 ## The pipeline
 
