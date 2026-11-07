@@ -94,7 +94,7 @@ def test_document_to_markdown_options():
         "[Guide][1] ![Logo](data:image/png;base64,abc)\n\n[1]: /guide"
     )
     assert doc.to_markdown(links="footer") == (
-        "[Guide][1] ![Logo](data:image/png;base64,abc)\n\n### Links\n\n1. [Guide](/guide)"
+        "Guide [1] ![Logo](data:image/png;base64,abc)\n\n### Links\n\n1. [Guide](/guide)"
     )
     assert doc.to_markdown(images="alt") == "[Guide](/guide) Logo"
     assert doc.to_markdown(images="drop") == "[Guide](/guide)"

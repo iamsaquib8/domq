@@ -731,7 +731,7 @@ fn markdown_options_link_style_footer() {
     let opts = MarkdownOptions::default().link_style(LinkStyle::Footer);
     assert_eq!(
         dom.to_markdown_with(&opts),
-        "Visit [Example][1] and [again][1], then [Rust][2].\n\n\
+        "Visit Example [1] and again [1], then Rust [2].\n\n\
          ### Links\n\n\
          1. [Example](https://example.com \"Home\")\n\
          2. [Rust](https://rust-lang.org)"
@@ -839,4 +839,49 @@ fn markdown_options_chunks() {
         chunks[0].markdown,
         "# Title\n\nVisit [Page](https://example.com/page)."
     );
+}
+
+// The footer link style (#97): `text [1]` with a list, no dangling references.
+
+#[test]
+fn footer_links_are_citations_and_entries_keep_their_markup() {
+    use domq::{LinkStyle, MarkdownOptions};
+    let opts = MarkdownOptions::default().link_style(LinkStyle::Footer);
+    let md = |html: &str| parse(html).to_markdown_with(&opts);
+    // The repro: an image-only link and a link with emphasis and underscores.
+    assert_eq!(
+        md("<p><a href=\"/x\"><img src=\"i.png\" alt=\"Logo\"></a> \
+            <a href=\"/y\"><b>bold *x*</b> text_with_under</a></p>"),
+        "![Logo](i.png) [1] **bold \\*x\\*** text_with_under [2]\n\n\
+         ### Links\n\n\
+         1. [![Logo](i.png)](/x)\n\
+         2. [**bold \\*x\\*** text_with_under](/y)"
+    );
+    // Link text is escaped in the list, like the text itself.
+    assert_eq!(
+        md("<p>See <a href=/a>A *star*</a>, <a href=/b title=T>[B]</a>.</p>"),
+        "See A \\*star\\* [1], \\[B\\] [2].\n\n\
+         ### Links\n\n\
+         1. [A \\*star\\*](/a)\n\
+         2. [\\[B\\]](/b \"T\")"
+    );
+    // Hidden content is not link text; a hard break is a space; an empty
+    // link reads as its URL, inline and in the list.
+    assert_eq!(
+        md(
+            "<p><a href=/x><span hidden>hid</span>shown</a> <a href=/z>a<br>b</a> <a href=/q></a></p>"
+        ),
+        "shown [1] a\\\nb [2] /q [3]\n\n\
+         ### Links\n\n\
+         1. [shown](/x)\n\
+         2. [a b](/z)\n\
+         3. [/q](/q)"
+    );
+    // The same link twice shares its number.
+    assert_eq!(
+        md("<p><a href=/x>A</a> and <a href=/x>again</a></p>"),
+        "A [1] and again [1]\n\n### Links\n\n1. [A](/x)"
+    );
+    // Without links there is no footer.
+    assert_eq!(md("<p>plain</p>"), "plain");
 }

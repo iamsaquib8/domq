@@ -246,7 +246,7 @@ fn markdown_options_cli_flags() {
 
     // --markdown-links footer
     let md_footer = ok(&["-m", "--markdown-links", "footer"], html);
-    assert!(md_footer.contains("[Example][1]"));
+    assert!(md_footer.contains("Example [1]"));
     assert!(md_footer.contains("### Links\n\n1. [Example](https://example.com \"Home\")"));
 
     // --markdown-images alt
