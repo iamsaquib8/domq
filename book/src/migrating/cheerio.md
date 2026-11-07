@@ -1,6 +1,6 @@
 # From cheerio
 
-`domq-wasm` is a ~65 KB (gzipped) WebAssembly module with no JS
+`domq-wasm` is a ~71 KB (gzipped) WebAssembly module with no JS
 dependencies: one file for browsers, Node, Deno, Bun and Cloudflare Workers.
 Where cheerio gives you a jQuery-style wrapper to traverse and edit, domq
 gives you plain data back: matches, text, Markdown and a JSON tree.
