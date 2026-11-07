@@ -25,6 +25,7 @@ use alloc::vec::Vec;
 use core::mem;
 
 use super::{is_space, push_verbatim, skip_newline, walk};
+use crate::extract::table::{MAX_SPAN, SPAN_CELLS, SPAN_FACTOR, span};
 use crate::node::{NodeId, NodeKind};
 use crate::tags::{self, Display};
 use crate::tree::{Dom, NodeRef};
@@ -228,6 +229,11 @@ impl Dom {
     /// a backslash hard break, and the output has no leading or trailing
     /// newline.
     ///
+    /// A table cell with `colspan` or `rowspan` keeps its columns: the cell
+    /// is written once, and the slots it covers are empty (Markdown tables
+    /// cannot merge cells). Use [`NodeRef::table_rows`] for a grid that
+    /// repeats the text instead.
+    ///
     /// ```
     /// let dom = domq::parse(
     ///     "<h1>Title</h1><p>Some <b>bold</b> and a <a href='/x'>link</a>.</p>\
@@ -360,8 +366,23 @@ struct Code<'a> {
 /// A GFM table being collected; it is written when the `<table>` closes.
 #[derive(Default)]
 struct Table {
-    rows: Vec<Vec<String>>,
-    cells: Vec<String>,
+    rows: Vec<TableRow>,
+    cells: Vec<Cell>,
+    /// Which `<thead>`/`<tbody>`/`<tfoot>` the rows being collected are in.
+    group: usize,
+}
+
+/// One row of a table being collected.
+struct TableRow {
+    group: usize,
+    cells: Vec<Cell>,
+}
+
+/// One cell: its Markdown, and how many columns and rows it spans.
+struct Cell {
+    text: String,
+    colspan: usize,
+    rowspan: usize,
 }
 
 /// What an open element changed, undone when it closes.
@@ -423,6 +444,8 @@ struct Markdown<'a> {
     inline_only: u32,
     code: Option<Code<'a>>,
     table: Option<Table>,
+    /// The `colspan` and `rowspan` of the cell being written.
+    cell_span: (usize, usize),
     /// The node `NodeRef::to_markdown` was called on: shown even if hidden.
     root: Option<NodeId>,
     /// `<noscript>` holds the document's content (see
@@ -452,6 +475,7 @@ impl<'a> Default for Markdown<'a> {
             inline_only: 0,
             code: None,
             table: None,
+            cell_span: (1, 1),
             root: None,
             noscript: false,
             options: &DEFAULT_OPTIONS,
@@ -637,7 +661,16 @@ impl<'a> Markdown<'a> {
                     self.inline_only += 1;
                     f.role = Role::Cell;
                     f.inline = true;
+                    self.cell_span = (span(node.attr("colspan")), span(node.attr("rowspan")));
                 }
+            }
+            // Spans stop at the end of their row group.
+            "thead" | "tbody" | "tfoot" if top && self.table.is_some() => {
+                if let Some(t) = &mut self.table {
+                    t.end_row();
+                    t.group += 1;
+                }
+                self.block(&mut f);
             }
             "td" | "th" => {
                 self.space = true;
@@ -667,9 +700,14 @@ impl<'a> Markdown<'a> {
         }
         match f.role {
             Role::Cell => {
-                let cell = self.take_cell();
+                let text = self.take_cell();
+                let (colspan, rowspan) = self.cell_span;
                 if let Some(t) = &mut self.table {
-                    t.cells.push(cell);
+                    t.cells.push(Cell {
+                        text,
+                        colspan,
+                        rowspan,
+                    });
                 }
             }
             Role::Row => {
@@ -1102,8 +1140,9 @@ impl<'a> Markdown<'a> {
 
     fn emit_table(&mut self, mut table: Table) {
         table.end_row();
-        let cols = table.rows.iter().map(Vec::len).max().unwrap_or(0);
-        let Some((head, body)) = table.rows.split_first().filter(|_| cols > 0) else {
+        let rows = table.grid();
+        let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
+        let Some((head, body)) = rows.split_first().filter(|_| cols > 0) else {
             return;
         };
         // GFM needs a header row: the first row is it, whatever its cells are,
@@ -1210,8 +1249,104 @@ impl Code<'_> {
 impl Table {
     fn end_row(&mut self) {
         if !self.cells.is_empty() {
-            self.rows.push(mem::take(&mut self.cells));
+            self.rows.push(TableRow {
+                group: self.group,
+                cells: mem::take(&mut self.cells),
+            });
         }
+    }
+
+    /// The rows as a grid of cell Markdown, a spanning cell followed by empty
+    /// cells for the columns it covers (and, below it, for the rows): Markdown
+    /// tables cannot merge cells, and this keeps every cell under its column.
+    /// Spans work as in [`NodeRef::table_rows`]: they stop at the end of their
+    /// row group, `rowspan=0` covers the rest of it, and a table's spans add
+    /// at most a bounded number of cells.
+    fn grid(self) -> Vec<Vec<String>> {
+        let rows = self.rows;
+        let own: usize = rows.iter().map(|r| r.cells.len()).sum();
+        let mut budget = SPAN_CELLS.saturating_add(own.saturating_mul(SPAN_FACTOR));
+        // Where each row's group ends (for `rowspan=0` and the cut-off).
+        let mut group_end = alloc::vec![rows.len(); rows.len()];
+        for i in (0..rows.len().saturating_sub(1)).rev() {
+            let same = rows.get(i).map(|r| r.group) == rows.get(i + 1).map(|r| r.group);
+            let next = group_end.get(i + 1).copied().unwrap_or(rows.len());
+            if let Some(end) = group_end.get_mut(i) {
+                *end = if same { next } else { i + 1 };
+            }
+        }
+        let mut out = Vec::with_capacity(rows.len());
+        // Per column: how many more rows a `rowspan` above still covers.
+        let mut covered: Vec<usize> = Vec::new();
+        let mut group = None;
+        for (i, row) in rows.into_iter().enumerate() {
+            if group != Some(row.group) {
+                covered.clear();
+                group = Some(row.group);
+            }
+            let rows_left = group_end.get(i).copied().unwrap_or(i + 1).saturating_sub(i);
+            let mut line: Vec<String> = Vec::with_capacity(row.cells.len());
+            // Columns that a `rowspan` above covers are empty here.
+            let skip = |line: &mut Vec<String>, covered: &mut Vec<usize>| {
+                while let Some(left) = covered.get_mut(line.len()).filter(|n| **n > 0) {
+                    *left -= 1;
+                    line.push(String::new());
+                }
+            };
+            for mut cell in row.cells {
+                skip(&mut line, &mut covered);
+                let colspan = cell.colspan.clamp(1, MAX_SPAN);
+                let rowspan = match cell.rowspan {
+                    0 => rows_left,
+                    n => n.min(rows_left),
+                }
+                .clamp(1, MAX_SPAN);
+                let extra = colspan.saturating_mul(rowspan).saturating_sub(1);
+                let (colspan, rowspan) = if extra <= budget {
+                    budget -= extra;
+                    (colspan, rowspan)
+                } else {
+                    (1, 1)
+                };
+                let col = line.len();
+                if covered.len() < col + colspan {
+                    covered.resize(col + colspan, 0);
+                }
+                for c in 0..colspan {
+                    if let Some(n) = covered.get_mut(col + c) {
+                        // A cell overlapping an earlier `rowspan` takes the column.
+                        *n = rowspan - 1;
+                    }
+                    line.push(if c == 0 {
+                        mem::take(&mut cell.text)
+                    } else {
+                        String::new()
+                    });
+                }
+            }
+            skip(&mut line, &mut covered);
+            // A `rowspan` reaching past the row's last cell: empty cells
+            // up to it.
+            loop {
+                skip(&mut line, &mut covered);
+                let more = covered
+                    .get(line.len()..)
+                    .is_some_and(|rest| rest.iter().any(|&n| n > 0));
+                if !more {
+                    break;
+                }
+                if budget == 0 {
+                    covered.clear();
+                    break;
+                }
+                budget -= 1;
+                line.push(String::new());
+            }
+            let used = covered.iter().rposition(|&n| n > 0).map_or(0, |i| i + 1);
+            covered.truncate(used);
+            out.push(line);
+        }
+        out
     }
 }
 
