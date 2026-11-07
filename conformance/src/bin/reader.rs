@@ -391,9 +391,12 @@ Readability found a value; equal after collapsing whitespace.
     );
     out.push_str(
         "
-Readability's byline also comes from the page text (\"By Jane Doe\"), and its
-title drops a trailing site name (\"Article | Site\"); domq reads both from
-markup only, so those two rows count differences of convention too.
+domq reads the title, author and published time from the page's JSON-LD
+article first (`headline`, `author`, `datePublished`), then from meta tags and
+other markup. Readability's byline also comes from the page text (\"By Jane
+Doe\"), and its title drops a trailing site name (\"Article | Site\"); domq
+reads both from markup only, so those two rows count differences of convention
+too.
 
 ## Hardest pages
 

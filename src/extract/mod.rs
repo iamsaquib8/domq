@@ -11,6 +11,7 @@ use alloc::string::String;
 use crate::serialize::is_space;
 use crate::tree::{Dom, NodeRef};
 
+mod json_ld;
 mod links;
 mod meta;
 mod outline;

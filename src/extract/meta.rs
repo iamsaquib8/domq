@@ -4,12 +4,20 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::{collapse, has_token, non_empty};
+use super::{collapse, has_token, json_ld, non_empty};
 use crate::serialize::walk;
 use crate::tree::{Dom, NodeRef};
 
 /// Metadata about a page, from its `<title>`, `<meta>` and `<link>` tags,
 /// JSON-LD blocks and a few in-page conventions. Built by [`Dom::metadata`].
+///
+/// The JSON-LD article is the first object, in the blocks' document order, at
+/// the top level of a block, in an array there or in its `@graph` whose
+/// `@type` is an article or a post (`Article`, `NewsArticle`, `BlogPosting`,
+/// …); for a field it lacks, the first such object of any type that has it.
+/// A block that is not JSON is skipped. Reading it is bounded: nesting
+/// deeper than 32 levels, a block of more than 200,000 values or objects
+/// beyond the first 512 are not read.
 ///
 /// Every field is owned, so the struct outlives the [`Dom`]. Scalar fields
 /// take the first non-empty value from a list of sources, in the order given
@@ -22,8 +30,8 @@ use crate::tree::{Dom, NodeRef};
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Metadata {
-    /// `<title>` (not one inside an `<svg>`), else `og:title`, else
-    /// `twitter:title`.
+    /// The `headline` of the page's JSON-LD article, else `<title>` (not one
+    /// inside an `<svg>`), else `og:title`, else `twitter:title`.
     pub title: Option<String>,
     /// `<meta name=description>`, else `og:description`, else
     /// `twitter:description`.
@@ -36,12 +44,16 @@ pub struct Metadata {
     /// `og:site_name`, else `<meta name=application-name>`.
     pub site_name: Option<String>,
     /// `og:image` (or `og:image:url`, `og:image:secure_url`), else
-    /// `twitter:image` (or `twitter:image:src`), else `<link rel=image_src>`.
+    /// `twitter:image` (or `twitter:image:src`), else `<link rel=image_src>`,
+    /// else the `image` of the page's JSON-LD article.
     pub image: Option<String>,
-    /// `<meta name=author>`, else `article:author` unless it is a URL, else
-    /// the text of the first `<a rel=author>`, else the `article:author` URL.
+    /// The `author` of the page's JSON-LD article (a name, an object with a
+    /// `name`, or a list of those joined with `, `), else `<meta
+    /// name=author>`, else `article:author` unless it is a URL, else the text
+    /// of the first `<a rel=author>`, else the `article:author` URL.
     pub author: Option<String>,
-    /// The publication date as written (usually ISO 8601):
+    /// The publication date as written (usually ISO 8601): the
+    /// `datePublished` of the page's JSON-LD article, else
     /// `article:published_time`, else `<meta itemprop=datePublished>`, else a
     /// `date`-style `<meta name>` (`date`, `pubdate`, `publish-date`,
     /// `dc.date`, `dc.date.issued`, `dcterms.date`, `dcterms.created`, …), else
@@ -291,8 +303,9 @@ impl<'a> Scan<'a> {
     fn finish(mut self) -> Metadata {
         let text = |s: Option<&str>| s.map(collapse).filter(|s| !s.is_empty());
         let url = |s: Option<&str>| s.map(String::from);
+        let ld = json_ld::fields(&self.meta.json_ld);
 
-        let title = self.title.take().or_else(|| {
+        let title = ld.headline.or_else(|| self.title.take()).or_else(|| {
             text(
                 self.og("og:title")
                     .or_else(|| self.twitter("twitter:title")),
@@ -315,19 +328,24 @@ impl<'a> Scan<'a> {
             .or_else(|| self.og("og:image:secure_url"))
             .or_else(|| self.twitter("twitter:image"))
             .or_else(|| self.twitter("twitter:image:src"))
-            .or(self.image_src));
+            .or(self.image_src))
+        .or(ld.image);
         // `article:author` is often a profile URL: prefer a name.
         let og_author = self.og("article:author").map(String::from);
         let is_url = |a: &String| a.contains("://");
-        let author = text(self.name("author"))
+        let author = ld
+            .author
+            .or_else(|| text(self.name("author")))
             .or_else(|| text(og_author.as_deref().filter(|a| !a.contains("://"))))
             .or_else(|| self.author_link.take())
             .or_else(|| og_author.filter(is_url));
-        let published = url(self
-            .og("article:published_time")
-            .or(self.item_published)
-            .or_else(|| DATE_NAMES.iter().find_map(|k| self.name(k)))
-            .or(self.time));
+        let published = ld.published.or_else(|| {
+            url(self
+                .og("article:published_time")
+                .or(self.item_published)
+                .or_else(|| DATE_NAMES.iter().find_map(|k| self.name(k)))
+                .or(self.time))
+        });
         let mut keywords: Vec<String> = self
             .name("keywords")
             .or_else(|| self.name("news_keywords"))

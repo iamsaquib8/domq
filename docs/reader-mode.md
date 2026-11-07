@@ -42,17 +42,20 @@ Readability found a value; equal after collapsing whitespace.
 
 | Field | Pages | Same |
 |---|---:|---:|
-| title | 127 | 48.8% |
-| author (byline) | 76 | 36.8% |
+| title | 127 | 59.1% |
+| author (byline) | 76 | 52.6% |
 | site name | 62 | 85.5% |
 | language | 73 | 100.0% |
-| published time | 33 | 48.5% |
+| published time | 33 | 97.0% |
 
 `Metadata::json_ld` holds the page's JSON-LD blocks for a JSON parser: on 25 pages, 34 blocks, of which 33 parse with `serde_json` as returned.
 
-Readability's byline also comes from the page text ("By Jane Doe"), and its
-title drops a trailing site name ("Article | Site"); domq reads both from
-markup only, so those two rows count differences of convention too.
+domq reads the title, author and published time from the page's JSON-LD
+article first (`headline`, `author`, `datePublished`), then from meta tags and
+other markup. Readability's byline also comes from the page text ("By Jane
+Doe"), and its title drops a trailing site name ("Article | Site"); domq
+reads both from markup only, so those two rows count differences of convention
+too.
 
 ## Hardest pages
 
