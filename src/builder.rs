@@ -270,13 +270,16 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
         if tags::is_void(&lname) {
             return; // void elements never have end tags
         }
-        match self.open.find(&self.sink, &lname) {
+        match self.open.find_end(&self.sink, &lname) {
             Some(idx) => {
-                if idx + 1 != self.open.len() {
+                if idx + 1 != self.open.len() || !self.open.is_named(&self.sink, idx, &lname) {
                     // Closing elements whose end tag is optional (`</ul>` over
                     // an open `<li>`) is valid HTML; anything else is
-                    // mis-nesting.
-                    let kind = if self.open.only_optional_above(&self.sink, idx) {
+                    // mis-nesting, as is a heading end tag of another level
+                    // (`<h2>x</h3>`).
+                    let kind = if self.open.is_named(&self.sink, idx, &lname)
+                        && self.open.only_optional_above(&self.sink, idx)
+                    {
                         ErrorKind::ImplicitlyClosed
                     } else {
                         ErrorKind::MismatchedEndTag
@@ -482,7 +485,8 @@ const OUTER_END_TAG_SEARCH: usize = 8;
 ///
 /// The same bound applies to a start tag that closes an element below the
 /// current node ([`OpenElements::closed_by`]); and that scan only runs while
-/// an element it could close is open, counted in `open_p` and `open_items`.
+/// an element it could close is open, counted in `open_p`, `open_items` and
+/// `open_nested`.
 struct OpenElements<O> {
     /// Open elements, innermost last; their names come from the sink.
     stack: Vec<O>,
@@ -491,6 +495,9 @@ struct OpenElements<O> {
     /// How many list items, cells, rows, table sections and captions are
     /// open (what [`tags::search`] closes).
     open_items: usize,
+    /// How many `<a>`, `<nobr>`, `<button>` and `<select>` are open (what a
+    /// start tag of the same name closes, see [`tags::search`]).
+    open_nested: usize,
 }
 
 impl<O> Default for OpenElements<O> {
@@ -499,6 +506,7 @@ impl<O> Default for OpenElements<O> {
             stack: Vec::new(),
             open_p: 0,
             open_items: 0,
+            open_nested: 0,
         }
     }
 }
@@ -534,6 +542,7 @@ impl<O> OpenElements<O> {
             "li" | "dd" | "dt" | "td" | "th" | "tr" | "thead" | "tbody" | "tfoot" | "caption" => {
                 &mut self.open_items
             }
+            "a" | "nobr" | "button" | "select" => &mut self.open_nested,
             _ => return,
         };
         *counter = if pushed {
@@ -565,6 +574,8 @@ impl<O> OpenElements<O> {
     ) -> Option<usize> {
         let (search, open): (tags::SearchFn, usize) = if p {
             (tags::p_search, self.open_p)
+        } else if matches!(opening, "a" | "nobr" | "button" | "select") {
+            (tags::search, self.open_nested)
         } else {
             (tags::search, self.open_items)
         };
@@ -598,6 +609,37 @@ impl<O> OpenElements<O> {
         }
         let outer = inner.min(OUTER_END_TAG_SEARCH);
         self.stack.get(..outer)?.iter().rposition(named)
+    }
+
+    /// Whether the open element at stack index `idx` is named `name`.
+    fn is_named<'a, S: Sink<'a, Open = O>>(&self, sink: &S, idx: usize, name: &str) -> bool {
+        self.stack
+            .get(idx)
+            .is_some_and(|open| sink.name(open) == name)
+    }
+
+    /// The stack index of the open element that the end tag `closing`
+    /// closes, by [`tags::EndScope::search`]: scanning down from the top, the first
+    /// element it names, unless a scope boundary comes first (then the end
+    /// tag is stray). Looks at the [`MAX_END_TAG_SEARCH`] innermost elements,
+    /// then the [`OUTER_END_TAG_SEARCH`] outermost, like [`OpenElements::find`].
+    fn find_end<'a, S: Sink<'a, Open = O>>(&self, sink: &S, closing: &str) -> Option<usize> {
+        let scope = tags::EndScope::of(closing);
+        let scan = |from: usize, to: usize| {
+            for i in (from..to).rev() {
+                match scope.search(closing, sink.name(self.stack.get(i)?)) {
+                    tags::Search::Closes => return Some(Some(i)),
+                    tags::Search::Stops => return Some(None),
+                    tags::Search::Continue => {}
+                }
+            }
+            None
+        };
+        let inner = self.stack.len().saturating_sub(MAX_END_TAG_SEARCH);
+        if let Some(found) = scan(inner, self.stack.len()) {
+            return found;
+        }
+        scan(0, inner.min(OUTER_END_TAG_SEARCH)).flatten()
     }
 }
 
