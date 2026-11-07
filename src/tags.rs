@@ -198,6 +198,10 @@ pub(crate) enum Search {
 /// * `<li>`, `<dd>`, `<dt>` close the open list item of their kind, looking
 ///   past anything but a "special" element (other than `address`, `div` and
 ///   `p`): `<li><a>One<li>` gives two items.
+/// * `<a>`, `<nobr>`, `<button>` and `<select>` close an open one of their own
+///   name, looking past anything but a scope boundary
+///   ([`is_scope_boundary`]): browsers never nest them (`<a>1<a>2` gives two
+///   links).
 /// * Table rows, cells and sections close the open cell, row, section or
 ///   caption they end, looking past anything but `table`, `template` or
 ///   `html` (table scope): `<td><b>x<td>` gives two cells.
@@ -225,6 +229,7 @@ pub(crate) fn search(opening: &str, open: &str) -> Option<Search> {
             matches!(open, "dd" | "dt"),
             is_special(open) && !matches!(open, "address" | "div" | "p"),
         ),
+        "a" | "nobr" | "button" | "select" => found(open == opening, is_scope_boundary(open)),
         "td" | "th" | "tr" => found(
             implicitly_closes(opening, open),
             matches!(open, "table" | "template" | "html"),
@@ -234,6 +239,67 @@ pub(crate) fn search(opening: &str, open: &str) -> Option<Search> {
             matches!(open, "table" | "template" | "html"),
         ),
         _ => None,
+    }
+}
+
+/// The elements that end a search "in scope" (WHATWG's default scope, without
+/// the SVG and MathML integration points): a search for an element stops at
+/// one of these.
+pub(crate) fn is_scope_boundary(name: &str) -> bool {
+    matches!(
+        name,
+        "applet" | "caption" | "html" | "marquee" | "object" | "table" | "td" | "template" | "th"
+    )
+}
+
+/// How far the end tag `closing` looks for the element it closes (see
+/// [`EndScope::search`]); decided once per end tag, not per open element.
+#[derive(Clone, Copy)]
+pub(crate) enum EndScope {
+    /// `</body>`, `</html>`, `</template>`: through everything.
+    Anywhere,
+    /// `</td>`, `</tr>`, `</table>`, …: to the nearest `table`, `template` or
+    /// `html`.
+    Table,
+    /// Every other end tag: to the nearest [scope boundary](is_scope_boundary).
+    Default,
+}
+
+impl EndScope {
+    pub(crate) fn of(closing: &str) -> Self {
+        match closing {
+            "body" | "html" | "template" => EndScope::Anywhere,
+            "table" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "caption" | "colgroup" => {
+                EndScope::Table
+            }
+            _ => EndScope::Default,
+        }
+    }
+
+    /// What the end tag `closing` finds at the open element `open` while
+    /// looking for the element it closes: [`Search::Closes`] at the element it
+    /// names (any open heading, for a heading end tag: `<h2>x</h3>` closes the
+    /// `<h2>`), [`Search::Stops`] at a scope boundary, else
+    /// [`Search::Continue`].
+    ///
+    /// A stray `</div>` inside a `<td>` whose `<div>` opened outside the
+    /// table is thus ignored instead of closing the cell, the row and the
+    /// table.
+    #[inline]
+    pub(crate) fn search(self, closing: &str, open: &str) -> Search {
+        if open == closing || (is_heading(closing) && is_heading(open)) {
+            return Search::Closes;
+        }
+        let stops = match self {
+            EndScope::Anywhere => false,
+            EndScope::Table => matches!(open, "table" | "template" | "html"),
+            EndScope::Default => is_scope_boundary(open),
+        };
+        if stops {
+            Search::Stops
+        } else {
+            Search::Continue
+        }
     }
 }
 
