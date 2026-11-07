@@ -240,6 +240,12 @@ fn deeply_nested_does_not_overflow() {
     assert!(dom.to_json().len() > depth);
 }
 
+/// Ceiling for the linear-time tests below. They guard against the quadratic
+/// case (tens of seconds at these sizes), not against a slow machine: a debug
+/// build on a loaded CI runner takes about a second, so the limit sits well
+/// above that and well below the failure it exists to catch (see #117).
+const LINEAR_TIME_LIMIT_MS: u128 = 5_000;
+
 #[test]
 fn stray_end_tags_on_a_deep_stack_are_linear() {
     // Each `</x>` has no open match. Scanning the whole open-element stack for
@@ -251,7 +257,7 @@ fn stray_end_tags_on_a_deep_stack_are_linear() {
     let start = std::time::Instant::now();
     let dom = parse(&html);
     assert!(
-        start.elapsed().as_millis() < 1000,
+        start.elapsed().as_millis() < LINEAR_TIME_LIMIT_MS,
         "took {:?}",
         start.elapsed()
     );
@@ -267,7 +273,7 @@ fn stray_end_tags_on_a_deep_stack_are_linear() {
     let start = std::time::Instant::now();
     let dom = parse(&html);
     assert!(
-        start.elapsed().as_millis() < 1000,
+        start.elapsed().as_millis() < LINEAR_TIME_LIMIT_MS,
         "took {:?}",
         start.elapsed()
     );
@@ -361,7 +367,7 @@ fn colliding_names_on_a_deep_stack_are_linear() {
             parse(&html).len()
         };
         assert!(
-            start.elapsed().as_millis() < 1000,
+            start.elapsed().as_millis() < LINEAR_TIME_LIMIT_MS,
             "{label} took {:?}",
             start.elapsed()
         );
