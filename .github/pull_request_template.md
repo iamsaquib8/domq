@@ -8,4 +8,4 @@
 - [ ] `cargo test --all-features` passes
 - [ ] Added a test for the changed behaviour
 - [ ] No new default dependencies; no `unwrap`/`expect`/`panic`/indexing on input-derived data
-- [ ] `CHANGELOG.md` updated under *Unreleased* (for user-visible changes)
+- [ ] A changelog fragment in `changes/` (for user-visible changes; see `changes/README.md`), not an edit to `CHANGELOG.md`
