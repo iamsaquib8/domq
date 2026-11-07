@@ -28,6 +28,8 @@ reader mode and extraction) and Python.
 [Python](./python) ·
 [Roadmap](./ROADMAP.md)
 
+New here? Start from [what you want to do](https://iamsaquib8.github.io/domq/docs/#what-do-you-want-to-do), or see [which surface fits](https://iamsaquib8.github.io/domq/docs/surfaces.html) and [which API to call](https://iamsaquib8.github.io/domq/docs/which-api.html).
+
 <img src="docs/assets/demo.svg" width="760" alt="Terminal demo: domq lists the navigation links of rust-lang.org, converts its first section to Markdown, counts images without alt text, and pretty-prints a fragment with unclosed list items.">
 
 </div>

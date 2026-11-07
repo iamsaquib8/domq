@@ -1,21 +1,23 @@
 # Summary
 
-[Introduction](introduction.md)
+[domq guide](introduction.md)
 
-# Getting started
+# Start here
 
 - [Install](install.md)
 - [Quick start](quickstart.md)
+- [Choose your surface](surfaces.md)
+- [Which API do I use?](which-api.md)
 
-# Cookbook
+# Recipes
 
+- [Turn a page into Markdown for an LLM](cookbook/reader-mode.md)
 - [Scrape elements and attributes](cookbook/scraping.md)
-- [Extract structured data](cookbook/extracting.md)
-- [Pages to Markdown for LLMs and RAG](cookbook/reader-mode.md)
-- [Links, metadata and tables](cookbook/links-metadata-tables.md)
-- [Edit and serialize](cookbook/editing.md)
-- [Stream huge documents](cookbook/streaming.md)
-- [Lint HTML in CI](cookbook/lint.md)
+- [Pull fields from a list of items](cookbook/extracting.md)
+- [Scrape links, metadata and tables](cookbook/links-metadata-tables.md)
+- [Edit HTML and write it back](cookbook/editing.md)
+- [Process a huge dump without building a tree](cookbook/streaming.md)
+- [Check HTML for accessibility problems in CI](cookbook/lint.md)
 
 # Reference
 
