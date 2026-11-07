@@ -64,7 +64,7 @@ on the dev set only; the test set is for reporting.
 
 | Extractor | Dev F1 | Dev precision | Dev recall | Test F1 |
 |---|---:|---:|---:|---:|
-| **domq `main_content()`** | **0.792** | 0.782 | 0.886 | **0.833** |
+| **domq `main_content()`** | **0.792** | 0.783 | 0.887 | **0.830** |
 | domq, whole page `to_text()` | 0.701 | | | 0.724 |
 | rs-trafilatura | 0.859 | 0.863 | 0.890 | 0.893 |
 | MinerU-HTML (0.6B model) | 0.827 | 0.845 | 0.840 | — |
@@ -78,19 +78,19 @@ on the dev set only; the test set is for reporting.
 | Readability | 0.675 | 0.685 | 0.713 | 0.726 |
 | Goose3 | 0.652 | 0.845 | 0.593 | — |
 
-domq's snippet checks: must include 77.5% (dev) / 84.7% (test), must
-exclude 19.8% (dev) / 20.4% (test). `main_content()` found no container
+domq's snippet checks: must include 77.6% (dev) / 84.3% (test), must
+exclude 19.9% (dev) / 20.4% (test). `main_content()` found no container
 on 23 dev and 5 test pages.
 
 ### By page type (dev)
 
 | Page type | Pages | domq F1 | domq whole page | rs-trafilatura | Trafilatura | dom-smoothie | Readability |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| article | 793 | 0.911 | 0.800 | 0.932 | 0.926 | 0.908 | 0.825 |
+| article | 793 | 0.910 | 0.800 | 0.932 | 0.926 | 0.908 | 0.825 |
 | forum | 113 | 0.577 | 0.606 | 0.808 | 0.585 | 0.530 | 0.466 |
-| product | 119 | 0.510 | 0.401 | 0.641 | 0.567 | 0.502 | 0.407 |
-| collection | 117 | 0.603 | 0.462 | 0.716 | 0.553 | 0.504 | 0.445 |
-| listing | 99 | 0.641 | 0.598 | 0.707 | 0.589 | 0.596 | 0.496 |
+| product | 119 | 0.523 | 0.401 | 0.641 | 0.567 | 0.502 | 0.407 |
+| collection | 117 | 0.600 | 0.462 | 0.716 | 0.553 | 0.504 | 0.445 |
+| listing | 99 | 0.632 | 0.598 | 0.707 | 0.589 | 0.596 | 0.496 |
 | documentation | 91 | 0.907 | 0.805 | 0.932 | 0.888 | 0.868 | 0.736 |
 | service | 165 | 0.736 | 0.678 | 0.844 | 0.763 | 0.714 | 0.604 |
 

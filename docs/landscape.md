@@ -13,7 +13,7 @@ unless a benchmark is named. Corrections welcome.
 - **One small core for every surface.** Selectors, reader mode, Markdown, RAG
   chunks, metadata, links, tables, lint and an MCP server in one
   zero-dependency, `no_std`, `forbid(unsafe)`, never-panicking crate, shipped
-  to Rust, a CLI, a ~65 KB gzipped wasm module, Python and WASI. The closest
+  to Rust, a CLI, a ~71 KB gzipped wasm module, Python and WASI. The closest
   bundles are narrower (mdream: Markdown-centric, no selectors or lint;
   defuddle: JS-only, needs a DOM implementation) or heavier (the Rust stack
   `dom_query` + `dom_smoothie` + `htmd` is three crates on html5ever;
@@ -30,7 +30,7 @@ unless a benchmark is named. Corrections welcome.
 
 - Reader-mode quality, now measured on the human-labelled corpora
   ([docs/reader-quality.md](reader-quality.md)): AEB 0.900 (trafilatura
-  0.958, Readability.js 0.947, dom_smoothie 0.865) and WCXB 0.792 / 0.833
+  0.958, Readability.js 0.947, dom_smoothie 0.865) and WCXB 0.792 / 0.830
   dev / test (rs-trafilatura 0.859 / 0.893, dom_smoothie 0.762 / 0.808).
   Precision and non-article page types (forums, listings) are the gaps.
 - No options on `to_markdown` / `to_text`; no confidence score from

@@ -11,18 +11,7 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ## [Unreleased]
 
-### Output changes
-
-- Reader mode: `main_content()` widens a winner that holds under a tenth of the page's text, up to `<body>` ([#91](https://github.com/iamsaquib8/domq/issues/91)). Listing, collection, product, service and forum pages often scored one stray paragraph (a signup or currency notice, a popup, a filter group, a card) while their real content is links; the answer is now the whole results area. A new step 5 in the `main_content` docs. The chosen element changes on those pages, and so do `--main`, the MCP `main` option and the Markdown/text of it. On WCXB (scored with its own method) F1 goes from 0.747 to 0.792 on the dev split (the split the rule was tuned on) and from 0.803 to 0.833 on the held-out test split, with every page type better on dev; AEB goes from 0.898 to 0.900 (precision 0.828 to 0.827, recall 0.981 to 0.987). Agreement with Readability (docs/reader-mode.md) is unchanged.
-- Parser: one newline (`\n` or `\r\n`) right after a `<pre>`, `<listing>` or `<textarea>` start tag is dropped, as in browsers ([#75](https://github.com/iamsaquib8/domq/issues/75)), so `<pre>\ncode</pre>` has the text `code`, not `\ncode`. `text_content()`, JSON, `#[derive(FromHtml)]` extraction, text and Markdown code blocks, and `<textarea>` values no longer start with that newline. `to_html()` writes a newline back after the start tag when the content starts with one, so `<pre>\n\nx</pre>` round-trips.
-- CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
-
-### Fixed
-
-- Parser: HTML conformance (same structure) goes from 1210 to 1216 of 1959 tests, and exact from 83 to 87, with no regressions (`tests3.dat:63`, `:75`, `:89`, `:215`, `:227`, `tests7.dat:188`).
-- MCP: a request whose `_meta` specifies a handshake-era legacy version is served with legacy semantics rather than modern, allowing `initialize` and omitting modern result fields, and `clientCapabilities` is validated to be an object ([#159](https://github.com/iamsaquib8/domq/issues/159)).
-- CLI: `-1` is applied after attribute (`-a`) and whitespace (`-w`) filtering rather than before, and `-c` honours `-w` to skip blank matches ([#144](https://github.com/iamsaquib8/domq/issues/144)).
-- Reject Markdown options combined with another output format, regardless of flag order.
+Pending changes are files in [`changes/`](./changes/README.md).
 
 ## [0.6.0] — 2026-11-03
 

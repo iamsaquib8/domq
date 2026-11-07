@@ -240,6 +240,12 @@ fn deeply_nested_does_not_overflow() {
     assert!(dom.to_json().len() > depth);
 }
 
+/// Ceiling for the linear-time tests below. They guard against the quadratic
+/// case (tens of seconds at these sizes), not against a slow machine: a debug
+/// build on a loaded CI runner takes about a second, so the limit sits well
+/// above that and well below the failure it exists to catch (see #117).
+const LINEAR_TIME_LIMIT_MS: u128 = 5_000;
+
 #[test]
 fn stray_end_tags_on_a_deep_stack_are_linear() {
     // Each `</x>` has no open match. Scanning the whole open-element stack for
@@ -251,7 +257,7 @@ fn stray_end_tags_on_a_deep_stack_are_linear() {
     let start = std::time::Instant::now();
     let dom = parse(&html);
     assert!(
-        start.elapsed().as_millis() < 1000,
+        start.elapsed().as_millis() < LINEAR_TIME_LIMIT_MS,
         "took {:?}",
         start.elapsed()
     );
@@ -267,7 +273,7 @@ fn stray_end_tags_on_a_deep_stack_are_linear() {
     let start = std::time::Instant::now();
     let dom = parse(&html);
     assert!(
-        start.elapsed().as_millis() < 1000,
+        start.elapsed().as_millis() < LINEAR_TIME_LIMIT_MS,
         "took {:?}",
         start.elapsed()
     );
@@ -361,7 +367,7 @@ fn colliding_names_on_a_deep_stack_are_linear() {
             parse(&html).len()
         };
         assert!(
-            start.elapsed().as_millis() < 1000,
+            start.elapsed().as_millis() < LINEAR_TIME_LIMIT_MS,
             "{label} took {:?}",
             start.elapsed()
         );
@@ -826,4 +832,398 @@ fn text_after_the_dropped_newline_keeps_its_source_range() {
     assert_eq!(text.text(), Some("ab"));
     let range = text.source_range().unwrap();
     assert_eq!(&src[range], "ab");
+}
+
+// An end tag looks for its element no further than a scope boundary (#67).
+
+#[test]
+fn stray_end_tag_does_not_close_the_table() {
+    // The repro from a real page: the `</div>` ends a `<div>` opened inside
+    // the cell, and the cells after it stay in the table.
+    let html = "<div class=wrap><table><tr><th><a href=/x><div>Logo</a><a href=/x>Acme</a></div></th>\
+                <td>$5</td></tr><tr><th>Beta</th><td>$7</td></tr></table></div>";
+    let dom = parse(html);
+    assert_eq!(dom.find_by_tag("td").count(), 2);
+    assert_eq!(
+        dom.to_html(),
+        "<div class=\"wrap\"><table><tr><th><a href=\"/x\"><div>Logo</div></a><a href=\"/x\">Acme</a></th>\
+         <td>$5</td></tr><tr><th>Beta</th><td>$7</td></tr></table></div>"
+    );
+    let table = dom.find_by_tag("table").next().unwrap();
+    assert_eq!(
+        table.table_rows(),
+        [vec!["Logo\nAcme", "$5"], vec!["Beta", "$7"]]
+    );
+}
+
+#[test]
+fn end_tags_for_outside_elements_are_stray_in_cells_and_captions() {
+    for (html, want) in [
+        (
+            "<div><table><tr><td>a</div>b</td><td>c</td></tr></table></div>",
+            "<div><table><tr><td>ab</td><td>c</td></tr></table></div>",
+        ),
+        (
+            "<span><table><tr><td>a</span>b</td><td>c</td></tr></table></span>",
+            "<span><table><tr><td>ab</td><td>c</td></tr></table></span>",
+        ),
+        (
+            "<a href=/x><table><tr><th>a</a>b</th><th>c</th></tr></table></a>",
+            "<a href=\"/x\"><table><tr><th>ab</th><th>c</th></tr></table></a>",
+        ),
+        (
+            "<div><table><caption>a</div>b</caption><tr><td>c</td></tr></table></div>",
+            "<div><table><caption>ab</caption><tr><td>c</td></tr></table></div>",
+        ),
+    ] {
+        assert_eq!(parse(html).to_html(), want, "{html}");
+    }
+}
+
+#[test]
+fn table_end_tags_still_close_through_cell_content() {
+    // Elements opened inside the cell are closed by the cell's end tag, and
+    // a table end tag closes the open cell and row.
+    let dom = parse("<table><tr><td><b>x</td><td>y</table>z");
+    assert_eq!(
+        dom.to_html(),
+        "<table><tr><td><b>x</b></td><td>y</td></tr></table>z"
+    );
+    // `</td>` does not reach a `<td>` outside a nested table.
+    let dom = parse("<table><tr><td><table><tr><td>a</td>b</td>c</tr></table>d</td></tr></table>");
+    assert_eq!(dom.find_by_tag("td").count(), 2);
+}
+
+#[test]
+fn a_matching_end_tag_inside_the_cell_still_closes() {
+    let dom = parse("<table><tr><td><div>a</div>b</td></tr></table>");
+    assert_eq!(
+        dom.to_html(),
+        "<table><tr><td><div>a</div>b</td></tr></table>"
+    );
+}
+
+// Any heading end tag closes the innermost open heading (#68).
+
+#[test]
+fn a_mismatched_heading_end_tag_closes_the_open_heading() {
+    let html =
+        "<h2>Shipping</h3><p>We ship worldwide.</p><p>Returns are free.</p><ul><li>Fast</li></ul>";
+    let dom = parse(html);
+    assert_eq!(
+        dom.to_html(),
+        "<h2>Shipping</h2><p>We ship worldwide.</p><p>Returns are free.</p><ul><li>Fast</li></ul>"
+    );
+    assert_eq!(
+        dom.find_by_tag("h2").next().unwrap().text_content(),
+        "Shipping"
+    );
+    // The innermost heading closes, and what it holds with it.
+    assert_eq!(parse("<h1>a<b>b</h4>c").to_html(), "<h1>a<b>b</b></h1>c");
+}
+
+#[test]
+fn a_heading_end_tag_does_not_cross_a_cell() {
+    // The `<h2>` is outside the table: `</h3>` in the cell is stray.
+    let dom = parse("<h2>Title<table><tr><td>a</h3>b</td><td>c</td></tr></table>");
+    assert_eq!(dom.find_by_tag("td").count(), 2);
+    let table = dom.find_by_tag("table").next().unwrap();
+    assert_eq!(table.table_rows(), [vec!["ab", "c"]]);
+    // A heading inside the cell closes as usual.
+    let dom = parse("<table><tr><td><h2>x</h3>y</td></tr></table>");
+    assert_eq!(
+        dom.to_html(),
+        "<table><tr><td><h2>x</h2>y</td></tr></table>"
+    );
+}
+
+// `<a>`, `<button>`, `<nobr>` and `<select>` do not nest (#69).
+
+#[test]
+fn a_link_closes_an_open_link() {
+    let dom = parse("<p><a href=/one>One<a href=/two>Two</a> after</p>");
+    assert_eq!(
+        dom.to_html(),
+        "<p><a href=\"/one\">One</a><a href=\"/two\">Two</a> after</p>"
+    );
+    // Through other elements too (not reopened: this is not the adoption agency).
+    assert_eq!(
+        parse("<a href=/1><span>1<a href=/2>2").to_html(),
+        "<a href=\"/1\"><span>1</span></a><a href=\"/2\">2</a>"
+    );
+}
+
+#[test]
+fn buttons_nobrs_and_selects_do_not_nest() {
+    assert_eq!(
+        parse("<button>1<button>2").to_html(),
+        "<button>1</button><button>2</button>"
+    );
+    assert_eq!(
+        parse("<nobr>1<nobr>2").to_html(),
+        "<nobr>1</nobr><nobr>2</nobr>"
+    );
+    assert_eq!(
+        parse("<select><option>a<select><option>b</select>").to_html(),
+        "<select><option>a</option></select><select><option>b</option></select>"
+    );
+}
+
+#[test]
+fn links_in_separate_cells_and_scopes_are_untouched() {
+    // A table cell is a scope boundary: a link in a cell inside a link nests,
+    // as in browsers.
+    let dom = parse("<a href=/o>x<table><tr><td><a href=/i>y</a></td></tr></table></a>");
+    assert_eq!(dom.find_by_tag("a").count(), 2);
+    let outer = dom.find_by_tag("a").next().unwrap();
+    assert_eq!(
+        outer
+            .descendants()
+            .filter(|n| n.tag_name() == Some("a"))
+            .count(),
+        1
+    );
+    // Sibling and consecutive links are fine.
+    assert_eq!(
+        parse("<a href=/1>1</a><a href=/2>2</a>").to_html(),
+        "<a href=\"/1\">1</a><a href=\"/2\">2</a>"
+    );
+}
+
+// A `<` that starts no markup stays in its text (#76).
+
+fn text_children(html: &str) -> Vec<String> {
+    let dom = parse(html);
+    let p = dom.find_by_tag("p").next().unwrap();
+    p.children()
+        .filter_map(|c| c.text().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn a_stray_lt_does_not_split_the_text() {
+    let dom = parse("<p>if a < b then</p>");
+    let p = dom.root().unwrap();
+    assert_eq!(p.children().count(), 1);
+    assert_eq!(p.first_child().unwrap().text(), Some("if a < b then"));
+    for (html, want) in [
+        ("<p><3 and <- and < </p>", "<3 and <- and < "),
+        ("<p>1 <2 <3<4</p>", "1 <2 <3<4"),
+        ("<p>a <&amp; b</p>", "a <& b"),
+        ("<p>x <\u{e9}</p>", "x <\u{e9}"),
+        ("<p>x <", "x <"),
+        ("<p>x </", "x </"),
+    ] {
+        assert_eq!(text_children(html), [want], "{html}");
+    }
+    // Real markup still ends the run.
+    assert_eq!(
+        text_children("<p>a < b<!--c--> < d<b>e</b> <3"),
+        ["a < b", " < d", " <3"]
+    );
+    let dom = parse("<p>a <i>b</i> c <? d>");
+    assert_eq!(dom.find_by_tag("p").next().unwrap().children().count(), 4);
+}
+
+#[test]
+fn a_stray_lt_in_a_text_run_is_one_token() {
+    let toks: Vec<_> = tokenize("a < b <3 <").collect();
+    assert_eq!(toks, [Token::Text("a < b <3 <")]);
+    // The text keeps its source range.
+    let src = "<p>a < b</p>";
+    let dom = parse(src);
+    let text = dom.root().unwrap().first_child().unwrap();
+    assert_eq!(&src[text.source_range().unwrap()], "a < b");
+}
+
+#[test]
+fn an_empty_end_tag_makes_no_token() {
+    // `</>` is dropped (with a parse error); it must not leave an empty text.
+    let toks: Vec<_> = tokenize("a</>b</></>").collect();
+    assert_eq!(toks, [Token::Text("a"), Token::Text("b")]);
+    assert_eq!(parse("</>").roots().count(), 0);
+}
+
+// Tag names run to whitespace, `/` or `>` (#84).
+
+#[test]
+fn tag_names_may_hold_non_ascii_and_symbols() {
+    let html = "<my-élément>t</my-élément>";
+    let dom = parse(html);
+    assert_eq!(dom.root().unwrap().tag_name(), Some("my-élément"));
+    assert_eq!(dom.to_html(), html);
+    assert_eq!(dom.root().unwrap().attributes().count(), 0);
+    #[cfg(feature = "query")]
+    assert_eq!(dom.select("my-élément").count(), 1);
+    assert_eq!(dom.errors().len(), 0);
+
+    let dom = parse("<div$x>t</div$x>");
+    assert_eq!(dom.root().unwrap().tag_name(), Some("div$x"));
+    assert_eq!(dom.to_html(), "<div$x>t</div$x>");
+
+    // Attributes after such a name, a self-closing one, and only ASCII upper
+    // case is lowered. A name must still start with an ASCII letter.
+    let dom = parse("<X-Ünï-Tag a=1 b/>x<x-ÜNÏ-TAG>y");
+    let kids: Vec<_> = dom.roots().filter_map(|n| n.tag_name()).collect();
+    assert_eq!(kids, ["x-Ünï-tag", "x-ÜnÏ-tag"]);
+    assert_eq!(dom.root().unwrap().attr("a"), Some("1"));
+    // The end tag matches the start tag.
+    let dom = parse("<a-é><b>x</b></a-é>y");
+    assert_eq!(dom.to_html(), "<a-é><b>x</b></a-é>y");
+    assert_eq!(parse("<Ünï>").to_html(), "&lt;Ünï&gt;");
+    // Tokens carry the whole name.
+    let toks: Vec<_> = tokenize("<my-é x>").collect();
+    assert!(matches!(toks[0], Token::StartTag { name: "my-é", .. }));
+}
+
+// A script's `<!--<script>` is "double escaped": the next `</script>` does
+// not end the element (#234).
+
+fn script_text(html: &str) -> Option<String> {
+    let dom = parse(html);
+    let script = dom.find_by_tag("script").next()?;
+    Some(script.text_content())
+}
+
+#[test]
+fn a_double_escaped_script_ends_at_the_second_end_tag() {
+    let html = "<script><!--<script>a</script>b</script><p>x</p>";
+    let dom = parse(html);
+    assert_eq!(
+        script_text(html).as_deref(),
+        Some("<!--<script>a</script>b")
+    );
+    // `b</script>` is not left over as page text, and the paragraph follows.
+    assert_eq!(dom.to_text(), "x");
+    assert_eq!(dom.roots().count(), 2);
+    assert_eq!(dom.to_html(), html);
+}
+
+#[test]
+fn script_data_states() {
+    for (html, want) in [
+        // Escaped, but not double escaped: the first end tag ends it.
+        ("<script><!-- a </script>x", "<!-- a "),
+        ("<script><!--<b>a</script>x", "<!--<b>a"),
+        // `-->` leaves the escaped part, so a later `<script` is plain text.
+        (
+            "<script><!-- a --><script>b</script>x",
+            "<!-- a --><script>b",
+        ),
+        ("<script><!--<script>a--></script>x", "<!--<script>a-->"),
+        // `<!-->` and `<!--->` are `<!--` followed by `>`/`->`.
+        ("<script><!--><script>a</script>x", "<!--><script>a"),
+        ("<script><!---><script>a</script>x", "<!---><script>a"),
+        // In the double escaped part, `</script>` goes back to escaped, and a
+        // second `</script>` ends the element; names are case-insensitive and
+        // end at whitespace, `/` or `>`.
+        (
+            "<script><!--<script>a</script>b</script>x",
+            "<!--<script>a</script>b",
+        ),
+        (
+            "<SCRIPT><!--<ScRipT >a</sCRIPT/>b</SCRIPT >x",
+            "<!--<ScRipT >a</sCRIPT/>b",
+        ),
+        (
+            "<script><!--<script/>a</script\tb</script>x",
+            "<!--<script/>a</script\tb",
+        ),
+        // Not `script`: `<scripts`, `<script`+`x`, and an undelimited name.
+        ("<script><!--<scripts>a</script>b", "<!--<scripts>a"),
+        (
+            "<script><!--<script>a</scripts>b</script>x",
+            "<!--<script>a</scripts>b</script>x",
+        ),
+        // Dashes need to be adjacent.
+        (
+            "<script><!-- - -><script>a</script>x</script>y",
+            "<!-- - -><script>a</script>x",
+        ),
+        // The double escaped part does not nest: one `</script>` leaves it.
+        (
+            "<script><!--<script><script>a</script>b</script>c</script>x",
+            "<!--<script><script>a</script>b",
+        ),
+    ] {
+        assert_eq!(script_text(html).as_deref(), Some(want), "{html}");
+    }
+    // Style, title and textarea have no such state.
+    let dom = parse("<style><!--<script>a</style>b");
+    assert_eq!(
+        dom.find_by_tag("style").next().unwrap().text_content(),
+        "<!--<script>a"
+    );
+    assert_eq!(dom.to_text(), "b");
+}
+
+#[test]
+fn double_escaped_scripts_round_trip_and_stay_closed() {
+    for html in [
+        "<script><!--<script>a</script>b</script><p>x</p>",
+        "<script><!--<script>a</script></script></script><p>y</p>",
+        "<script><!--<script>a",
+        "<script><!--<script>a</script",
+        "<script>x</script</script><p>z</p>",
+    ] {
+        let once = parse(html);
+        let out = once.to_html();
+        let twice = parse(&out);
+        assert_eq!(out, twice.to_html(), "{html}");
+        assert_eq!(once.roots().count(), twice.roots().count(), "{html}");
+        // Whatever the text, the element is closed by its own end tag.
+        assert!(out.ends_with("</script>") || out.ends_with("</p>"), "{out}");
+    }
+    // The parsed text survives intact when it ends in plain script data.
+    let html = "<script><!--<script>a</script>b</script><p>x</p>";
+    assert_eq!(
+        script_text(&parse(html).to_html()).as_deref(),
+        Some("<!--<script>a</script>b")
+    );
+}
+
+#[test]
+fn editing_a_script_into_double_escaped_text_cannot_swallow_its_end_tag() {
+    let mut dom = parse("<script>1</script><p>after</p>");
+    let script = dom.find_by_tag("script").next().unwrap().id();
+    dom.set_text(script, "<!--<script>alert(1)");
+    let out = dom.to_html();
+    let again = parse(&out);
+    assert_eq!(again.roots().count(), 2, "{out}");
+    assert_eq!(again.to_text(), "after");
+    // An end tag in plain or escaped text is still written `<\/script`.
+    dom.set_text(script, "a</script><img src=x>");
+    assert_eq!(
+        dom.to_html(),
+        "<script>a<\\/script><img src=x></script><p>after</p>"
+    );
+    dom.set_text(script, "<!--a</script><img src=x>");
+    let again = parse(&dom.to_html());
+    assert_eq!(again.roots().count(), 2);
+}
+
+#[test]
+fn script_scanning_is_linear() {
+    // Many `<!--`, `-`, `<script` and `</script` pieces, and a long run of
+    // letters after a `<`: each byte is looked at a bounded number of times.
+    let n = 200_000;
+    for unit in [
+        "<!--<script>",
+        "-->",
+        "<scrip",
+        "<aaaaaaaaaaaaaaaaaaaaaaaa",
+        "--",
+        "</scriptx",
+    ] {
+        let html = format!("<script>{}</script><p>x</p>", unit.repeat(n));
+        let start = std::time::Instant::now();
+        let dom = parse(&html);
+        let _ = dom.to_html();
+        assert!(
+            start.elapsed().as_millis() < 2000,
+            "{unit}: took {:?}",
+            start.elapsed()
+        );
+        assert!(dom.roots().count() >= 1);
+    }
 }

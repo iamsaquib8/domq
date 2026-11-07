@@ -376,8 +376,8 @@ MCP config:
 
 ## JavaScript & WebAssembly
 
-The same parser — selectors, text, Markdown and all — in a ~70 KB (gzipped; 0.6.0
-is ~65 KB) wasm module with zero JS dependencies and full TypeScript types.
+The same parser — selectors, text, Markdown and all — in a ~71 KB (gzipped; 0.6.0
+was ~65 KB) wasm module with zero JS dependencies and full TypeScript types.
 Works in the browser, Cloudflare Workers, Deno, Bun, and Node (no setup needed
 in Node). [Package docs →](./wasm) · [**Playground →**](https://iamsaquib8.github.io/domq/)
 
@@ -514,7 +514,10 @@ Windows-1252 remapping, and a missing `;` recovered where browsers do:
 `&copy 2026`, `&#169`), and implicit closing as browsers scope it: a `<li>`,
 `<dd>`/`<dt>`, table cell or row closes its predecessor even past unclosed
 inline elements (`<li><a>One<li><a>Two`), a block closes an open `<p>` past them
-(`<p><b>x<div>`), a stray `</p>` makes an empty paragraph, `</br>` is a `<br>`.
+(`<p><b>x<div>`), a stray `</p>` makes an empty paragraph, `</br>` is a `<br>`,
+a `<a>`, `<button>`, `<nobr>` or `<select>` closes an open one instead of
+nesting in it, a `</h3>` closes an open `<h2>`, and an end tag does not reach
+past a table cell, caption or table (a stray `</div>` in a `<td>` is ignored).
 Everything it recovers from is recorded in
 [`Dom::errors`](https://docs.rs/domq/latest/domq/struct.Dom.html#method.errors).
 How close the trees are to a browser's is measured in
@@ -570,7 +573,7 @@ benchmark's own method:
 
 | | AEB (181 articles) | WCXB dev / test (2,008 pages, 7 types) |
 |---|---:|---:|
-| **domq `main_content()`** | **0.900** | **0.792 / 0.833** |
+| **domq `main_content()`** | **0.900** | **0.792 / 0.830** |
 | trafilatura (Python) | 0.958 | 0.791 / 0.833 |
 | Readability.js | 0.947 | 0.675 / 0.726 |
 | dom_smoothie (Rust) | 0.865 | 0.762 / 0.808 |
