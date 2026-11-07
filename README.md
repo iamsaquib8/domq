@@ -6,7 +6,7 @@
 </picture>
 
 A tiny, zero-dependency, never-panicking HTML parser with CSS selectors —
-for Rust, your shell, JavaScript (a ~57 KB gzipped WebAssembly module, ~78 KB with
+for Rust, your shell, JavaScript (a ~58 KB gzipped WebAssembly module, ~80 KB with
 reader mode and extraction) and Python.
 
 [![crates.io](https://img.shields.io/crates/v/domq.svg?logo=rust)](https://crates.io/crates/domq)
@@ -66,7 +66,7 @@ assert_eq!(md, "## Notes\n\nSome **bold** text");
 
 ```toml
 [dependencies]
-domq = "0.6"
+domq = "0.7"
 ```
 
 ```rust
@@ -123,7 +123,7 @@ Also: 🤖 **AI agents** — `domq mcp` ([setup](#ai-agents-mcp)) · 🐍 **Pyth
 - **Content out, not just a tree.** Readable text (`to_text`), CommonMark/GFM
   Markdown (`to_markdown`) for LLM prompts and RAG pipelines, JSON, and HTML.
 - **Runs everywhere.** `no_std + alloc`, `#![forbid(unsafe_code)]`, a ~58 KB
-  gzipped wasm module (~79 KB with extraction) for browsers, Cloudflare Workers, Deno, Bun and Node, and a
+  gzipped wasm module (~80 KB with extraction) for browsers, Cloudflare Workers, Deno, Bun and Node, and a
   single static binary for your shell.
 - **Fast for an owned tree.** 5.8–9.1× faster than `scraper` on real pages, with
   6–23 allocations per parse (benchmark inputs). Speed specialists that do less work are faster:
@@ -242,8 +242,7 @@ let dom = domq::parse_bytes_with(&bytes, Some("windows-1252")); // or force a la
 
 UTF-8, UTF-16LE/BE and Windows-1252 (with browser labels such as `latin1`) are
 supported. The CLI does the same detection and has `--encoding <LABEL>`;
-`parse_bytes` and byte input to Python's and JavaScript's `parse` are on `main`
-and not in 0.6.0.
+Python's and JavaScript's `parse` take bytes too (new in 0.7).
 </details>
 
 <details>
@@ -381,8 +380,8 @@ MCP config:
 
 ## JavaScript & WebAssembly
 
-The same parser — selectors, text, Markdown and all — in a ~57 KB (gzipped) wasm
-module, or ~78 KB with reader mode and the other extraction helpers, with zero JS
+The same parser — selectors, text, Markdown and all — in a ~58 KB (gzipped) wasm
+module, or ~80 KB with reader mode and the other extraction helpers, with zero JS
 dependencies and full TypeScript types.
 Works in the browser, Cloudflare Workers, Deno, Bun, and Node (no setup needed
 in Node). [Package docs →](./wasm) · [**Playground →**](https://iamsaquib8.github.io/domq/)
@@ -407,13 +406,13 @@ page.free();
 Also `metadata`, `links`, `resources`, `tables`, `toCsv`, `toText`, `resolveUrl`.
 Not in JavaScript yet: Markdown options, the page outline, extraction and editing
 ([what works where](./ROADMAP.md#what-works-where)). Byte input (`parse(Uint8Array)`,
-`parseBytes`, `decode`) is on `main`, not in 0.6.0.
+`parseBytes`, `decode`) is new in 0.7.
 
 ## Python
 
 Same engine, Pythonic API, abi3 wheels for Linux, macOS and Windows (Python ≥ 3.11).
 The GIL is released while parsing large documents. `domq.parse(b"…")` also takes
-bytes and detects the encoding (on `main`, not in 0.6.0). [Package docs →](./python)
+bytes and detects the encoding (new in 0.7). [Package docs →](./python)
 
 ```python
 import domq
@@ -558,7 +557,7 @@ If you embed or index domq's output, re-embedding should be planned, not a
 surprise. The text it produces (`to_text`, `to_markdown`,
 `to_markdown_chunks`, the choice `main_content()` makes, and the same output
 from the CLI, the MCP tools, JavaScript and Python) changes **only in minor
-releases** (0.5 → 0.6), and every such change is listed under an **"Output
+releases** (0.6 → 0.7), and every such change is listed under an **"Output
 changes"** heading in the [changelog](./CHANGELOG.md). Patch releases keep it
 identical, except to fix a panic or a hang. The parsed tree follows the same
 rule, so selectors keep matching what they matched.

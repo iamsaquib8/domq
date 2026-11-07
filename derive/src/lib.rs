@@ -6,7 +6,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! domq = { version = "0.6", features = ["derive"] }
+//! domq = { version = "0.7", features = ["derive"] }
 //! ```
 //!
 //! ```ignore

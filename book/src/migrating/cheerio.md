@@ -1,7 +1,7 @@
 # From cheerio
 
-`domq-wasm` is a ~57 KB (gzipped) WebAssembly module with no JS
-dependencies (~78 KB with reader mode, metadata, links, chunks and tables, which
+`domq-wasm` is a ~58 KB (gzipped) WebAssembly module with no JS
+dependencies (~80 KB with reader mode, metadata, links, chunks and tables, which
 you import from `domq-wasm/extract`): one file for browsers, Node, Deno, Bun
 and Cloudflare Workers.
 Where cheerio gives you a jQuery-style wrapper to traverse and edit, domq
@@ -45,7 +45,7 @@ doc.free(); // or `using doc = new Document(html)`
 - **Matches are snapshots**, not live wrappers: there is no `.find()`,
   `.parent()` or editing on them yet. Express traversal in the selector
   (`:has()`, combinators). Editing and events in the JS package are planned
-  for 0.7.
+  for 0.10.
 - **Node needs no setup**; browsers and bundlers call `await init()` once.
 - An invalid selector throws a `SelectorError` with a `position`.
 - No implied `<html>`/`<body>`, as in cheerio's `load(html, null, false)`.

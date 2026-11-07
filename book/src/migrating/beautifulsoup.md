@@ -60,7 +60,7 @@ stories = extract_all(Story, html)
 
 - domq's documents and elements are **read-only** in Python today (no
   `decompose()` or `tag.string = …`). The Rust crate has an editing API;
-  bringing it to Python is planned for 0.7.
+  bringing it to Python is planned for 0.10.
 - An invalid selector raises `ValueError` with the position of the problem.
 - Like `html.parser`, domq does not add `<html>`/`<body>` around fragments;
   unlike it, it repairs unclosed and mis-nested tags the way browsers do.

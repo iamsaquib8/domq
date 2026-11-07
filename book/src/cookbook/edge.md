@@ -13,8 +13,8 @@ first plus extraction.
 
 | Import | Gives you | `.wasm`, gzipped |
 |---|---|---:|
-| `domq-wasm` | the core: `select`, `selectFirst`, `toText`, `toMarkdown`, `toHtml`, `parse`, `errors`, `decode`, `Document` | about 57 KB |
-| `domq-wasm/extract` | the core plus `mainContent`, `metadata`, `links`, `resources`, `toMarkdownChunks`, `tables`, `toCsv` | about 78 KB |
+| `domq-wasm` | the core: `select`, `selectFirst`, `toText`, `toMarkdown`, `toHtml`, `parse`, `errors`, `decode`, `Document` | about 58 KB |
+| `domq-wasm/extract` | the core plus `mainContent`, `metadata`, `links`, `resources`, `toMarkdownChunks`, `tables`, `toCsv` | about 80 KB |
 
 Sizes are as stated in the package's README, which is where they are kept up
 to date. Import from `domq-wasm/extract` alone if you need both. Do not import

@@ -3,7 +3,7 @@
 **Messy HTML in. Clean tree, text, Markdown, or JSON out.** A forgiving HTML
 parser with CSS selectors for JavaScript: browsers, Node, Deno, Bun and edge
 workers. It is the Rust crate [`domq`](https://github.com/iamsaquib8/domq)
-compiled to a **~57 KB (gzipped)** WebAssembly module (or **~78 KB** with
+compiled to a **~58 KB (gzipped)** WebAssembly module (or **~80 KB** with
 data extraction: reader mode, metadata, links, chunks, tables), with zero JS
 dependencies.
 
@@ -25,9 +25,9 @@ toMarkdown(html); // "- [One](/a)\n- [Two](/b)"
   `:not()`, `:is()`, `:has()`, plus jQuery-style `:contains("text")`.
 - **Content out.** Readable text (no scripts or styles), CommonMark/GFM Markdown
   for LLM prompts and RAG, a JSON-ready tree, or repaired HTML.
-- **Small.** The core `.wasm` is ~57 KB gzipped plus ~5 KB of generated glue
+- **Small.** The core `.wasm` is ~58 KB gzipped plus ~5 KB of generated glue
   JS. Extraction (reader mode, metadata, links, chunks, tables) is a second,
-  optional entry, `domq-wasm/extract`, for ~78 KB in all.
+  optional entry, `domq-wasm/extract`, for ~80 KB in all.
 
 It is not a spec-compliant WHATWG parser (no implicit `<html>`/`<body>`, no
 adoption agency) and not a sanitizer. Use DOMPurify for untrusted HTML that you
@@ -46,8 +46,8 @@ second is the first plus extraction.
 
 | Import | What you get | `.wasm` gzipped |
 |---|---|---:|
-| `domq-wasm` | **Core:** `parse`, `parseJson`, `parseBytes`, `select`, `selectFirst`, `toText`, `toMarkdown`, `toHtml`, `errors`, `decode`, `resolveUrl`, `resolveSrcset`, and the parse-once `Document` | 56,647 B |
-| `domq-wasm/extract` | **Everything in the core, plus extraction:** `mainContent`, `metadata`, `links`, `resources`, `toMarkdownChunks`, `tables`, `toCsv` (also as `Document` methods) | 77,769 B |
+| `domq-wasm` | **Core:** `parse`, `parseJson`, `parseBytes`, `select`, `selectFirst`, `toText`, `toMarkdown`, `toHtml`, `errors`, `decode`, `resolveUrl`, `resolveSrcset`, and the parse-once `Document` | 58,468 B |
+| `domq-wasm/extract` | **Everything in the core, plus extraction:** `mainContent`, `metadata`, `links`, `resources`, `toMarkdownChunks`, `tables`, `toCsv` (also as `Document` methods) | 79,534 B |
 
 ```js
 import { select, toMarkdown } from "domq-wasm"; // the core
@@ -281,8 +281,8 @@ Measured with `gzip -9` on the files in the package:
 
 | Entry | `.wasm` raw | `.wasm` gzipped | glue JS gzipped | CI gate (`.wasm`, gzipped) |
 |---|---:|---:|---:|---:|
-| `domq-wasm` (core) | 128,838 B | **56,647 B** | 5,152 B | < 60,000 B |
-| `domq-wasm/extract` (core + extraction) | 178,270 B | **77,769 B** | 5,886 B | < 80,000 B |
+| `domq-wasm` (core) | 130,121 B | **58,468 B** | 5,152 B | < 60,000 B |
+| `domq-wasm/extract` (core + extraction) | 179,583 B | **79,534 B** | 5,885 B | < 80,000 B |
 
 The core holds the parser, the selector engine, bytes-in decoding, and the
 text, Markdown, JSON and HTML serializers. `domq-wasm/extract` adds data

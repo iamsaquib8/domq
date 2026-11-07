@@ -34,7 +34,7 @@ summary and upgrade notes), and update ROADMAP's "Where we are", "What works whe
 "Shipped". Merge that, then tag `main`:
 
 ```sh
-git tag v0.6.0 && git push origin main --tags
+git tag v0.7.0 && git push origin main --tags
 ```
 
 ## 1. crates.io
