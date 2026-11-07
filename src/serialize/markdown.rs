@@ -502,7 +502,12 @@ impl<'a> Markdown<'a> {
             "hr" if top => {
                 self.block(&mut f);
                 self.begin_block();
-                self.out.push_str("---");
+                // After a `-` bullet, `- ---` would be one thematic break and
+                // the list would be gone: a different character keeps the item.
+                let line = self.out.rsplit('\n').next().unwrap_or("");
+                let after_dashes =
+                    line.contains('-') && line.bytes().all(|b| matches!(b, b'-' | b' '));
+                self.out.push_str(if after_dashes { "***" } else { "---" });
             }
             "img" => self.image(node),
             "code" | "kbd" | "samp" | "tt" => self.start_code(&mut f, false, ""),
@@ -536,22 +541,30 @@ impl<'a> Markdown<'a> {
             }
             "ul" | "ol" | "menu" if top => {
                 self.flush();
-                // A list nested in an item follows the item's text tightly.
+                let ordered = tag == "ol";
+                let reversed = ordered && node.has_attr("reversed");
+                let start = number(node.attr("start")).unwrap_or_else(|| {
+                    if reversed {
+                        let items = node.child_elements().filter(|c| c.tag_name() == Some("li"));
+                        items.count() as i64
+                    } else {
+                        1
+                    }
+                });
+                // A list nested in an item follows the item's text tightly,
+                // except an ordered one that does not start at 1: it cannot
+                // interrupt a paragraph, so it needs a blank line.
                 let nested = matches!(self.prefixes.last(), Some(Prefix::Item { .. }));
-                self.sep(if nested { 1 } else { 2 });
+                let first = node
+                    .child_elements()
+                    .find(|c| c.tag_name() == Some("li"))
+                    .and_then(|li| number(li.attr("value")))
+                    .unwrap_or(start)
+                    .clamp(0, MAX_NUMBER);
+                let tight = nested && !(ordered && first != 1 && self.prefixes.len() < MAX_NEST);
+                self.sep(if tight { 1 } else { 2 });
                 f.block = true;
                 if self.prefixes.len() < MAX_NEST {
-                    let ordered = tag == "ol";
-                    let reversed = ordered && node.has_attr("reversed");
-                    let start = number(node.attr("start")).unwrap_or_else(|| {
-                        if reversed {
-                            let items =
-                                node.child_elements().filter(|c| c.tag_name() == Some("li"));
-                            items.count() as i64
-                        } else {
-                            1
-                        }
-                    });
                     // Right after a list of the same kind (nothing between)?
                     let depth = self.prefixes.len();
                     let alt = matches!(self.last_list, Some((d, at, o, false))
@@ -926,7 +939,11 @@ impl<'a> Markdown<'a> {
             if i > 0 {
                 self.next_line(false);
             }
-            self.out.push_str(part);
+            if self.heading > 0 && i == 0 {
+                self.out.push_str(part);
+            } else {
+                push_line_start_escaped(&mut self.out, part, i > 0);
+            }
         }
         self.line = line;
         self.line.clear();
@@ -1216,6 +1233,36 @@ fn code_lang<'a>(pre: NodeRef<'a>) -> &'a str {
         })
         .filter(|l| !l.contains('`'))
         .unwrap_or("")
+}
+
+/// Append a finished line of a paragraph, escaping the block syntax its text
+/// formed across nodes, where [`escape`] only saw one word at a time:
+/// `<span>1</span>. x` and `1<!-- -->. x` (React's server rendering) read as
+/// an ordered list, and, after a hard break (`later`), a line of only `|`,
+/// `-` and `:` is a table's delimiter row.
+fn push_line_start_escaped(out: &mut String, line: &str, later: bool) {
+    let digits = line.bytes().take_while(u8::is_ascii_digit).count();
+    let marker = (1..=9).contains(&digits)
+        && matches!(line.as_bytes().get(digits), Some(b'.' | b')'))
+        && matches!(line.as_bytes().get(digits + 1), None | Some(b' '));
+    if marker {
+        out.push_str(line.get(..digits).unwrap_or_default());
+        out.push('\\');
+        out.push_str(line.get(digits..).unwrap_or_default());
+    } else if later
+        && line.contains('|')
+        && line.contains('-')
+        && line.bytes().all(|b| matches!(b, b'|' | b'-' | b':' | b' '))
+    {
+        for c in line.chars() {
+            if c == '|' {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+    } else {
+        out.push_str(line);
+    }
 }
 
 /// Append one word (no whitespace) of text, escaping what Markdown would

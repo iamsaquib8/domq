@@ -240,6 +240,62 @@ fn ordered_lists() {
 }
 
 #[test]
+fn a_nested_ordered_list_not_starting_at_1_follows_a_blank_line() {
+    // An ordered list can only interrupt a paragraph when it starts at 1, so
+    // anything else after the item's text would be swallowed into it.
+    for (html, want) in [
+        (
+            "<ul><li>Item<ol start=5><li>five</li><li>six</li></ol></li></ul>",
+            "- Item\n\n  5. five\n  6. six",
+        ),
+        (
+            "<ul><li>Item<ol start=0><li>zero</li></ol></li></ul>",
+            "- Item\n\n  0. zero",
+        ),
+        (
+            "<ol><li>One<ol start=3><li>three</li></ol></li></ol>",
+            "1. One\n\n   3. three",
+        ),
+        (
+            "<ul><li>Item<ol reversed><li>a</li><li>b</li><li>c</li></ol></li></ul>",
+            "- Item\n\n  3. a\n  2. b\n  1. c",
+        ),
+        (
+            "<ol><li>One<ol reversed><li>a</li><li>b</li></ol></li></ol>",
+            "1. One\n\n   2. a\n   1. b",
+        ),
+        // The first item's own number counts.
+        (
+            "<ul><li>Item<ol><li value=7>a</li></ol></li></ul>",
+            "- Item\n\n  7. a",
+        ),
+        (
+            "<ul><li>Item<ol start=7><li value=1>a</li></ol></li></ul>",
+            "- Item\n  1. a",
+        ),
+        // Starting at 1 (the default), or a bullet list, stays tight.
+        (
+            "<ul><li>Item<ol><li>a</li></ol></li></ul>",
+            "- Item\n  1. a",
+        ),
+        (
+            "<ul><li>Item<ol start=1><li>a</li></ol></li></ul>",
+            "- Item\n  1. a",
+        ),
+        (
+            "<ol start=5><li>Item<ul><li>a</li></ul></li></ol>",
+            "5. Item\n   - a",
+        ),
+        (
+            "<ol reversed><li>Item<ol reversed><li>a</li></ol></li></ol>",
+            "1. Item\n   1. a",
+        ),
+    ] {
+        assert_eq!(md(html), want, "{html}");
+    }
+}
+
+#[test]
 fn list_item_values_and_reversed_lists() {
     // Numbers are what a browser shows (renderers only honour the first).
     assert_eq!(md("<ol><li>a<li value=7>b<li>c</ol>"), "1. a\n7. b\n8. c");
@@ -518,6 +574,47 @@ fn escapes_line_start_syntax() {
     assert_eq!(md("<p>a<br>- b</p>"), "a\\\n\\- b");
     // Item text starts a line.
     assert_eq!(md("<ul><li># x</li></ul>"), r"- \# x");
+}
+
+#[test]
+fn escapes_block_syntax_formed_across_nodes() {
+    // `<span>1</span>. x` and React's `1<!-- -->. x` read as an ordered list
+    // once the nodes are joined (checked with markdown-it and cmark-gfm).
+    assert_eq!(
+        md("<p><span>1</span>. Introduction</p>"),
+        r"1\. Introduction"
+    );
+    assert_eq!(md("<p>1<!-- -->. Introduction</p>"), r"1\. Introduction");
+    assert_eq!(md("<p>2024<!-- -->) was a year</p>"), r"2024\) was a year");
+    assert_eq!(
+        md("<p><b>1</b>. Not at the start</p>"),
+        "**1**. Not at the start"
+    );
+    // After a hard break, and as the first thing in an item or a quote.
+    assert_eq!(md("<p>a<br><i></i>3<!-- -->. b</p>"), "a\\\n3\\. b");
+    assert_eq!(md("<ul><li>1<!-- -->. x</li></ul>"), r"- 1\. x");
+    assert_eq!(md("<blockquote>1<!-- -->. x</blockquote>"), r"> 1\. x");
+    // Not a marker: a decimal, a longer run, no space, a heading's text.
+    assert_eq!(md("<p>1<!-- -->.5 apples</p>"), "1.5 apples");
+    assert_eq!(md("<p>1234567890<!-- -->. x</p>"), "1234567890. x");
+    assert_eq!(md("<h2><span>1</span>. Intro</h2>"), "## 1. Intro");
+    assert_eq!(md("<p>x<!-- -->1. y</p>"), "x1. y");
+    // A delimiter-row lookalike after a hard break would turn the line above
+    // into a table header.
+    assert_eq!(md("<p>a|b<br>|---|---|</p>"), "a|b\\\n\\|---\\|---\\|");
+    assert_eq!(md("<p>a|b<br>:-:|--</p>"), "a|b\\\n:-:\\|--");
+    assert_eq!(md("<p>|---|---|</p>"), "|---|---|");
+    assert_eq!(md("<p>a|b<br>x|---|</p>"), "a|b\\\nx|---|");
+}
+
+#[test]
+fn a_rule_first_in_a_bullet_item_stays_in_its_item() {
+    // `- ---` is one thematic break, and the list would be gone.
+    assert_eq!(md("<ul><li><hr></li></ul>"), "- ***");
+    assert_eq!(md("<ul><li><ul><li><hr></li></ul></li></ul>"), "- - ***");
+    assert_eq!(md("<ol><li><hr>x</li></ol>"), "1. ---\n\n   x");
+    assert_eq!(md("<ul><li>a<hr>b</li></ul>"), "- a\n\n  ---\n\n  b");
+    assert_eq!(md("<blockquote><hr></blockquote>"), "> ---");
 }
 
 #[test]
