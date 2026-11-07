@@ -47,6 +47,10 @@
 //! - `</span>` / `</x-card>` as the last child of a parent whose end tag is
 //!   written, unless that parent has the same name (its end tag would close
 //!   the child and leave the parent open);
+//! - `</a>` when the next sibling is another `<a>` (which closes it), and the
+//!   link holds only text and comments (a formatting element inside it would
+//!   be reopened in the next link by html5ever's adoption agency, which we
+//!   do not do);
 //! - any end tag at the very end of the input (everything still open).
 //!
 //! Out of the subset, on purpose: tables, forms, `select`, `template`,
@@ -415,6 +419,14 @@ fn write_nodes(
                     // Not inside a parent of the same name: its end tag would
                     // close this element instead, leaving the parent open.
                     "span" | "x-card" => last && closing_parent.is_some_and(|p| p != *tag),
+                    // An `<a>` closes the open `<a>`; only simple content is
+                    // left alone by the adoption agency.
+                    "a" => {
+                        matches!(next, Some(Node::Element { tag: "a", .. }))
+                            && children
+                                .iter()
+                                .all(|c| matches!(c, Node::Text(_) | Node::Comment(_)))
+                    }
                     _ => false,
                 } || (last && at_eof);
                 let close = !omissible || u.ratio(1, 3).unwrap_or(true);
