@@ -29,6 +29,8 @@
 
 - [Command line](cli.md)
 - [Selectors](selectors.md)
+- [JavaScript API](javascript.md)
+- [Python API](python.md)
 - [AI agents (MCP)](mcp.md)
 - [Measured: conformance and reader mode](measured.md)
 

@@ -111,6 +111,9 @@ Next: [Give an agent a page](cookbook/agent-page.md), [AI agents (MCP)](mcp.md).
 Read from the Rust API, the CLI's `--help`, the MCP tool list, the JavaScript
 `.d.ts` files and the Python `.pyi` stub. A dash means it is not there.
 
+Every function of the two packages: [JavaScript API](javascript.md) and
+[Python API](python.md).
+
 | | Rust | CLI | JavaScript | Python | MCP |
 |---|---|---|---|---|---|
 | CSS selectors | `select` | `domq SELECTOR` | `select` | `select` | `select` |
