@@ -1,0 +1,1 @@
+CLI: an unknown or unsupported `--encoding` label (supported: utf-8, utf-16le, utf-16be, windows-1252) is a usage error instead of being ignored ([#152](https://github.com/iamsaquib8/domq/issues/152)).
