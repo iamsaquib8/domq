@@ -116,6 +116,9 @@ pub(crate) struct TreeBuilder<'a, S: Sink<'a>> {
     pub(crate) errors: Vec<ParseError>,
     /// The source the tokens borrow from.
     src: &'a str,
+    /// The last token was the start tag of a `<pre>`, `<listing>` or
+    /// `<textarea>`: a newline starting the next text is dropped.
+    skip_lf: bool,
 }
 
 impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
@@ -126,6 +129,7 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
             open: OpenElements::default(),
             errors: Vec::new(),
             src,
+            skip_lf: false,
         }
     }
 
@@ -147,12 +151,14 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
         pos: usize,
         end: usize,
     ) {
+        // Only a text token right after the start tag loses its newline.
+        let skip_lf = core::mem::take(&mut self.skip_lf);
         match tok {
             Token::StartTag {
                 name, self_closing, ..
             } => self.start_tag(name, attrs, self_closing, pos, end),
             Token::EndTag { name } => self.end_tag(name, pos, end),
-            Token::Text(t) => self.text(t, pos, end),
+            Token::Text(t) => self.text(t, pos, end, skip_lf),
             Token::Cdata(c) => {
                 if !c.is_empty() {
                     self.sink.text(self.open.top(), c, false, pos, end);
@@ -242,12 +248,14 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
             }
         }
         let void = self_closing || tags::is_void(&lname);
+        let drops_lf = matches!(&*lname, "pre" | "listing" | "textarea");
         let open = self
             .sink
             .start(self.open.top(), lname, attrs.len(), pos, end);
         if void {
             self.sink.end(open, end, end, true);
         } else {
+            self.skip_lf = drops_lf;
             self.open.push(&self.sink, open);
         }
     }
@@ -297,7 +305,21 @@ impl<'a, S: Sink<'a>> TreeBuilder<'a, S> {
         }
     }
 
-    fn text(&mut self, t: &'a str, pos: usize, end: usize) {
+    fn text(&mut self, t: &'a str, mut pos: usize, end: usize, skip_lf: bool) {
+        // Browsers drop one newline right after `<pre>`, `<listing>` and
+        // `<textarea>` (the serializer writes one back where the content
+        // starts with one).
+        let t = if skip_lf {
+            let rest = t.strip_prefix('\n').or_else(|| t.strip_prefix("\r\n"));
+            if let Some(rest) = rest {
+                pos += t.len() - rest.len();
+                rest
+            } else {
+                t
+            }
+        } else {
+            t
+        };
         if t.is_empty() {
             return;
         }
