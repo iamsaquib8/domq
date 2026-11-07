@@ -169,9 +169,8 @@ Input is decoded the way a browser would, minus HTTP headers: a byte-order mark
 bytes are valid UTF-8 (a character cut off at the very end still counts);
 otherwise Windows-1252. `iso-8859-1`, `latin1` and `ascii` mean Windows-1252,
 as in browsers. Other encodings are not supported: an unknown `--encoding`
-label prints a warning and decodes as UTF-8, with invalid bytes as U+FFFD (a
-page declaring an unsupported charset is decoded as UTF-8 if it is valid UTF-8,
-else as Windows-1252 with a warning).
+label is a usage error (exit 2); a page that declares an unsupported charset is
+decoded as UTF-8 if it is valid UTF-8, else as Windows-1252 with a warning.
 
 ## Lint
 

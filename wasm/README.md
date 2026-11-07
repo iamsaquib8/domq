@@ -3,7 +3,7 @@
 **Messy HTML in. Clean tree, text, Markdown, or JSON out.** A forgiving HTML
 parser with CSS selectors for JavaScript: browsers, Node, Deno, Bun and edge
 workers. It is the Rust crate [`domq`](https://github.com/iamsaquib8/domq)
-compiled to one **~65 KB (gzipped)** WebAssembly module, with zero JS
+compiled to one **~70 KB (gzipped)** WebAssembly module, with zero JS
 dependencies.
 
 **[Try it in the playground](https://iamsaquib8.github.io/domq/)**: paste
@@ -24,7 +24,7 @@ toMarkdown(html); // "- [One](/a)\n- [Two](/b)"
   `:not()`, `:is()`, `:has()`, plus jQuery-style `:contains("text")`.
 - **Content out.** Readable text (no scripts or styles), CommonMark/GFM Markdown
   for LLM prompts and RAG, a JSON-ready tree, or repaired HTML.
-- **Small.** One `.wasm` (~65 KB gzipped) plus ~5 KB of generated glue JS.
+- **Small.** One `.wasm` (~70 KB gzipped) plus ~6 KB of generated glue JS.
 
 It is not a spec-compliant WHATWG parser (no implicit `<html>`/`<body>`, no
 adoption agency) and not a sanitizer. Use DOMPurify for untrusted HTML that you
@@ -229,12 +229,12 @@ pseudo-elements, `:hover` and other interactive states, namespaces, and
 
 | File | Raw | Gzipped |
 |---|---:|---:|
-| `domq_wasm_bg.wasm` | ~148 KB | ~65 KB |
-| `domq_wasm.js` (glue) | ~37 KB | ~5 KB |
+| `domq_wasm_bg.wasm` | ~160 KB | ~70 KB |
+| `domq_wasm.js` (glue) | ~41 KB | ~6 KB |
 
 The module contains the parser, the selector engine, data extraction (reader
 mode, metadata, links, chunks, tables), and the text, Markdown, JSON and HTML
-serializers. CI fails if the gzipped `.wasm` grows past 65 KiB.
+serializers. CI fails if the gzipped `.wasm` grows past 70 KiB (0.6.0 shipped ~65 KB).
 
 ## Upgrading from 0.1 or 0.2
 
