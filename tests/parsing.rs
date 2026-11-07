@@ -755,3 +755,75 @@ fn entity_problems_are_reported_at_their_ampersand() {
     let html = "<title>a &bogus;</title><textarea>\n&#xZZ;</textarea>";
     assert_eq!(positions(html), [9, html.find("&#").unwrap()]);
 }
+
+// One newline right after <pre>, <listing> and <textarea> is dropped (#75).
+
+#[test]
+fn a_newline_after_pre_listing_and_textarea_is_dropped() {
+    let dom = parse("<pre>\nfn main() {}\n</pre>");
+    assert_eq!(dom.root().unwrap().text_content(), "fn main() {}\n");
+    let dom = parse("<textarea>\nhello</textarea>");
+    assert_eq!(dom.root().unwrap().text_content(), "hello");
+    let dom = parse("<listing>\r\nx</listing>");
+    assert_eq!(dom.root().unwrap().text_content(), "x");
+    // Only one, and only right after the start tag.
+    assert_eq!(
+        parse("<pre>\n\nx</pre>").root().unwrap().text_content(),
+        "\nx"
+    );
+    assert_eq!(
+        parse("<pre> \nx</pre>").root().unwrap().text_content(),
+        " \nx"
+    );
+    assert_eq!(
+        parse("<pre><!--c-->\nx</pre>")
+            .root()
+            .unwrap()
+            .text_content(),
+        "\nx"
+    );
+    // Other elements keep theirs.
+    assert_eq!(
+        parse("<div>\nx</div>").root().unwrap().text_content(),
+        "\nx"
+    );
+    // An empty element, and one that is only the newline.
+    assert_eq!(parse("<pre>\n</pre>").root().unwrap().text_content(), "");
+    assert_eq!(parse("<pre>\n</pre>").root().unwrap().children().count(), 0);
+}
+
+#[test]
+fn pre_newline_round_trips() {
+    for html in [
+        "<pre>\n\nx</pre>",
+        "<pre>\n\n\nx\n</pre>",
+        "<textarea>\n\nhello</textarea>",
+        "<listing>\n\r\nx</listing>",
+        "<pre>x\n</pre>",
+        "<pre>\nx</pre>",
+        "<pre><b>\n</b>\nx</pre>",
+    ] {
+        let once = parse(html);
+        let twice = parse(&once.to_html());
+        assert_eq!(once.to_html(), twice.to_html(), "{html}");
+        assert_eq!(once.to_text(), twice.to_text(), "{html}");
+        assert_eq!(
+            once.root().unwrap().text_content(),
+            twice.root().unwrap().text_content(),
+            "{html}"
+        );
+    }
+    // The serializer writes back the newline the parser dropped.
+    assert_eq!(parse("<pre>\n\nx</pre>").to_html(), "<pre>\n\nx</pre>");
+    assert_eq!(parse("<pre>\nx</pre>").to_html(), "<pre>x</pre>");
+}
+
+#[test]
+fn text_after_the_dropped_newline_keeps_its_source_range() {
+    let src = "<pre>\r\nab</pre>";
+    let dom = parse(src);
+    let text = dom.root().unwrap().first_child().unwrap();
+    assert_eq!(text.text(), Some("ab"));
+    let range = text.source_range().unwrap();
+    assert_eq!(&src[range], "ab");
+}
