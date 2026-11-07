@@ -17,29 +17,6 @@ use crate::scan;
 use crate::tags::Tag;
 use crate::token::{AttrValue, Token};
 
-/// What the tokenizer learned about the token it returned last, beyond the
-/// token itself: for the tree builder, which would otherwise work it out again
-/// ([`Tokenizer::hints`]).
-#[derive(Clone, Copy)]
-pub(crate) struct Hints {
-    /// The name of a start or end tag, classified.
-    pub(crate) tag: Tag,
-    /// A text token known to hold no `&`, so no character reference to
-    /// decode. `false` also when the scan did not look (raw text).
-    pub(crate) text_clean: bool,
-    /// The same for a start tag's attribute values, bit `i` for attribute `i`
-    /// (the first 64; the others are not known).
-    pub(crate) attrs_clean: u64,
-}
-
-impl Hints {
-    /// Whether attribute `i`'s value is known to hold no `&`.
-    #[inline]
-    pub(crate) fn attr_clean(&self, i: usize) -> bool {
-        i < 64 && (self.attrs_clean >> i) & 1 == 1
-    }
-}
-
 /// A streaming HTML tokenizer. Construct with [`Tokenizer::new`] (or the
 /// top-level [`crate::tokenize`]) and iterate to get [`Token`]s.
 pub struct Tokenizer<'a> {
@@ -51,10 +28,8 @@ pub struct Tokenizer<'a> {
     raw_text_end: Option<&'a str>,
     /// The attributes of the start tag read last (see [`Tokenizer::attrs`]).
     attrs: Vec<(&'a str, AttrValue<'a>)>,
-    /// What is known about the token read last.
-    hints: Hints,
-    /// Whether the attribute value read last is known to hold no `&`.
-    value_clean: bool,
+    /// The name of the start or end tag read last, classified.
+    tag: Tag,
     pub(crate) errors: Vec<ParseError>,
 }
 
@@ -67,12 +42,7 @@ impl<'a> Tokenizer<'a> {
             pos: 0,
             raw_text_end: None,
             attrs: Vec::new(),
-            hints: Hints {
-                tag: Tag::OTHER,
-                text_clean: false,
-                attrs_clean: 0,
-            },
-            value_clean: false,
+            tag: Tag::OTHER,
             errors: Vec::new(),
         }
     }
@@ -118,17 +88,6 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    /// [`Tokenizer::skip_to`], and whether an `&` was passed on the way.
-    #[inline]
-    fn skip_to_noting_amp(&mut self, needle: u8) -> bool {
-        let (found, amp) = scan::find_byte_noting_amp(needle, self.rest());
-        match found {
-            Some(rel) => self.pos += rel,
-            None => self.pos = self.bytes.len(),
-        }
-        amp
-    }
-
     fn skip_whitespace(&mut self) {
         while let Some(b) = self.peek() {
             if b.is_ascii_whitespace() {
@@ -158,13 +117,13 @@ impl<'a> Tokenizer<'a> {
         &self.attrs
     }
 
-    /// What the tokenizer noticed about the token returned last by
-    /// [`Tokenizer::next_token`]: the classified name of a tag (looked up
-    /// once here, not again for each rule of the tree builder) and where
-    /// there is nothing to decode.
+    /// The name of the start or end tag returned last by
+    /// [`Tokenizer::next_token`], classified (looked up once here for the
+    /// tree builder, which would otherwise match the name again for each
+    /// rule).
     #[inline]
-    pub(crate) fn hints(&self) -> Hints {
-        self.hints
+    pub(crate) fn tag(&self) -> Tag {
+        self.tag
     }
 
     /// Like `Iterator::next`, but also returns the byte offset the token
@@ -175,7 +134,6 @@ impl<'a> Tokenizer<'a> {
             return None;
         }
         let start = self.pos;
-        self.hints.text_clean = false;
         if let Some(end_name) = self.raw_text_end.take() {
             return Some((self.read_raw_text(end_name), start));
         }
@@ -201,11 +159,10 @@ impl<'a> Tokenizer<'a> {
     /// and stays in the run, so a browser's one text node is one token.
     fn read_text(&mut self) -> Token<'a> {
         let start = self.pos;
-        let mut amp = false;
         loop {
             // Scan to the next '<' in one shot, not a byte-at-a-time `peek`
             // loop.
-            amp |= self.skip_to_noting_amp(b'<');
+            self.skip_to(b'<');
             let literal = match self.peek_at(1) {
                 None => true,
                 Some(b'/') => self.peek_at(2).is_none(),
@@ -216,7 +173,6 @@ impl<'a> Tokenizer<'a> {
             }
             self.pos += 1; // the '<'
         }
-        self.hints.text_clean = !amp;
         Token::Text(self.slice(start, self.pos))
     }
 
@@ -263,8 +219,7 @@ impl<'a> Tokenizer<'a> {
         let open = self.pos;
         self.pos += 1; // consume '<'
         let name = self.read_tag_name();
-        self.hints.tag = Tag::of(name);
-        self.hints.attrs_clean = 0;
+        self.tag = Tag::of(name);
         self.attrs.clear();
         let mut self_closing = false;
 
@@ -288,18 +243,13 @@ impl<'a> Tokenizer<'a> {
                     self.pos += 1; // stray slash
                 }
                 Some(_) => match self.read_attribute() {
-                    Some(attr) => {
-                        if self.value_clean && self.attrs.len() < 64 {
-                            self.hints.attrs_clean |= 1 << self.attrs.len();
-                        }
-                        self.attrs.push(attr);
-                    }
+                    Some(attr) => self.attrs.push(attr),
                     None => self.pos += 1, // couldn't form an attr; make progress
                 },
             }
         }
 
-        if !self_closing && self.hints.tag.is_rawish() {
+        if !self_closing && self.tag.is_rawish() {
             self.raw_text_end = Some(name);
         }
 
@@ -328,7 +278,6 @@ impl<'a> Tokenizer<'a> {
         if name.is_empty() {
             return None;
         }
-        self.value_clean = true;
         self.skip_whitespace();
         if self.peek() == Some(b'=') {
             self.pos += 1;
@@ -344,7 +293,7 @@ impl<'a> Tokenizer<'a> {
             Some(q @ (b'"' | b'\'')) => {
                 self.pos += 1; // opening quote
                 let start = self.pos;
-                self.value_clean = !self.skip_to_noting_amp(q);
+                self.skip_to(q);
                 let val = self.slice(start, self.pos);
                 if self.peek() == Some(q) {
                     self.pos += 1; // closing quote
@@ -353,15 +302,12 @@ impl<'a> Tokenizer<'a> {
             }
             _ => {
                 let start = self.pos;
-                let mut amp = false;
                 while let Some(b) = self.peek() {
                     if b.is_ascii_whitespace() || b == b'>' {
                         break;
                     }
-                    amp |= b == b'&';
                     self.pos += 1;
                 }
-                self.value_clean = !amp;
                 AttrValue::Unquoted(self.slice(start, self.pos))
             }
         }
@@ -371,7 +317,7 @@ impl<'a> Tokenizer<'a> {
         let open = self.pos;
         self.pos += 2; // consume '</'
         let name = self.read_tag_name();
-        self.hints.tag = Tag::of(name);
+        self.tag = Tag::of(name);
         self.skip_to(b'>');
         if self.peek() == Some(b'>') {
             self.pos += 1;

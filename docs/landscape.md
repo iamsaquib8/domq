@@ -155,7 +155,7 @@ markuplint, HTMLHint, html-validate and axe-core's static subset).
   starts in 1.4 ms.
 - **Parsing** (Rust): on [astral-html](https://github.com/astral-sh/astral-html)'s
   five real pages, measured on one machine (`benchmarks/benches/real_pages.rs`),
-  astral-html is fastest, `tl` second and domq third (25–48% behind `tl`),
+  astral-html is fastest, `tl` second and domq third (22–35% behind `tl`),
   all far ahead of scraper. domq's old "ahead of tl" held only on generated
   inputs.
 - **Python**: selectolax's 754-domain harness: selectolax 2.39 s, lxml 9.09 s,

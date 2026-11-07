@@ -16,30 +16,7 @@ pub(crate) fn find_byte(needle: u8, haystack: &[u8]) -> Option<usize> {
     }
     #[cfg(not(feature = "simd"))]
     {
-        portable_noting_amp(needle, haystack).0
-    }
-}
-
-/// [`find_byte`], and whether an `&` comes before the match (anywhere, if
-/// there is none): the tokenizer notes it while it scans text and attribute
-/// values, so that decoding them can skip its own search for an `&`. `needle`
-/// must not be `&`.
-#[inline]
-pub(crate) fn find_byte_noting_amp(needle: u8, haystack: &[u8]) -> (Option<usize>, bool) {
-    #[cfg(feature = "simd")]
-    {
-        match memchr::memchr2(needle, b'&', haystack) {
-            None => (None, false),
-            Some(i) if haystack.get(i) == Some(&needle) => (Some(i), false),
-            Some(i) => match haystack.get(i + 1..) {
-                Some(rest) => (memchr::memchr(needle, rest).map(|j| i + 1 + j), true),
-                None => (None, true),
-            },
-        }
-    }
-    #[cfg(not(feature = "simd"))]
-    {
-        portable_noting_amp(needle, haystack)
+        portable(needle, haystack)
     }
 }
 
@@ -70,65 +47,42 @@ pub(crate) fn find(needle: &[u8], haystack: &[u8]) -> Option<usize> {
 /// ~37 GB/s against ~4 GB/s for an iterator `position` loop, which the
 /// compiler does not vectorize because of the early exit; `memchr`'s NEON
 /// code does ~110 GB/s.
-///
-/// It also reports whether an `&` comes before the match
-/// ([`find_byte_noting_amp`]), with a second set of flags. A flag is only
-/// ever wrong above a true match of its byte (the borrow runs towards higher
-/// bytes), so a flag below the first `needle` is a real `&`. One function
-/// for both searches: [`find_byte`] drops the answer, which keeps a second
-/// copy of the loop out of the wasm build.
 #[cfg(any(not(feature = "simd"), test))]
-fn portable_noting_amp(needle: u8, haystack: &[u8]) -> (Option<usize>, bool) {
+fn portable(needle: u8, haystack: &[u8]) -> Option<usize> {
     const LO: u64 = 0x0101_0101_0101_0101;
     const HI: u64 = 0x8080_8080_8080_8080;
+    // A word whose bytes are zero exactly where `w` holds `needle`; the
+    // returned mask flags them. Borrows only ever run towards higher bytes,
+    // so in little-endian order the lowest flag is the first match.
     let splat = LO * u64::from(needle);
-    let amp = LO * u64::from(b'&');
-    let flags = |w: u64, splat: u64| {
+    let flags = |w: u64| {
         let x = w ^ splat;
         x.wrapping_sub(LO) & !x & HI
     };
+    // (Always `Some` on a 16-byte chunk; the fallback matches nothing.)
     let word = |b: Option<&[u8; 8]>| b.map_or(splat ^ HI, |b| u64::from_le_bytes(*b));
     let (chunks, tail) = haystack.as_chunks::<16>();
     let mut offset = 0;
-    let mut seen = false;
     for chunk in chunks {
         let (a, b) = (word(chunk.first_chunk()), word(chunk.last_chunk()));
-        let (fa, fb) = (flags(a, splat), flags(b, splat));
-        let (ga, gb) = (flags(a, amp), flags(b, amp));
+        let (fa, fb) = (flags(a), flags(b));
         if fa | fb != 0 {
             let bit = if fa != 0 {
                 fa.trailing_zeros()
             } else {
                 64 + fb.trailing_zeros()
             };
-            // The `&` flags of the bytes before the match's.
-            let before = if bit < 64 {
-                ga & ((1u64 << bit) - 1)
-            } else {
-                ga | (gb & ((1u64 << (bit - 64)) - 1))
-            };
-            return (Some(offset + bit as usize / 8), seen || before != 0);
+            return Some(offset + bit as usize / 8);
         }
-        seen |= (ga | gb) != 0;
         offset += 16;
     }
-    for (i, &b) in tail.iter().enumerate() {
-        if b == needle {
-            return (Some(offset + i), seen);
-        }
-        seen |= b == b'&';
-    }
-    (None, seen)
+    tail.iter().position(|&b| b == needle).map(|i| offset + i)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloc::vec::Vec;
-
-    fn portable(needle: u8, haystack: &[u8]) -> Option<usize> {
-        portable_noting_amp(needle, haystack).0
-    }
 
     /// Haystacks around the sizes where SIMD searches switch strategy (short
     /// tails, one vector, several vectors, unaligned starts).
@@ -202,51 +156,6 @@ mod tests {
                 let mut h = [other; 40];
                 h[33] = needle;
                 assert_eq!(find_byte(needle, &h), portable(needle, &h));
-            }
-        }
-    }
-
-    /// The obviously correct version of [`find_byte_noting_amp`].
-    fn naive_amp(needle: u8, haystack: &[u8]) -> (Option<usize>, bool) {
-        let at = naive(needle, haystack);
-        let before = &haystack[..at.unwrap_or(haystack.len())];
-        (at, before.contains(&b'&'))
-    }
-
-    #[test]
-    fn noting_the_amp_agrees_with_the_naive_search() {
-        for h in haystacks() {
-            for start in 0..h.len().min(40) {
-                let h = &h[start..];
-                for needle in [b'<', b'"', b'a', 0, 0xff] {
-                    assert_eq!(portable_noting_amp(needle, h), naive_amp(needle, h));
-                    assert_eq!(find_byte_noting_amp(needle, h), naive_amp(needle, h));
-                    // The same with an `&` put at each of a few places.
-                    for at in [0, 1, 7, 8, 15, 16, 17, 31, 40] {
-                        let mut h = h.to_vec();
-                        if let Some(b) = h.get_mut(at) {
-                            *b = b'&';
-                        }
-                        assert_eq!(find_byte_noting_amp(needle, &h), naive_amp(needle, &h));
-                    }
-                }
-            }
-        }
-        // Every byte value around a match and an `&`, in every pair of lanes
-        // (borrows between lanes are where SWAR searches go wrong).
-        for needle in *b"<\"'>" {
-            for other in 0..=255u8 {
-                for lane in 0..33 {
-                    for amp_lane in 0..33 {
-                        if lane == amp_lane {
-                            continue;
-                        }
-                        let mut h = [other; 33];
-                        h[lane] = needle;
-                        h[amp_lane] = b'&';
-                        assert_eq!(find_byte_noting_amp(needle, &h), naive_amp(needle, &h));
-                    }
-                }
             }
         }
     }

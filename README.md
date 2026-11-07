@@ -122,12 +122,12 @@ Also: 🤖 **AI agents** — `domq mcp` ([setup](#ai-agents-mcp)) · 🐍 **Pyth
   favourite, `:contains("text")`.
 - **Content out, not just a tree.** Readable text (`to_text`), CommonMark/GFM
   Markdown (`to_markdown`) for LLM prompts and RAG pipelines, JSON, and HTML.
-- **Runs everywhere.** `no_std + alloc`, `#![forbid(unsafe_code)]`, a ~57 KB
-  gzipped wasm module (~78 KB with extraction) for browsers, Cloudflare Workers, Deno, Bun and Node, and a
+- **Runs everywhere.** `no_std + alloc`, `#![forbid(unsafe_code)]`, a ~58 KB
+  gzipped wasm module (~79 KB with extraction) for browsers, Cloudflare Workers, Deno, Bun and Node, and a
   single static binary for your shell.
-- **Fast for an owned tree.** 5.6–9.5× faster than `scraper` on real pages, with
+- **Fast for an owned tree.** 5.8–9.1× faster than `scraper` on real pages, with
   6–23 allocations per parse (benchmark inputs). Speed specialists that do less work are faster:
-  [`tl`][tl] by 25–48% on four of the five pages and astral-html by 25–72% (see
+  [`tl`][tl] by 22–35% on four of the five pages and astral-html by 28–58% (see
   [Performance](#performance)).
 - **Streams, too.** `domq::events` yields start/end/text events with the
   same recovery as the tree builder, for documents you don't want to keep.
@@ -476,20 +476,20 @@ you're sanitizing untrusted HTML, use [`ammonia`](https://crates.io/crates/ammon
 
 Fast *for an owned tree*: full recovery, entity decoding, source spans and
 all. **Real pages** (the five astral-html publishes numbers for, parsed into
-each library's document; GitHub Actions run of 2026-10-25, AMD EPYC 7763; µs,
+each library's document; GitHub Actions run of 2026-11-07, AMD EPYC 7763; µs,
 lower is better;
 see [benchmarks/](./benchmarks)):
 
 | page | domq | astral-html | [tl] | [scraper] |
 |---|---:|---:|---:|---:|
-| iniconfig (6 KB) | 6.5 | **5.2** | 7.3 | 62.0 |
-| Bootstrap dashboard (22 KB) | 56.1 | **36.7** | 43.1 | 350 |
-| Rust Book chapter (89 KB) | 224 | **141** | 171 | 1,469 |
-| PEP 8 (122 KB) | 489 | **319** | 390 | 2,826 |
-| PEP index (419 KB) | 1,707 | **995** | 1,155 | 9,545 |
+| iniconfig (6 KB) | 6.8 | **5.3** | 7.5 | 62.1 |
+| Bootstrap dashboard (22 KB) | 54.1 | **37.0** | 44.4 | 354 |
+| Rust Book chapter (89 KB) | 223 | **141** | 173 | 1,505 |
+| PEP 8 (122 KB) | 497 | **319** | 370 | 2,902 |
+| PEP index (419 KB) | 1,526 | **984** | 1,189 | 9,570 |
 
-On real pages domq is 5.6–9.5× faster than `scraper`. `tl` is faster on all but
-the smallest page (by 25–48%), astral-html on all five (by 25–72%); closing that
+On real pages domq is 5.8–9.1× faster than `scraper`. `tl` is faster on all but
+the smallest page (by 22–35%), astral-html on all five (by 28–58%); closing that
 gap is on the [roadmap](./ROADMAP.md). Absolute times depend on the runner: a
 scheduled run on 2026-11-02 (AMD EPYC 9V45) was roughly half these numbers.
 **Generated inputs** (Apple M4 Pro, `cargo bench`):
