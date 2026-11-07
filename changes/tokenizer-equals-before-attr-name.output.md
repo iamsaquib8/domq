@@ -1,1 +1,0 @@
-Tokenizer: an `=` where an attribute name starts begins the name, as in browsers ([#235](https://github.com/iamsaquib8/domq/issues/235)): `<div =x>` has an attribute named `=x` (it was `x`), and a parse error, the new `ErrorKind::UnexpectedEqualsSign`, is recorded at the `=`.

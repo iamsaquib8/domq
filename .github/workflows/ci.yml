@@ -136,12 +136,12 @@ jobs:
         working-directory: wasm
         run: |
           # Core (`domq-wasm`): parser, selectors, text/Markdown/JSON/HTML.
-          # Measured 56,647 bytes (gzip -9). Extract (`domq-wasm/extract`): the
+          # Measured 58,468 bytes (gzip -9). Extract (`domq-wasm/extract`): the
           # core plus mainContent, metadata, links, resources,
-          # toMarkdownChunks, tables and toCsv. Measured 77,769 bytes, up from
+          # toMarkdownChunks, tables and toCsv. Measured 79,534 bytes, up from
           # ~40,800 (0.4) as extraction, bytes-in, encoding detection and the
           # script-data tokenizer states landed in the one module. #111 split
-          # the module in two so that parsing alone is no longer 78 KB. The
+          # the module in two so that parsing alone is no longer 80 KB. The
           # extract budget stays at the temporary 80,000. Raise either on
           # purpose, never by accident.
           CORE=$(gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c)

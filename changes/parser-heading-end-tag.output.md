@@ -1,1 +1,0 @@
-Parser: any heading end tag closes the innermost open heading of any level, so `<h2>Title</h3>` closes the `<h2>` ([#68](https://github.com/iamsaquib8/domq/issues/68)). The paragraphs after such a heading no longer land inside it, which fixes `to_markdown()` heading lines and chunk heading paths on those pages.

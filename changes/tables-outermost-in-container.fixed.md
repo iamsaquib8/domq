@@ -1,1 +1,0 @@
-CLI `--csv` and MCP `tables` with a selector that matches a container (not a `<table>`) use the outermost tables inside it, without descending into nested tables ([#149](https://github.com/iamsaquib8/domq/issues/149)).

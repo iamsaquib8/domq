@@ -55,14 +55,14 @@ text and comments. A test that fails here is a real difference from a browser.
   [roadmap](../ROADMAP.md).
 - **Tables**: browsers move stray content out of tables (foster parenting)
   and insert `<tbody>`; domq keeps content where it appears. Optional
-  `<tbody>` insertion is planned for 0.7.
+  `<tbody>` insertion is planned for 0.10.
 - **Foreign content**: domq has no namespaces, and lower-cases every tag name.
 - **Templates**: a template's children stay its children (browsers move them
   into a separate document fragment, `content`); the structure score unwraps
   `content` for this reason.
 - **Fragments**: domq parses a fragment like a document, without the context
   element a test names (`<td>` parsed inside a `<tr>`). Context-aware
-  fragment parsing is planned for 0.7.
+  fragment parsing is planned for 0.10.
 - **Scripting**: domq never runs scripts, so tests that need scripting enabled
   are skipped; `<noscript>` content is parsed as markup.
 - **Quirks mode**: domq always builds the tree as in standards mode (a

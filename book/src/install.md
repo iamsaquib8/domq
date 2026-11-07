@@ -4,7 +4,7 @@
 
 ```toml
 [dependencies]
-domq = "0.6"
+domq = "0.7"
 ```
 
 Default features are `json`, `query` (CSS selectors) and `markdown`; all of

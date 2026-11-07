@@ -25,7 +25,7 @@ The Linux binaries are statically linked (musl), so they run on any distro.
   placeholders (all zeros); do not publish it as is.
 - [`fill-formula.sh`](fill-formula.sh) — prints the template with a real
   version and the checksums of a directory of release archives:
-  `packaging/homebrew/fill-formula.sh 0.6.0 path/to/assets > domq.rb`.
+  `packaging/homebrew/fill-formula.sh 0.7.0 path/to/assets > domq.rb`.
 
 ## One-time setup: the tap
 
@@ -49,7 +49,7 @@ A tap is just a GitHub repository named `homebrew-<something>`; `brew` maps
    ```sh
    cd homebrew-tap
    cp ~/Downloads/domq.rb Formula/domq.rb   # from the artifact
-   git commit -am "domq 0.6.0" && git push
+   git commit -am "domq 0.7.0" && git push
    ```
 
 4. Check it:

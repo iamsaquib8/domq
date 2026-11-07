@@ -1,1 +1,0 @@
-Input that is mostly valid UTF-8 with a few invalid sequences is decoded as UTF-8, with U+FFFD for the bad bytes and a warning, instead of being decoded as windows-1252 and garbling every accented character ([#143](https://github.com/iamsaquib8/domq/issues/143)).
