@@ -1,4 +1,4 @@
-# Extract structured data
+# Pull fields from a list of items
 
 Describe the fields you want once, and get typed values back, with errors
 that name the selector that failed.
