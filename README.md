@@ -223,7 +223,9 @@ let md = domq::parse(html).to_markdown_with(&opts);
 
 Same options in the CLI (`--markdown-links reference --markdown-images alt`),
 MCP (`links`, `images`, `drop_data_uris`, `base_url`) and Python
-(`to_markdown(links="reference")`). Not in JavaScript yet.
+(`to_markdown(links="reference")`). Not in JavaScript yet. Chunks
+(`to_markdown_chunks_with`, MCP `chunks`) always write links inline, whatever
+the style, so that each chunk stands alone.
 </details>
 
 <details>
@@ -573,13 +575,13 @@ benchmark's own method:
 
 | | AEB (181 articles) | WCXB dev / test (2,008 pages, 7 types) |
 |---|---:|---:|
-| **domq `main_content()`** | **0.898** | **0.747 / 0.803** |
+| **domq `main_content()`** | **0.900** | **0.792 / 0.830** |
 | trafilatura (Python) | 0.958 | 0.791 / 0.833 |
 | Readability.js | 0.947 | 0.675 / 0.726 |
 | dom_smoothie (Rust) | 0.865 | 0.762 / 0.808 |
 
 F1, published scores for the others. Strongest on articles and documentation
-(0.90 on WCXB dev), weakest on listings, products and forums; 0.7–2.7 ms per
+(0.91 on WCXB dev), weakest on listings, products and forums; 0.7–2.7 ms per
 page (on the machine that wrote the report). Agreement with Readability itself is tracked in
 [docs/reader-mode.md](./docs/reader-mode.md).
 
