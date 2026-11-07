@@ -759,10 +759,11 @@ mod tests {
 
     #[test]
     fn nested_links_are_linear() {
-        // `<a>` does not close an open `<a>`, so these nest 50,000 deep.
-        let html = "<a href=/>".repeat(50_000) + "x";
+        // An `<a>` closes an open `<a>`, except past a scope boundary such as
+        // `<object>`, so these nest 50,000 deep (100,000 elements).
+        let html = "<a href=/><object>".repeat(50_000) + "x";
         let findings = check(&html);
-        assert_eq!(findings.len(), 50_000);
+        assert_eq!(findings.len(), 100_000);
         assert!(findings.iter().all(|f| f.rule == "unclosed-element"));
     }
 

@@ -1,0 +1,21 @@
+---
+source: tests/corpus.rs
+expression: parse(html).to_html()
+---
+<!-- End tags stop at scope boundaries; a heading end tag closes any open heading;
+     a, button, nobr and select do not nest. -->
+<div class="wrap"><table>
+  <tr><th><a href="/x"><div>Logo</div></a><a href="/x">Acme</a></th><td>$5</td></tr>
+  <tr><th>Beta</th><td>$7</td></tr>
+</table></div>
+<div><table><caption>Prices2026</caption>
+  <tr><td>ab</td><td>cd
+</td></tr></table></div>
+<h2>Shipping</h2>
+<p>We ship worldwide.
+</p><p>Returns are free.
+</p><ul><li>Fast</li></ul>
+<p><a href="/one">One</a><a href="/two">Two</a> after</p>
+<p><button>1</button><button>2</button></p>
+<p><nobr>1</nobr><nobr>2</nobr></p>
+<select><option>a</option></select><select><option>b</option></select>
