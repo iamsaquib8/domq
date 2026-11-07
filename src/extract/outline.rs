@@ -556,7 +556,7 @@ fn is_container_landmark(role: &ElementRole<'_>) -> bool {
 fn is_hidden_element(node: NodeRef<'_>) -> bool {
     let tag = node.tag_name().unwrap_or("");
     (tags::display(tag) == Display::Hidden
-        && !(tag == "noscript" && node.dom().noscript_is_content))
+        && !(tag == "noscript" && node.dom().noscript_is_content()))
         || node.hides_itself()
         || node
             .attr("aria-hidden")

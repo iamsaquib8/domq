@@ -210,7 +210,7 @@ impl Dom {
         let mut md = Markdown {
             options,
             base,
-            noscript: self.noscript_is_content,
+            noscript: self.noscript_is_content(),
             ..Markdown::default()
         };
         for root in self.roots() {
@@ -270,7 +270,7 @@ impl NodeRef<'_> {
             options,
             base,
             root: Some(self.id()),
-            noscript: self.dom().noscript_is_content,
+            noscript: self.dom().noscript_is_content(),
             ..Markdown::default()
         };
         walk(*self, |node, enter| md.visit(node, enter));
