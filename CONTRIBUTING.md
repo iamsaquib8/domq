@@ -66,4 +66,6 @@ committing the updated `.snap` files.
   parsing changes).
 - Keep the MSRV at 1.88 (edition 2024); the CI `msrv` job enforces it. Raise it only in a
   minor release, and never to a Rust release less than about six months old.
-- Add an entry to `CHANGELOG.md` for anything user-visible.
+- For anything user-visible, add a changelog fragment, `changes/<slug>.<kind>.md`
+  (see [changes/README.md](changes/README.md)); do not edit `CHANGELOG.md`, so
+  pull requests don't conflict with each other.

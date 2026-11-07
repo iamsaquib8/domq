@@ -71,6 +71,10 @@ pub enum ErrorKind {
     MissingSemicolon,
     /// A `<! ... >` or `<? ... >` construct was treated as a bogus comment.
     BogusComment,
+    /// An `=` came where an attribute name starts (`<div =x>`). As in
+    /// browsers it starts the name: this attribute is called `=x`. The
+    /// position is that of the `=`.
+    UnexpectedEqualsSign,
 }
 
 impl ErrorKind {
@@ -86,6 +90,7 @@ impl ErrorKind {
             ErrorKind::UnknownEntity => "unknown character reference left verbatim",
             ErrorKind::MissingSemicolon => "character reference without its ';'",
             ErrorKind::BogusComment => "bogus comment",
+            ErrorKind::UnexpectedEqualsSign => "'=' before an attribute name",
         }
     }
 }
