@@ -13,7 +13,7 @@ regenerates it and fails when it differs. -->
 | Measure | Passing | Rate |
 |---|---:|---:|
 | Exact tree: the html5lib dump, line for line | 87 | 4.4% |
-| Same structure, in domq's model of HTML | 1216 | 62.1% |
+| Same structure, in domq's model of HTML | 1226 | 62.6% |
 
 domq is a forgiving parser, not a spec-compliant one (see the
 [README](../README.md#what-it-handles)), so the exact rate is low by design:
@@ -35,15 +35,15 @@ text and comments. A test that fails here is a real difference from a browser.
 
 | Area | Tests | Exact | Structure |
 |---|---:|---:|---:|
-| General tree building | 647 | 2.2% | 66.8% |
+| General tree building | 647 | 2.2% | 67.5% |
 | Comments, doctypes, quirks | 87 | 0.0% | 81.6% |
 | Character references | 101 | 0.0% | 100.0% |
-| Raw text, script data, unsafe text | 380 | 0.0% | 55.5% |
-| Mis-nested formatting (adoption agency) | 86 | 0.0% | 26.7% |
+| Raw text, script data, unsafe text | 380 | 0.0% | 55.8% |
+| Mis-nested formatting (adoption agency) | 86 | 0.0% | 27.9% |
 | Tables and foster parenting | 63 | 0.0% | 42.9% |
 | Foreign content (SVG, MathML) | 202 | 19.3% | 71.3% |
-| Templates | 127 | 1.6% | 73.2% |
-| Fragments and context | 142 | 22.5% | 52.1% |
+| Templates | 127 | 1.6% | 74.8% |
+| Fragments and context | 142 | 22.5% | 52.8% |
 | Processing instructions (new in the spec) | 124 | 0.0% | 32.3% |
 
 ### Where the gaps are by design
@@ -106,29 +106,29 @@ text and comments. A test that fails here is a real difference from a browser.
 | `search-element.dat` | General tree building | 8 | 0.0% | 50.0% |
 | `svg.dat` | Foreign content (SVG, MathML) | 8 | 0.0% | 0.0% |
 | `tables01.dat` | Tables and foster parenting | 19 | 0.0% | 21.1% |
-| `template.dat` | Templates | 127 | 1.6% | 73.2% |
+| `template.dat` | Templates | 127 | 1.6% | 74.8% |
 | `tests1.dat` | General tree building | 112 | 4.5% | 60.7% |
 | `tests10.dat` | Foreign content (SVG, MathML) | 54 | 0.0% | 61.1% |
 | `tests11.dat` | Foreign content (SVG, MathML) | 13 | 0.0% | 100.0% |
 | `tests12.dat` | Foreign content (SVG, MathML) | 2 | 0.0% | 100.0% |
 | `tests14.dat` | General tree building | 7 | 0.0% | 100.0% |
 | `tests15.dat` | Raw text, script data, unsafe text | 14 | 0.0% | 35.7% |
-| `tests16.dat` | Raw text, script data, unsafe text | 191 | 0.0% | 73.8% |
+| `tests16.dat` | Raw text, script data, unsafe text | 191 | 0.0% | 74.3% |
 | `tests17.dat` | Raw text, script data, unsafe text | 13 | 0.0% | 38.5% |
 | `tests18.dat` | General tree building | 36 | 0.0% | 50.0% |
-| `tests19.dat` | General tree building | 107 | 0.0% | 39.3% |
+| `tests19.dat` | General tree building | 107 | 0.0% | 41.1% |
 | `tests2.dat` | General tree building | 63 | 1.6% | 76.2% |
-| `tests20.dat` | General tree building | 64 | 0.0% | 85.9% |
+| `tests20.dat` | General tree building | 64 | 0.0% | 87.5% |
 | `tests21.dat` | Foreign content (SVG, MathML) | 23 | 0.0% | 91.3% |
 | `tests22.dat` | Mis-nested formatting (adoption agency) | 5 | 0.0% | 0.0% |
 | `tests23.dat` | Mis-nested formatting (adoption agency) | 5 | 0.0% | 0.0% |
 | `tests24.dat` | Mis-nested formatting (adoption agency) | 8 | 0.0% | 0.0% |
 | `tests25.dat` | Mis-nested formatting (adoption agency) | 26 | 0.0% | 76.9% |
-| `tests26.dat` | Mis-nested formatting (adoption agency) | 20 | 0.0% | 5.0% |
-| `tests3.dat` | General tree building | 24 | 33.3% | 79.2% |
+| `tests26.dat` | Mis-nested formatting (adoption agency) | 20 | 0.0% | 10.0% |
+| `tests3.dat` | General tree building | 24 | 33.3% | 87.5% |
 | `tests4.dat` | Fragments and context | 9 | 33.3% | 44.4% |
 | `tests5.dat` | Raw text, script data, unsafe text | 16 | 0.0% | 81.2% |
-| `tests6.dat` | Fragments and context | 52 | 15.4% | 69.2% |
+| `tests6.dat` | Fragments and context | 52 | 15.4% | 71.2% |
 | `tests7.dat` | Tables and foster parenting | 34 | 0.0% | 61.8% |
 | `tests8.dat` | Tables and foster parenting | 10 | 0.0% | 20.0% |
 | `tests9.dat` | Foreign content (SVG, MathML) | 27 | 0.0% | 48.1% |
