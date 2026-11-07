@@ -1,36 +1,59 @@
 // Smoke test of the *built npm package* in Node.js, imported by its name the
-// way users do (so the "exports" map and the Node entry point are exercised).
-// `npm/smoke-test.sh` packs pkg/, installs the tarball and runs this file:
+// way users do (so the "exports" map and the Node entry points are exercised).
+// The package has two entries: `domq-wasm` (the core) and `domq-wasm/extract`
+// (the core plus extraction). `npm/smoke-test.sh` packs pkg/, installs the
+// tarball and runs this file:
 //
-//   wasm-pack build --target web --release && node npm/finish.mjs && sh npm/smoke-test.sh
+//   node npm/build.mjs && sh npm/smoke-test.sh
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
-// 1. Plain ESM import: ready to use, no init call.
+// 1. Plain ESM import of the core: ready to use, no init call.
 import init, {
   Document,
   decode,
   errors,
-  links,
-  mainContent,
-  metadata,
   parse,
   parseBytes,
   parseJson,
   resolveSrcset,
   resolveUrl,
-  resources,
   select,
   selectFirst,
-  tables,
-  toCsv,
   toHtml,
   toMarkdown,
-  toMarkdownChunks,
   toText,
 } from "domq-wasm";
+import * as core from "domq-wasm";
+// The extraction API lives in the second entry (a superset of the core).
+import * as full from "domq-wasm/extract";
+import {
+  Document as FullDocument,
+  links,
+  mainContent,
+  metadata,
+  resources,
+  tables,
+  toCsv,
+  toMarkdownChunks,
+} from "domq-wasm/extract";
+
+// 0. What each entry exports. The core must NOT have the extraction API;
+//    the extract entry has everything the core has, and the extraction on top.
+const extraction = ["links", "mainContent", "metadata", "resources", "tables", "toCsv", "toMarkdownChunks"];
+for (const name of extraction) {
+  assert.equal(name in core, false, `the core must not export ${name}`);
+  assert.equal(typeof full[name], "function", `domq-wasm/extract must export ${name}`);
+  assert.equal(name in Document.prototype, false, `the core Document must not have ${name}()`);
+  assert.equal(typeof FullDocument.prototype[name], "function", `the extract Document must have ${name}()`);
+}
+for (const name of Object.keys(core)) {
+  assert.ok(name in full, `domq-wasm/extract must also export ${name}`);
+}
+assert.equal(typeof core.mainContent, "undefined");
 
 const html = `<ul id=list><li class=item>One<li>Two &amp; <b>more</b></ul>`;
 
@@ -130,7 +153,7 @@ assert.deepEqual(doc.tree(), parse(html));
 assert.equal(JSON.stringify(doc), parseJson(html)); // toJSON()
 assert.deepEqual(doc.errors(), errors(html));
 
-const richDoc = new Document(articleHtml + metaHtml + linkHtml + tableHtml);
+const richDoc = new FullDocument(articleHtml + metaHtml + linkHtml + tableHtml);
 assert.ok(richDoc.mainContent());
 assert.equal(richDoc.metadata("https://example.com/base/").title, "Blog");
 assert.equal(richDoc.links("https://example.com/").length, 2);
@@ -193,18 +216,32 @@ assert.equal(viaImport.toText("<i>import()</i>"), "import()");
 let viaRequire = "require() unsupported on this Node";
 try {
   viaRequire = require("domq-wasm").toText("<i>require() works</i>");
+  assert.equal(require("domq-wasm/extract").links("<a href=x>y</a>").length, 1);
 } catch (e) {
   assert.equal(e.code, "ERR_REQUIRE_ESM");
 }
 
-// 6. The plain web build, initialised by hand (what node.js does for you).
+// 6. The plain web builds, initialised by hand (what node.js does for you).
 //    The query string gives a fresh, not yet initialised module instance.
-const webPath = require.resolve("domq-wasm/domq_wasm.js");
-const web = await import(`${pathToFileURL(webPath)}?fresh`);
-assert.throws(() => web.toText("<p>x</p>")); // not initialised yet
-const wasmPath = require.resolve("domq-wasm/domq_wasm_bg.wasm");
-await web.default({ module_or_path: readFileSync(wasmPath) });
-assert.equal(web.toText("<p>web build</p>"), "web build");
+for (const [entry, wasmEntry] of [
+  ["domq-wasm/domq_wasm.js", "domq-wasm/domq_wasm_bg.wasm"],
+  ["domq-wasm/extract/domq_wasm.js", "domq-wasm/extract/domq_wasm_bg.wasm"],
+]) {
+  const web = await import(`${pathToFileURL(require.resolve(entry))}?fresh`);
+  assert.throws(() => web.toText("<p>x</p>")); // not initialised yet
+  await web.default({ module_or_path: readFileSync(require.resolve(wasmEntry)) });
+  assert.equal(web.toText("<p>web build</p>"), "web build");
+}
+
+// 7. The package ships exactly the two entries, and each .d.ts describes only
+//    what its entry exports.
+const root = dirname(require.resolve("domq-wasm/package.json"));
+const coreTypes = readFileSync(`${root}/domq_wasm.d.ts`, "utf8");
+const fullTypes = readFileSync(`${root}/extract/domq_wasm.d.ts`, "utf8");
+for (const type of ["MainContent", "Metadata", "Link", "Resource", "Chunk", "Table"]) {
+  assert.doesNotMatch(coreTypes, new RegExp(`(?:interface|type) ${type}\\b`), `core types declare ${type}`);
+  assert.match(fullTypes, new RegExp(`(?:interface|type) ${type}\\b`), `extract types lack ${type}`);
+}
 
 console.log(`domq-wasm OK on Node ${process.version} (${viaRequire})`);
 console.log(select(html, "li").map((m) => m.html).join("\n"));

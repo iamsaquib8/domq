@@ -85,10 +85,16 @@ jobs:
       - name: Wasm size (npm package build)
         working-directory: wasm
         run: |
-          wasm-pack build --target web --release
-          SIZE=$(gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c)
-          RAW=$(wc -c < pkg/domq_wasm_bg.wasm)
-          echo "wasm: $SIZE bytes gzipped, $RAW raw (budget 80000 gzipped)" | tee ../sizes.txt
+          node npm/build.mjs
+          {
+            for entry in "core:pkg" "extract:pkg/extract"; do
+              name=${entry%%:*}; dir=${entry#*:}
+              SIZE=$(gzip -9 -c $dir/domq_wasm_bg.wasm | wc -c)
+              RAW=$(wc -c < $dir/domq_wasm_bg.wasm)
+              BUDGET=60000; [ "$name" = extract ] && BUDGET=80000
+              echo "wasm $name: $SIZE bytes gzipped, $RAW raw (budget $BUDGET gzipped)"
+            done
+          } | tee ../sizes.txt
           { echo "## Wasm"; cat ../sizes.txt; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Compile time (clean release build of the library)

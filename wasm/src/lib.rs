@@ -102,6 +102,22 @@ export interface SelectorError extends Error {
   position: number;
 }
 
+/** The result of `decode()`. */
+export interface Decoded {
+  /** The decoded text. */
+  text: string;
+  /** The encoding detected or chosen, e.g. "utf-8", "windows-1252". */
+  encoding: string;
+  /** Any warning produced during decoding. */
+  warning: string | null;
+}
+"#;
+
+/// TypeScript types of the extraction API (`domq-wasm/extract` only: the core
+/// build's `.d.ts` must not mention what the core does not export).
+#[cfg(feature = "extract")]
+#[wasm_bindgen(typescript_custom_section)]
+const TS_EXTRACT_TYPES: &str = r#"
 /** The isolated core article content ("reader mode"). */
 export interface MainContent {
   /** Readable text of the main content. */
@@ -182,16 +198,6 @@ export interface Chunk {
 
 /** A table represented as rows of rectangularized cell strings. */
 export type Table = string[][];
-
-/** The result of `decode()`. */
-export interface Decoded {
-  /** The decoded text. */
-  text: string;
-  /** The encoding detected or chosen, e.g. "utf-8", "windows-1252". */
-  encoding: string;
-  /** Any warning produced during decoding. */
-  warning: string | null;
-}
 "#;
 
 // --- the Document class ----------------------------------------------------
@@ -332,7 +338,12 @@ impl Document {
         out.push(']');
         json(&out)
     }
+}
 
+/// The extraction API: `domq-wasm/extract` only (the `extract` cargo feature).
+#[cfg(feature = "extract")]
+#[wasm_bindgen]
+impl Document {
     /// The element holding the page's main content ("reader mode"), or `undefined`.
     #[wasm_bindgen(js_name = mainContent, unchecked_return_type = "MainContent | undefined")]
     pub fn main_content(&self) -> JsValue {
@@ -583,6 +594,7 @@ pub fn errors(html: &str) -> JsValue {
 }
 
 /// The element holding the page's main content ("reader mode"), or `undefined`.
+#[cfg(feature = "extract")]
 #[wasm_bindgen(js_name = mainContent, unchecked_return_type = "MainContent | undefined")]
 pub fn main_content(html: &str) -> JsValue {
     Document::from_str(html).main_content()
@@ -590,36 +602,42 @@ pub fn main_content(html: &str) -> JsValue {
 
 /// Page metadata: title, description, canonical URL, language, OpenGraph,
 /// Twitter Cards, feeds, and JSON-LD blocks.
+#[cfg(feature = "extract")]
 #[wasm_bindgen(unchecked_return_type = "Metadata")]
 pub fn metadata(html: &str, base_url: Option<String>) -> JsValue {
     Document::from_str(html).metadata(base_url)
 }
 
 /// Every hyperlink (`<a href>` and `<area href>`) in document order.
+#[cfg(feature = "extract")]
 #[wasm_bindgen(unchecked_return_type = "Link[]")]
 pub fn links(html: &str, base_url: Option<String>) -> JsValue {
     Document::from_str(html).links(base_url)
 }
 
 /// Every embedded resource URL in document order.
+#[cfg(feature = "extract")]
 #[wasm_bindgen(unchecked_return_type = "Resource[]")]
 pub fn resources(html: &str, base_url: Option<String>) -> JsValue {
     Document::from_str(html).resources(base_url)
 }
 
 /// CommonMark + GFM Markdown split at headings into chunks under `max_chars`.
+#[cfg(feature = "extract")]
 #[wasm_bindgen(js_name = toMarkdownChunks, unchecked_return_type = "Chunk[]")]
 pub fn to_markdown_chunks(html: &str, max_chars: Option<usize>) -> JsValue {
     Document::from_str(html).to_markdown_chunks(max_chars)
 }
 
 /// Extract rows of cell text for tables matching `selector` (default `"table"`).
+#[cfg(feature = "extract")]
 #[wasm_bindgen(unchecked_return_type = "Table[]")]
 pub fn tables(html: &str, selector: Option<String>) -> Result<JsValue, JsValue> {
     Document::from_str(html).tables(selector)
 }
 
 /// Format matched tables as RFC 4180 CSV, separated by `\r\n`.
+#[cfg(feature = "extract")]
 #[wasm_bindgen(js_name = toCsv)]
 pub fn to_csv(html: &str, selector: Option<String>) -> Result<String, JsValue> {
     Document::from_str(html).to_csv(selector)
@@ -672,6 +690,7 @@ fn compile(selector: &str) -> Result<Selector, JsValue> {
     })
 }
 
+#[cfg(feature = "extract")]
 fn push_opt_str(out: &mut String, val: Option<&str>) {
     match val {
         Some(s) => push_str(out, s),
@@ -679,6 +698,7 @@ fn push_opt_str(out: &mut String, val: Option<&str>) {
     }
 }
 
+#[cfg(feature = "extract")]
 fn push_str_array(out: &mut String, list: &[String]) {
     out.push('[');
     for (i, s) in list.iter().enumerate() {
@@ -690,6 +710,7 @@ fn push_str_array(out: &mut String, list: &[String]) {
     out.push(']');
 }
 
+#[cfg(feature = "extract")]
 fn push_str_pair_array(out: &mut String, list: &[(String, String)]) {
     out.push('[');
     for (i, (k, v)) in list.iter().enumerate() {
@@ -705,6 +726,7 @@ fn push_str_pair_array(out: &mut String, list: &[(String, String)]) {
     out.push(']');
 }
 
+#[cfg(feature = "extract")]
 fn push_metadata(out: &mut String, meta: &domq::Metadata) {
     out.push_str("{\"title\":");
     push_opt_str(out, meta.title.as_deref());
@@ -737,6 +759,7 @@ fn push_metadata(out: &mut String, meta: &domq::Metadata) {
     out.push('}');
 }
 
+#[cfg(feature = "extract")]
 fn push_link(out: &mut String, link: &domq::Link<'_>) {
     out.push_str("{\"url\":");
     push_str(out, &link.url);
@@ -747,6 +770,7 @@ fn push_link(out: &mut String, link: &domq::Link<'_>) {
     out.push('}');
 }
 
+#[cfg(feature = "extract")]
 fn push_resource(out: &mut String, res: &domq::Resource<'_>) {
     out.push_str("{\"url\":");
     push_str(out, &res.url);
@@ -759,6 +783,7 @@ fn push_resource(out: &mut String, res: &domq::Resource<'_>) {
     out.push('}');
 }
 
+#[cfg(feature = "extract")]
 fn push_chunk(out: &mut String, chunk: &domq::Chunk) {
     out.push_str("{\"markdown\":");
     push_str(out, &chunk.markdown);
@@ -773,6 +798,7 @@ fn push_chunk(out: &mut String, chunk: &domq::Chunk) {
     out.push('}');
 }
 
+#[cfg(feature = "extract")]
 fn push_table(out: &mut String, rows: &[Vec<String>]) {
     out.push('[');
     for (r, row) in rows.iter().enumerate() {

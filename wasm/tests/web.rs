@@ -7,9 +7,8 @@
 #![cfg(target_arch = "wasm32")]
 
 use crate::{
-    Document, decode, errors, links, main_content, metadata, parse, parse_bytes, parse_json,
-    resolve_srcset, resolve_url, resources, select, select_first, tables, to_csv, to_html,
-    to_markdown, to_markdown_chunks, to_text,
+    Document, decode, errors, parse, parse_bytes, parse_json, resolve_srcset, resolve_url, select,
+    select_first, to_html, to_markdown, to_text,
 };
 use js_sys::{JSON, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
@@ -270,156 +269,167 @@ fn never_throws_on_garbage() {
     }
 }
 
-#[wasm_bindgen_test]
-fn main_content_finds_article_and_returns_undefined_when_missing() {
-    let html = "<html><head><title>Page</title></head><body>\
-                <nav><a href='/'>Home</a></nav>\
-                <article><h1>Release Notes</h1><p>domq now supports reader mode in WASM with full parity.</p></article>\
-                <footer>Footer text</footer></body></html>";
-    let main = main_content(html);
-    assert!(!main.is_undefined());
-    assert!(
-        get(&main, "text")
-            .as_string()
-            .unwrap()
-            .contains("Release Notes")
-    );
-    assert!(
-        get(&main, "markdown")
-            .as_string()
-            .unwrap()
-            .contains("# Release Notes")
-    );
-    assert!(
-        get(&main, "html")
-            .as_string()
-            .unwrap()
-            .contains("<article>")
-    );
+/// The extraction API only exists in the `extract` build.
+#[cfg(feature = "extract")]
+mod extract {
+    use super::{get, js};
+    use crate::{
+        Document, links, main_content, metadata, resources, tables, to_csv, to_markdown_chunks,
+    };
+    use wasm_bindgen::JsValue;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
-    let doc = Document::new(&JsValue::from_str(html)).unwrap();
-    let doc_main = doc.main_content();
-    assert_eq!(js(&main), js(&doc_main));
+    #[wasm_bindgen_test]
+    fn main_content_finds_article_and_returns_undefined_when_missing() {
+        let html = "<html><head><title>Page</title></head><body>\
+                    <nav><a href='/'>Home</a></nav>\
+                    <article><h1>Release Notes</h1><p>domq now supports reader mode in WASM with full parity.</p></article>\
+                    <footer>Footer text</footer></body></html>";
+        let main = main_content(html);
+        assert!(!main.is_undefined());
+        assert!(
+            get(&main, "text")
+                .as_string()
+                .unwrap()
+                .contains("Release Notes")
+        );
+        assert!(
+            get(&main, "markdown")
+                .as_string()
+                .unwrap()
+                .contains("# Release Notes")
+        );
+        assert!(
+            get(&main, "html")
+                .as_string()
+                .unwrap()
+                .contains("<article>")
+        );
 
-    assert!(main_content("").is_undefined());
-}
+        let doc = Document::new(&JsValue::from_str(html)).unwrap();
+        let doc_main = doc.main_content();
+        assert_eq!(js(&main), js(&doc_main));
 
-#[wasm_bindgen_test]
-fn metadata_extracts_fields_and_resolves_urls() {
-    let html = "<html lang=\"en\"><head>\
-                <title>Document Title</title>\
-                <meta name=\"description\" content=\"Meta description text\">\
-                <link rel=\"canonical\" href=\"doc.html\">\
-                <meta property=\"og:title\" content=\"OG Title\">\
-                <meta name=\"twitter:card\" content=\"summary_large_image\">\
-                <script type=\"application/ld+json\">{\"@type\":\"Article\"}</script>\
-                <link rel=\"alternate\" type=\"application/rss+xml\" href=\"feed.xml\">\
-                </head><body><p>Body</p></body></html>";
-    let base = "https://example.com/blog/";
-    let meta = metadata(html, Some(base.into()));
-    assert_eq!(get(&meta, "title").as_string().unwrap(), "Document Title");
-    assert_eq!(
-        get(&meta, "description").as_string().unwrap(),
-        "Meta description text"
-    );
-    assert_eq!(
-        get(&meta, "canonical").as_string().unwrap(),
-        "https://example.com/blog/doc.html"
-    );
-    assert_eq!(get(&meta, "lang").as_string().unwrap(), "en");
-    assert_eq!(get(&meta, "language").as_string().unwrap(), "en");
+        assert!(main_content("").is_undefined());
+    }
 
-    let feeds = js_sys::Array::from(&get(&meta, "feeds"));
-    assert_eq!(feeds.length(), 1);
-    assert_eq!(
-        feeds.get(0).as_string().unwrap(),
-        "https://example.com/blog/feed.xml"
-    );
+    #[wasm_bindgen_test]
+    fn metadata_extracts_fields_and_resolves_urls() {
+        let html = "<html lang=\"en\"><head>\
+                    <title>Document Title</title>\
+                    <meta name=\"description\" content=\"Meta description text\">\
+                    <link rel=\"canonical\" href=\"doc.html\">\
+                    <meta property=\"og:title\" content=\"OG Title\">\
+                    <meta name=\"twitter:card\" content=\"summary_large_image\">\
+                    <script type=\"application/ld+json\">{\"@type\":\"Article\"}</script>\
+                    <link rel=\"alternate\" type=\"application/rss+xml\" href=\"feed.xml\">\
+                    </head><body><p>Body</p></body></html>";
+        let base = "https://example.com/blog/";
+        let meta = metadata(html, Some(base.into()));
+        assert_eq!(get(&meta, "title").as_string().unwrap(), "Document Title");
+        assert_eq!(
+            get(&meta, "description").as_string().unwrap(),
+            "Meta description text"
+        );
+        assert_eq!(
+            get(&meta, "canonical").as_string().unwrap(),
+            "https://example.com/blog/doc.html"
+        );
+        assert_eq!(get(&meta, "lang").as_string().unwrap(), "en");
+        assert_eq!(get(&meta, "language").as_string().unwrap(), "en");
 
-    let json_ld = js_sys::Array::from(&get(&meta, "jsonLd"));
-    assert_eq!(json_ld.length(), 1);
-    assert_eq!(
-        json_ld.get(0).as_string().unwrap(),
-        "{\"@type\":\"Article\"}"
-    );
+        let feeds = js_sys::Array::from(&get(&meta, "feeds"));
+        assert_eq!(feeds.length(), 1);
+        assert_eq!(
+            feeds.get(0).as_string().unwrap(),
+            "https://example.com/blog/feed.xml"
+        );
 
-    let doc = Document::new(&JsValue::from_str(html)).unwrap();
-    assert_eq!(js(&meta), js(&doc.metadata(Some(base.into()))));
-}
+        let json_ld = js_sys::Array::from(&get(&meta, "jsonLd"));
+        assert_eq!(json_ld.length(), 1);
+        assert_eq!(
+            json_ld.get(0).as_string().unwrap(),
+            "{\"@type\":\"Article\"}"
+        );
 
-#[wasm_bindgen_test]
-fn links_and_resources_extract_and_resolve() {
-    let html = "<div>\
-                <a href=\"sub/page.html\">Read more</a>\
-                <img src=\"images/logo.png\" alt=\"Logo\">\
-                <script src=\"/bundle.js\"></script>\
-                </div>";
-    let base = "https://example.com/news/";
-    let l = links(html, Some(base.into()));
-    let link_arr = js_sys::Array::from(&l);
-    assert_eq!(link_arr.length(), 1);
-    let link0 = link_arr.get(0);
-    assert_eq!(
-        get(&link0, "url").as_string().unwrap(),
-        "https://example.com/news/sub/page.html"
-    );
-    assert_eq!(get(&link0, "text").as_string().unwrap(), "Read more");
-    assert_eq!(get(&link0, "href").as_string().unwrap(), "sub/page.html");
+        let doc = Document::new(&JsValue::from_str(html)).unwrap();
+        assert_eq!(js(&meta), js(&doc.metadata(Some(base.into()))));
+    }
 
-    let r = resources(html, Some(base.into()));
-    let res_arr = js_sys::Array::from(&r);
-    assert_eq!(res_arr.length(), 2);
-    let img = res_arr.get(0);
-    assert_eq!(
-        get(&img, "url").as_string().unwrap(),
-        "https://example.com/news/images/logo.png"
-    );
-    assert_eq!(get(&img, "attr").as_string().unwrap(), "src");
-    assert_eq!(get(&img, "tag").as_string().unwrap(), "img");
-    assert_eq!(get(&img, "value").as_string().unwrap(), "images/logo.png");
+    #[wasm_bindgen_test]
+    fn links_and_resources_extract_and_resolve() {
+        let html = "<div>\
+                    <a href=\"sub/page.html\">Read more</a>\
+                    <img src=\"images/logo.png\" alt=\"Logo\">\
+                    <script src=\"/bundle.js\"></script>\
+                    </div>";
+        let base = "https://example.com/news/";
+        let l = links(html, Some(base.into()));
+        let link_arr = js_sys::Array::from(&l);
+        assert_eq!(link_arr.length(), 1);
+        let link0 = link_arr.get(0);
+        assert_eq!(
+            get(&link0, "url").as_string().unwrap(),
+            "https://example.com/news/sub/page.html"
+        );
+        assert_eq!(get(&link0, "text").as_string().unwrap(), "Read more");
+        assert_eq!(get(&link0, "href").as_string().unwrap(), "sub/page.html");
 
-    let doc = Document::new(&JsValue::from_str(html)).unwrap();
-    assert_eq!(js(&l), js(&doc.links(Some(base.into()))));
-    assert_eq!(js(&r), js(&doc.resources(Some(base.into()))));
-}
+        let r = resources(html, Some(base.into()));
+        let res_arr = js_sys::Array::from(&r);
+        assert_eq!(res_arr.length(), 2);
+        let img = res_arr.get(0);
+        assert_eq!(
+            get(&img, "url").as_string().unwrap(),
+            "https://example.com/news/images/logo.png"
+        );
+        assert_eq!(get(&img, "attr").as_string().unwrap(), "src");
+        assert_eq!(get(&img, "tag").as_string().unwrap(), "img");
+        assert_eq!(get(&img, "value").as_string().unwrap(), "images/logo.png");
 
-#[wasm_bindgen_test]
-fn to_markdown_chunks_splits_by_budget() {
-    let html = "<h1>Main Heading</h1><p>First paragraph here.</p>\
-                <h2>Sub Heading</h2><p>Second paragraph with more detail.</p>";
-    let chunks = to_markdown_chunks(html, Some(40));
-    let arr = js_sys::Array::from(&chunks);
-    assert!(arr.length() >= 2);
-    let c0 = arr.get(0);
-    assert!(!get(&c0, "markdown").as_string().unwrap().is_empty());
-    assert!(!get(&c0, "text").as_string().unwrap().is_empty());
-    assert!(get(&c0, "byteSize").as_f64().unwrap() > 0.0);
+        let doc = Document::new(&JsValue::from_str(html)).unwrap();
+        assert_eq!(js(&l), js(&doc.links(Some(base.into()))));
+        assert_eq!(js(&r), js(&doc.resources(Some(base.into()))));
+    }
 
-    let doc = Document::new(&JsValue::from_str(html)).unwrap();
-    assert_eq!(js(&chunks), js(&doc.to_markdown_chunks(Some(40))));
-}
+    #[wasm_bindgen_test]
+    fn to_markdown_chunks_splits_by_budget() {
+        let html = "<h1>Main Heading</h1><p>First paragraph here.</p>\
+                    <h2>Sub Heading</h2><p>Second paragraph with more detail.</p>";
+        let chunks = to_markdown_chunks(html, Some(40));
+        let arr = js_sys::Array::from(&chunks);
+        assert!(arr.length() >= 2);
+        let c0 = arr.get(0);
+        assert!(!get(&c0, "markdown").as_string().unwrap().is_empty());
+        assert!(!get(&c0, "text").as_string().unwrap().is_empty());
+        assert!(get(&c0, "byteSize").as_f64().unwrap() > 0.0);
 
-#[wasm_bindgen_test]
-fn tables_and_csv_extraction() {
-    let html = "<table>\
-                <thead><tr><th>Col A</th><th>Col B</th></tr></thead>\
-                <tbody><tr><td>1</td><td>2</td></tr></tbody>\
-                </table>";
-    let t = tables(html, None).unwrap();
-    assert_eq!(js(&t), r#"[[["Col A","Col B"],["1","2"]]]"#);
+        let doc = Document::new(&JsValue::from_str(html)).unwrap();
+        assert_eq!(js(&chunks), js(&doc.to_markdown_chunks(Some(40))));
+    }
 
-    let csv = to_csv(html, None).unwrap();
-    assert_eq!(csv, "Col A,Col B\r\n1,2\r\n");
+    #[wasm_bindgen_test]
+    fn tables_and_csv_extraction() {
+        let html = "<table>\
+                    <thead><tr><th>Col A</th><th>Col B</th></tr></thead>\
+                    <tbody><tr><td>1</td><td>2</td></tr></tbody>\
+                    </table>";
+        let t = tables(html, None).unwrap();
+        assert_eq!(js(&t), r#"[[["Col A","Col B"],["1","2"]]]"#);
 
-    let doc = Document::new(&JsValue::from_str(html)).unwrap();
-    assert_eq!(js(&t), js(&doc.tables(None).unwrap()));
-    assert_eq!(csv, doc.to_csv(None).unwrap());
+        let csv = to_csv(html, None).unwrap();
+        assert_eq!(csv, "Col A,Col B\r\n1,2\r\n");
 
-    // Invalid selector throws SelectorError
-    assert!(tables(html, Some("table >".into())).is_err());
-    assert!(doc.tables(Some("table >".into())).is_err());
-    assert!(to_csv(html, Some("table >".into())).is_err());
-    assert!(doc.to_csv(Some("table >".into())).is_err());
+        let doc = Document::new(&JsValue::from_str(html)).unwrap();
+        assert_eq!(js(&t), js(&doc.tables(None).unwrap()));
+        assert_eq!(csv, doc.to_csv(None).unwrap());
+
+        // Invalid selector throws SelectorError
+        assert!(tables(html, Some("table >".into())).is_err());
+        assert!(doc.tables(Some("table >".into())).is_err());
+        assert!(to_csv(html, Some("table >".into())).is_err());
+        assert!(doc.to_csv(Some("table >".into())).is_err());
+    }
 }
 
 #[wasm_bindgen_test]

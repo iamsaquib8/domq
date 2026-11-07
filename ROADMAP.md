@@ -33,7 +33,7 @@ The [guide](https://iamsaquib8.github.io/domq/docs/) covers every surface. See
    chunks for a prompt or an index, at the edge, on a server or as an agent's
    MCP tool, without a headless browser.
 4. **JavaScript on the edge** `js` — Workers, Deno, Bun, the browser: no DOM
-   needed, and a ~71 KB gzipped wasm module.
+   needed, and a ~57 KB gzipped wasm module (~78 KB with extraction).
 5. **Python scraping and data code** `py` — where most scraping and RAG code
    lives; a fast, never-panicking parser with selectors and Markdown.
 6. **People who ship HTML** `ship` — docs sites, static-site generators, email
@@ -69,6 +69,9 @@ gap (— means no plan yet).
 | accessibility and markup lint | 0.9 | ✅ | ✅ | 0.9 | 0.9 |
 | parse errors with positions | ✅ | via lint | via lint | ✅ | ✅ |
 
+In JavaScript, reader mode, chunks, metadata, links and tables come from the
+`domq-wasm/extract` entry; plain `domq-wasm` is the smaller core without them.
+
 ## Principles
 
 Every addition is weighed against what defines the project:
@@ -90,7 +93,8 @@ Numbers we hold ourselves to (✅ = enforced in CI):
 | budget | limit | today |
 |---|---|---|
 | runtime dependencies, default build | **0** ✅ | 0 |
-| gzipped wasm, all bindings | **< 80,000 bytes** ✅ (temporary; was 45 KiB; see below) | ~71 KB (0.6.0: 64.5 KB, +21.4 KB for reader mode, metadata, links, chunks, tables and Markdown options; since then bytes-in and tokenizer fixes) |
+| gzipped wasm, core (`domq-wasm`) | **< 60,000 bytes** ✅ (was a 45 KiB promise; see below) | 56,647 B (55.3 KiB) |
+| gzipped wasm, extract (`domq-wasm/extract`: the core plus extraction) | **< 80,000 bytes** ✅ (temporary) | 77,769 B (75.9 KiB) (0.6.0: 64.5 KB, +21.4 KB for reader mode, metadata, links, chunks, tables and Markdown options; since then bytes-in and tokenizer fixes) |
 | panics or hangs on any input (HTML, selectors, edits) | **none** ✅ proptest + fuzz | none known |
 | stack use on deeply nested input | **bounded** ✅ 100k-deep tests | bounded |
 | super-linear time on adversarial input | **none** — every fix gets a timing test | none known |
@@ -101,11 +105,20 @@ Numbers we hold ourselves to (✅ = enforced in CI):
 | CLI binary size, wheel size | to be set (0.9) | ~0.9 MB CLI (Apple Silicon) |
 
 Bringing reader mode, chunks and the data helpers to JavaScript (0.6) took the
-module from 43.1 KB to 64.5 KB, and the 0.7 correctness fixes and JSON-LD add
-more, so the CI gate is a temporary 80,000 bytes. The plan is to win it back ([#111](https://github.com/iamsaquib8/domq/issues/111)):
-find where the bytes go, and ship the extraction helpers as a second,
-optional wasm module, so the core is back under 45 KiB for people who only
-select and convert.
+single module from 43.1 KB to 64.5 KB, and the 0.7 correctness fixes, bytes-in
+decoding and JSON-LD added more. The 0.7 split ([#111](https://github.com/iamsaquib8/domq/issues/111))
+builds two modules from one crate: the **core**, which people who only select
+and convert import, and **extract**, the core plus the extraction helpers
+(`mainContent`, `metadata`, `links`, `resources`, `toMarkdownChunks`, `tables`,
+`toCsv`).
+
+The old "45 KiB" promise is **not** met: the core is 55.3 KiB, about 10 KiB
+over it, because it now also carries bytes-in decoding (`decode`, ~5.4 KB
+gzipped when it landed), configurable Markdown options and the script-data
+tokenizer states, which were not in 0.5's 43 KB. Extraction costs another
+~21 KB (77,769 B vs 56,647 B). The extract gate stays at a temporary 80,000
+bytes; the core gate (60,000 bytes) is the one to keep tight. Raise either on
+purpose, never by accident.
 
 ## Non-goals
 
@@ -143,7 +156,7 @@ In short:
 
 - **Where domq leads:** one zero-dependency, never-panicking core that does
   selectors, reader mode, Markdown, chunks, metadata, links, tables, lint and
-  MCP, on every surface, in ~71 KB of gzipped wasm; the only forgiving parser
+  MCP, on every surface, in ~57 KB of gzipped wasm (~78 KB with extraction); the only forgiving parser
   with a published conformance report; an MCP server with no network or file
   access; the maintained successor to htmlq and pup.
 - **Where it's behind:** reader-mode quality is measured only as agreement
@@ -315,9 +328,10 @@ defuddle and mdream. Bring everything to the bindings before anything else.
       Python (`requests`' `r.content`, Scrapy's `response.body`) and
       `Uint8Array` in JS (cheerio's `loadBuffer`). ([#46](https://github.com/iamsaquib8/domq/issues/46))
 - [x] **M** `js` JavaScript: `mainContent()`, `metadata()`, `links()`,
-      `toMarkdownChunks()` and `tables()`. *Shipped in 0.6.0*, in the one
-      module for now; splitting them into a second, optional module is
-      [#111](https://github.com/iamsaquib8/domq/issues/111).
+      `toMarkdownChunks()` and `tables()`. *Shipped in 0.6.0* in the one
+      module; since 0.7 they are the optional `domq-wasm/extract` entry, so
+      the core module no longer carries them
+      ([#111](https://github.com/iamsaquib8/domq/issues/111)).
 - [ ] **S** `js` `extract(html, spec)`: cheerio's `extract()` descriptor maps
       (a selector string, `[selector]` for all matches, `{selector, value}`,
       nested maps), so cheerio code ports one-to-one. ([#184](https://github.com/iamsaquib8/domq/issues/184))
@@ -351,9 +365,11 @@ decided first, because every JavaScript item after it depends on the answer.
 
 **Tracking:** epic [#249](https://github.com/iamsaquib8/domq/issues/249) · [milestone](https://github.com/iamsaquib8/domq/milestone/1) · bugs and performance traps to clear alongside: [#257](https://github.com/iamsaquib8/domq/issues/257).
 
-- [ ] **S** `js` Decide the wasm budget: win back the ~21 KB that 0.6 added,
-      or split the extraction helpers into a second, optional module, and
-      make every size claim agree ([#111](https://github.com/iamsaquib8/domq/issues/111)).
+- [x] **S** `js` Decide the wasm budget: split the extraction helpers into a
+      second, optional module (`domq-wasm/extract`; the core is 56,647 B
+      gzipped, extract 77,769 B) with a CI gate on each, and make every size
+      claim agree ([#111](https://github.com/iamsaquib8/domq/issues/111)).
+      The old 45 KiB promise is restated, not met: see [Budgets](#budgets).
 - [ ] **M** `rust` Trees that match browsers where real pages differ: stray
       end tags inside table cells, mismatched heading end tags, nested `<a>`
       / `<button>`, the newline after `<pre>`, stray `<` in text, non-ASCII
