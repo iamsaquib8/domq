@@ -157,13 +157,20 @@ impl Dom {
 
     /// Append `s` with its character references decoded straight into the
     /// arena. Also returns the first problem decoding met, its offset into
-    /// `s` (see [`crate::entities::decode_into`]).
+    /// `s` (see [`crate::entities::decode_into`]). `clean`: the tokenizer
+    /// saw that `s` holds no `&`, so there is nothing to decode and nothing
+    /// to search for.
     pub(crate) fn intern_decoded(
         &mut self,
         s: &str,
         in_attr: bool,
+        clean: bool,
     ) -> (Span, Option<crate::entities::Problem>) {
         let start = self.strings.len();
+        if clean {
+            self.strings.push_str(s);
+            return (self.span_since(start), None);
+        }
         let unknown = crate::entities::decode_into(s, &mut self.strings, in_attr);
         (self.span_since(start), unknown)
     }
