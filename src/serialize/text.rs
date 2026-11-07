@@ -85,7 +85,7 @@ impl NodeRef<'_> {
     pub(crate) fn text_head(self, chars: usize) -> String {
         let mut text = Text {
             root: Some(self.id()),
-            noscript: self.dom().noscript_is_content,
+            noscript: self.dom().noscript_is_content(),
             ..Text::default()
         };
         // How much of `text.out` has been counted, and how many characters.

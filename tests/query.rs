@@ -711,6 +711,44 @@ fn of_type_pseudo_classes_count_each_type_among_many() {
 }
 
 #[test]
+fn has_with_child_combinators_looks_only_as_deep_as_it_must() {
+    // 20k nested divs, then a span: `:has(> span)` once scanned each div's
+    // whole subtree.
+    let dom = parse(&nested_divs(20_000));
+    let start = Instant::now();
+    assert_eq!(dom.select("div:has(> span)").count(), 1);
+    assert_eq!(dom.select("div:has(> div > span)").count(), 1);
+    assert_eq!(dom.select("div:has(> div > div > span)").count(), 1);
+    assert_eq!(dom.select("div:has(> p)").count(), 0);
+    assert_eq!(dom.select("div:has(> span + p)").count(), 0);
+    assert_eq!(dom.select("div:has(> div ~ span)").count(), 0);
+    assert_eq!(dom.select("div:not(:has(> span))").count(), 19_999);
+    let elapsed = start.elapsed();
+    assert!(elapsed < SCALING_LIMIT, "took {elapsed:?}");
+}
+
+#[test]
+fn has_with_child_combinators_matches_at_the_right_depth() {
+    let dom = parse("<a><b><c>x</c><d></d></b><e></e></a>");
+    let ids = |sel: &str| -> Vec<String> {
+        dom.select(sel)
+            .filter_map(|n| n.tag_name().map(str::to_string))
+            .collect()
+    };
+    assert_eq!(ids(":has(> b)"), ["a"]);
+    assert_eq!(ids(":has(> c)"), ["b"]);
+    assert_eq!(ids(":has(> d > c)"), Vec::<String>::new());
+    assert_eq!(ids(":has(c)"), ["a", "b"]);
+    assert_eq!(ids(":has(> b > c)"), ["a"]);
+    assert_eq!(ids(":has(> b > d)"), ["a"]);
+    assert_eq!(ids(":has(> c + d)"), ["b"]);
+    assert_eq!(ids(":has(> c ~ d)"), ["b"]);
+    assert_eq!(ids(":has(> b ~ e)"), ["a"]);
+    assert_eq!(ids(":has(> b + e > c)"), Vec::<String>::new());
+    assert_eq!(ids(":has(> b c)"), ["a"]);
+}
+
+#[test]
 fn nested_nth_of_selectors_are_memoized() {
     let dom = parse(&format!("<ul>{}</ul>", "<li>x</li>".repeat(1_000)));
     let nested = "li:nth-child(n of :nth-child(n of :nth-child(n of :nth-child(n of li))))";

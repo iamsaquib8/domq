@@ -63,9 +63,11 @@
 //! `row.select(..)` over every row stays linear), and its memory is bounded
 //! by the size of the document plus the length of the selector, never their
 //! product.
-//! Exceptions: `:has()` and `:contains()` scan each candidate's subtree, and
-//! a lone [`Selector::matches`] call starts with an empty memo (prefer
-//! `select` for bulk work).
+//! Exceptions: `:has()` (unless every combinator in its argument is `>`, `+` or
+//! `~`, when it looks only as many levels down as the argument has `>`s) and
+//! `:contains()` scan each candidate's subtree, and a lone
+//! [`Selector::matches`] call starts with an empty memo (prefer `select` for
+//! bulk work).
 //!
 //! ## Deliberately missing
 //!
@@ -1605,7 +1607,42 @@ fn has<'a>(rels: &[Complex], el: NodeRef<'a>, cx: Ctx<'_, 'a>) -> bool {
                     rel.matches(s, cx) || (deep && s.descendants().any(|d| rel.matches(d, cx)))
                 })
         }
-        _ => el.descendants().any(|d| rel.matches(d, cx)),
+        // Only `>`, `+` and `~` between the subject and `el`: the subject is at
+        // most as many levels down as there are `>`.
+        _ => {
+            let reach = match rel.combs.contains(&Comb::Descendant) {
+                true => usize::MAX,
+                false => rel.combs.iter().filter(|c| **c == Comb::Child).count(),
+            };
+            descendants_within(el, reach).any(|d| rel.matches(d, cx))
+        }
+    })
+}
+
+/// The descendants of `el` at most `depth` levels down, in document order.
+fn descendants_within<'a>(el: NodeRef<'a>, depth: usize) -> impl Iterator<Item = NodeRef<'a>> {
+    let (mut next, mut level) = (el.first_child(), 1);
+    core::iter::from_fn(move || {
+        let cur = next?;
+        next = match cur.first_child() {
+            Some(child) if level < depth => {
+                level += 1;
+                Some(child)
+            }
+            _ => {
+                let mut up = cur;
+                loop {
+                    if let Some(sibling) = up.next_sibling() {
+                        break Some(sibling);
+                    }
+                    let Some(parent) = up.parent().filter(|_| level > 1) else {
+                        break None;
+                    };
+                    (up, level) = (parent, level - 1);
+                }
+            }
+        };
+        Some(cur)
     })
 }
 
