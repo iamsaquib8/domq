@@ -145,12 +145,15 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
     });
 
     let mut checks = TokenStream2::new();
+    let mut plan_steps = Vec::new();
     let body = match specs {
         None => quote!(::domq::__private::Ok(Self)),
         Some(specs) => {
             let mut inits = Vec::new();
+            // Fields that read something, in order: the index into the plan.
+            let mut index = 0usize;
             for spec in &specs {
-                let (init, bound, check) = spec.expand(&type_name);
+                let (init, bound, check, plan_step) = spec.expand(&type_name, index);
                 let ident = &spec.ident;
                 inits.push(quote!(#ident: #init));
                 if let Some((ty, bound)) = bound
@@ -159,6 +162,10 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
                     bounds.push(parse_quote!(#ty: #bound));
                 }
                 checks.extend(check);
+                if let Some(step) = plan_step {
+                    plan_steps.push(step);
+                    index += 1;
+                }
             }
             quote!(::domq::__private::Ok(Self { #(#inits),* }))
         }
@@ -175,6 +182,23 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
 
             fn from_html(
                 __scope: ::domq::Scope<'_>,
+            ) -> ::domq::__private::Result<Self, ::domq::ExtractError> {
+                let __plan = <Self as ::domq::FromHtml>::__plan()?;
+                <Self as ::domq::FromHtml>::__from_html_prepared(__scope, &__plan)
+            }
+
+            fn __plan() -> ::domq::__private::Result<
+                ::domq::__private::Plan,
+                ::domq::ExtractError,
+            > {
+                let mut __plan = ::domq::__private::Plan::new();
+                #(__plan.push(#plan_steps?);)*
+                ::domq::__private::Ok(__plan)
+            }
+
+            fn __from_html_prepared(
+                __scope: ::domq::Scope<'_>,
+                __plan: &::domq::__private::Plan,
             ) -> ::domq::__private::Result<Self, ::domq::ExtractError> {
                 #checks
                 #body
@@ -542,12 +566,20 @@ impl FieldSpec {
     }
 
     /// The field's initializer, the trait bound it needs on its value type
-    /// (for generic structs), and statements to emit before the struct
-    /// literal.
+    /// (for generic structs), statements to emit before the struct literal,
+    /// and the expression that compiles the field's selectors for the plan
+    /// (`None` for `skip`). `index` is the field's place in the plan.
+    #[allow(clippy::type_complexity)]
     fn expand(
         &self,
         type_name: &str,
-    ) -> (TokenStream2, Option<(Type, TokenStream2)>, TokenStream2) {
+        index: usize,
+    ) -> (
+        TokenStream2,
+        Option<(Type, TokenStream2)>,
+        TokenStream2,
+        Option<TokenStream2>,
+    ) {
         let pv = quote!(::domq::__private);
         if self.skip.is_some() {
             let ty = &self.ty;
@@ -555,6 +587,7 @@ impl FieldSpec {
                 quote!(<#ty as #pv::Default>::default()),
                 Some((self.ty.clone(), quote!(#pv::Default))),
                 TokenStream2::new(),
+                None,
             );
         }
 
@@ -612,7 +645,7 @@ impl FieldSpec {
                     .unwrap_or_default();
                 (
                     quote_spanned! {span=>
-                        |__s, __c| ::domq::__private::with::<#value_ty, _>(
+                        |__s, __c, _| ::domq::__private::with::<#value_ty, _>(
                             __s, __c, #function, #path,
                         )
                     },
@@ -629,21 +662,28 @@ impl FieldSpec {
             ),
         };
 
+        let plan = quote!(__plan.field(#index));
         let init = match container {
             Container::Option(_) => {
-                quote_spanned!(span=> ::domq::__private::opt(#scope, #ctx, #convert)?)
+                quote_spanned!(span=> ::domq::__private::opt(#scope, #ctx, #plan, #convert)?)
             }
             Container::Vec(_) => {
-                quote_spanned!(span=> ::domq::__private::all(#scope, #ctx, #convert)?)
+                quote_spanned!(span=> ::domq::__private::all(#scope, #ctx, #plan, #convert)?)
             }
             Container::One if self.default.is_some() => quote_spanned! {span=>
                 ::domq::__private::Option::unwrap_or_default(
-                    ::domq::__private::opt(#scope, #ctx, #convert)?
+                    ::domq::__private::opt(#scope, #ctx, #plan, #convert)?
                 )
             },
             Container::One => {
-                quote_spanned!(span=> ::domq::__private::one(#scope, #ctx, #convert)?)
+                quote_spanned!(span=> ::domq::__private::one(#scope, #ctx, #plan, #convert)?)
             }
+        };
+        // Compile the selectors once per call (and a nested type's too).
+        let plan_step = if src.is_some() {
+            quote_spanned!(span=> ::domq::__private::plan_value(#ctx))
+        } else {
+            quote_spanned!(span=> ::domq::__private::plan_nested::<#value_ty>(#ctx))
         };
         let bound = match (bound, self.default.is_some()) {
             // `default` also needs `T: Default`.
@@ -651,6 +691,6 @@ impl FieldSpec {
             (None, true) => Some((self.ty.clone(), quote!(#pv::Default))),
             (bound, false) => bound,
         };
-        (init, bound, check)
+        (init, bound, check, Some(plan_step))
     }
 }

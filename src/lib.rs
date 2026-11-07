@@ -334,7 +334,9 @@ pub mod __private {
     pub use core::option::Option::{self, None, Some};
     pub use core::result::Result::{self, Err, Ok};
 
-    pub use crate::from_html::{Ctx, Src, all, nested, one, opt, value, with};
+    pub use crate::from_html::{
+        Ctx, FieldPlan, Plan, Src, all, nested, one, opt, plan_nested, plan_value, value, with,
+    };
     pub use crate::{ExtractError, FromHtml, FromHtmlValue, Scope};
 
     pub use crate::__domq_require_markdown as require_markdown;

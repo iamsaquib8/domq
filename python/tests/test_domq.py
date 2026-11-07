@@ -609,6 +609,159 @@ def test_links_and_resources():
     assert len(main.resources(base)) == 3
 
 
+# --- Element methods release the GIL ------------------------------------------
+
+BIG_SECTIONS = 1500
+
+
+def _big_page():
+    sections = "".join(
+        f"<section><h2>Part {i}</h2><p>Some <b>bold</b> text and a <a href='/x/{i}'>link</a>.</p>"
+        "<ul><li>one</li><li>two</li></ul></section>"
+        for i in range(BIG_SECTIONS)
+    )
+    table = "<table>" + "".join(f"<tr><td>{i}</td><td>x</td></tr>" for i in range(2000)) + "</table>"
+    return domq.parse(f"<main>{sections}{table}</main><p id=small>tiny</p>")
+
+
+# Every Element method that does real work, as a function of the element.
+ELEMENT_WORK = {
+    "text": lambda e: e.text,
+    "to_text": lambda e: e.to_text(),
+    "text_content": lambda e: e.text_content,
+    "html": lambda e: e.html,
+    "inner_html": lambda e: e.inner_html,
+    "to_markdown": lambda e: e.to_markdown(),
+    "to_markdown_chunks": lambda e: e.to_markdown_chunks(),
+    "outline": lambda e: e.outline(),
+    "to_json": lambda e: e.to_json(),
+    "table_rows": lambda e: e.select_first("table").table_rows(),
+    "to_csv": lambda e: e.select_first("table").to_csv(),
+}
+
+
+@pytest.mark.parametrize("name", sorted(ELEMENT_WORK))
+def test_large_element_methods_run_without_the_gil(name):
+    """While one thread is inside the method, a Python thread keeps running.
+
+    The ticker stamps the time on every turn and gives the GIL up each time.
+    If the call holds the GIL, the stretch of the call with no stamp is as long
+    as the call; if it releases it, stamps come all through it. No timing
+    limit is involved, only the shape of the stamps: machine load decides how
+    many calls are needed before the ticker is scheduled promptly.
+    """
+    main = _big_page().select_first("main")
+    work = ELEMENT_WORK[name]
+    stamps = []
+    stop = threading.Event()
+
+    def tick():
+        while not stop.is_set():
+            stamps.append(time.perf_counter())
+            time.sleep(0)
+
+    ticker = threading.Thread(target=tick)
+    ticker.start()
+    try:
+        for _ in range(60):
+            time.sleep(0.002)  # let the ticker run, so that it is waiting for the GIL
+            del stamps[:]
+            start = time.perf_counter()
+            work(main)
+            end = time.perf_counter()
+            points = [start] + [t for t in list(stamps) if start < t < end] + [end]
+            longest_silence = max(b - a for a, b in zip(points, points[1:]))
+            if longest_silence < (end - start) / 2:
+                break
+        else:
+            pytest.fail(f"Element.{name} never let another thread run: it holds the GIL")
+    finally:
+        stop.set()
+        ticker.join()
+
+
+def _plain(value):
+    """A comparable form of what an Element method returned."""
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    if isinstance(value, (str, int, float, bool, type(None))):
+        return value
+    return str(value) if isinstance(value, domq.PageOutline) else (value.markdown, value.heading_path)
+
+
+def test_element_methods_agree_across_threads():
+    """The same answers from many threads at once as from one."""
+    doc = _big_page()
+    main = doc.select_first("main")
+    small = doc.select_first("#small")
+    expected = {name: _plain(work(main)) for name, work in ELEMENT_WORK.items()}
+    small_expected = {
+        name: _plain(ELEMENT_WORK[name](small))
+        for name in ("text", "to_text", "html", "inner_html", "to_markdown", "to_json")
+    }
+    results = []
+    errors = []
+
+    def run():
+        try:
+            got = {name: _plain(work(main)) for name, work in ELEMENT_WORK.items()}
+            small_got = {name: _plain(ELEMENT_WORK[name](small)) for name in small_expected}
+            results.append((got, small_got))
+        except Exception as e:  # pragma: no cover - only on failure
+            errors.append(e)
+
+    threads = [threading.Thread(target=run) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors
+    assert len(results) == 6
+    for got, small_got in results:
+        assert got == expected
+        assert small_got == small_expected
+    assert small_expected["text"] == "tiny"
+    assert small_expected["html"] == '<p id="small">tiny</p>'
+
+
+def test_element_serialization_scales_across_threads(capsys):
+    """Record how much faster 4 threads are than 4 sequential calls.
+
+    A benchmark, not a timing test: it only asserts that the answers match,
+    because the speedup depends on the machine (one core, a loaded CI runner,
+    a free-threaded build all give a different number). Run with `-s` to see
+    it. Before Element methods released the GIL it was about x1.0.
+    """
+    main = _big_page().select_first("main")
+    expected = main.to_markdown()
+
+    def best(fn, runs=5):
+        best = float("inf")
+        for _ in range(runs):
+            start = time.perf_counter()
+            fn()
+            best = min(best, time.perf_counter() - start)
+        return best
+
+    def sequential():
+        return [main.to_markdown() for _ in range(4)]
+
+    def threaded():
+        out = []
+        threads = [threading.Thread(target=lambda: out.append(main.to_markdown())) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        return out
+
+    assert sequential() == [expected] * 4
+    assert threaded() == [expected] * 4
+    seq, par = best(sequential), best(threaded)
+    with capsys.disabled():
+        print(f"\nElement.to_markdown, 4 calls: sequential {seq * 1e3:.1f} ms, 4 threads {par * 1e3:.1f} ms, x{seq / par:.2f}")
+
+
 def test_element_links_and_resources_stay_in_the_subtree():
     doc = domq.parse(
         "<div class=c><a href=/a>A</a><img src=a.png></div>"

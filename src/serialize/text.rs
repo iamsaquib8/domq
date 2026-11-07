@@ -35,7 +35,7 @@ impl Dom {
     /// ```
     pub fn to_text(&self) -> String {
         let mut text = Text {
-            noscript: self.noscript_is_content,
+            noscript: self.noscript_is_content(),
             ..Text::default()
         };
         for root in self.roots() {
@@ -67,10 +67,44 @@ impl NodeRef<'_> {
     pub fn to_text(&self) -> String {
         let mut text = Text {
             root: Some(self.id()),
-            noscript: self.dom().noscript_is_content,
+            noscript: self.dom().noscript_is_content(),
             ..Text::default()
         };
         walk(*self, |node, enter| text.visit(node, enter));
+        text.finish()
+    }
+}
+
+impl NodeRef<'_> {
+    /// The start of [`NodeRef::to_text`]: it stops walking once `chars`
+    /// characters that are not whitespace are in, instead of reading a whole
+    /// subtree to use its first words. The result is cut at a node boundary,
+    /// so it can be longer than `chars`, but `chars` characters of
+    /// whitespace-collapsed text taken from it are the same as from the full
+    /// text.
+    pub(crate) fn text_head(self, chars: usize) -> String {
+        let mut text = Text {
+            root: Some(self.id()),
+            noscript: self.dom().noscript_is_content(),
+            ..Text::default()
+        };
+        // How much of `text.out` has been counted, and how many characters.
+        let (mut counted, mut seen) = (0, 0);
+        walk(self, |node, enter| {
+            if seen >= chars {
+                return false;
+            }
+            let descend = text.visit(node, enter);
+            // A closing `<pre>` can trim trailing whitespace, which is not
+            // counted, so `counted` may be past the end: clamp it.
+            counted = counted.min(text.out.len());
+            if let Some(new) = text.out.get(counted..) {
+                // `finish` trims Unicode whitespace, so count only what stays.
+                seen += new.chars().filter(|c| !c.is_whitespace()).count();
+            }
+            counted = text.out.len();
+            descend
+        });
         text.finish()
     }
 }

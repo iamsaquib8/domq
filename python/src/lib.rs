@@ -1034,6 +1034,17 @@ impl Element {
         }
     }
 
+    /// Run `f` on this element's node, with the GIL released when the subtree
+    /// is large. The document is frozen, so nothing changes under `f`.
+    fn detached<T: Ungil>(
+        &self,
+        py: Python<'_>,
+        f: impl Send + FnOnce(NodeRef<'_>) -> T,
+    ) -> PyResult<T> {
+        let node = self.node()?;
+        Ok(maybe_detach(py, self.large(), move || f(node)))
+    }
+
     fn node(&self) -> PyResult<NodeRef<'_>> {
         // Ids come from the same (immutable) document, so this always succeeds.
         self.doc
@@ -1098,32 +1109,32 @@ impl Element {
 
     /// Readable text of this element (like `Document.to_text()`).
     #[getter]
-    fn text(&self) -> PyResult<String> {
-        Ok(self.node()?.to_text())
+    fn text(&self, py: Python<'_>) -> PyResult<String> {
+        self.detached(py, |node| node.to_text())
     }
 
     /// Readable plain text of this element: whitespace collapsed, a line per
     /// block and a blank line between paragraphs (like `Document.to_text()`).
-    fn to_text(&self) -> PyResult<String> {
-        self.text()
+    fn to_text(&self, py: Python<'_>) -> PyResult<String> {
+        self.text(py)
     }
 
     /// All descendant text concatenated, verbatim (DOM `textContent`).
     #[getter]
-    fn text_content(&self) -> PyResult<String> {
-        Ok(self.node()?.text_content())
+    fn text_content(&self, py: Python<'_>) -> PyResult<String> {
+        self.detached(py, |node| node.text_content())
     }
 
     /// This element as HTML, including its own tags (DOM `outerHTML`).
     #[getter]
-    fn html(&self) -> PyResult<String> {
-        Ok(self.node()?.outer_html())
+    fn html(&self, py: Python<'_>) -> PyResult<String> {
+        self.detached(py, |node| node.outer_html())
     }
 
     /// The HTML of this element's children (DOM `innerHTML`).
     #[getter]
-    fn inner_html(&self) -> PyResult<String> {
-        Ok(self.node()?.inner_html())
+    fn inner_html(&self, py: Python<'_>) -> PyResult<String> {
+        self.detached(py, |node| node.inner_html())
     }
 
     /// Descendants matching a CSS selector, in document order. As with the
@@ -1168,17 +1179,19 @@ impl Element {
     }
 
     /// If this element is a `<table>`, rows of cell text with colspan/rowspan expanded.
-    fn table_rows(&self) -> PyResult<Vec<Vec<String>>> {
-        Ok(self.node()?.table_rows())
+    fn table_rows(&self, py: Python<'_>) -> PyResult<Vec<Vec<String>>> {
+        self.detached(py, |node| node.table_rows())
     }
 
     /// If this element is a `<table>`, its cell text formatted as RFC 4180 CSV.
-    fn to_csv(&self) -> PyResult<String> {
-        let rows = self.node()?.table_rows();
-        Ok(if rows.is_empty() {
-            String::new()
-        } else {
-            domq::to_csv(rows)
+    fn to_csv(&self, py: Python<'_>) -> PyResult<String> {
+        self.detached(py, |node| {
+            let rows = node.table_rows();
+            if rows.is_empty() {
+                String::new()
+            } else {
+                domq::to_csv(rows)
+            }
         })
     }
 
@@ -1283,13 +1296,14 @@ impl Element {
     #[pyo3(signature = (*, links = None, images = None, drop_data_uris = false, base_url = None))]
     fn to_markdown(
         &self,
+        py: Python<'_>,
         links: Option<&str>,
         images: Option<&str>,
         drop_data_uris: bool,
         base_url: Option<String>,
     ) -> PyResult<String> {
         let opts = parse_py_markdown_options(links, images, drop_data_uris, base_url)?;
-        Ok(self.node()?.to_markdown_with(&opts))
+        self.detached(py, |node| node.to_markdown_with(&opts))
     }
 
     /// CommonMark + GFM Markdown chunks for this element's subtree.
@@ -1298,6 +1312,7 @@ impl Element {
     #[pyo3(signature = (max_chars = None, *, links = None, images = None, drop_data_uris = false, base_url = None))]
     fn to_markdown_chunks(
         &self,
+        py: Python<'_>,
         max_chars: Option<usize>,
         links: Option<&str>,
         images: Option<&str>,
@@ -1306,7 +1321,7 @@ impl Element {
     ) -> PyResult<Vec<Chunk>> {
         let budget = max_chars.unwrap_or(1500);
         let opts = parse_py_markdown_options(links, images, drop_data_uris, base_url)?;
-        let chunks = self.node()?.to_markdown_chunks_with(budget, &opts);
+        let chunks = self.detached(py, |node| node.to_markdown_chunks_with(budget, &opts))?;
         Ok(chunks
             .into_iter()
             .map(|c| Chunk {
@@ -1317,19 +1332,19 @@ impl Element {
     }
 
     /// Extract a semantic page outline for this element's subtree.
-    fn outline(&self) -> PyResult<PageOutline> {
+    fn outline(&self, py: Python<'_>) -> PyResult<PageOutline> {
         Ok(PageOutline {
-            inner: self.node()?.outline(),
+            inner: self.detached(py, |node| node.outline())?,
         })
     }
 
     /// This element's subtree as a JSON string.
-    fn to_json(&self) -> PyResult<String> {
-        Ok(self.node()?.to_json())
+    fn to_json(&self, py: Python<'_>) -> PyResult<String> {
+        self.detached(py, |node| node.to_json())
     }
 
-    fn __str__(&self) -> PyResult<String> {
-        self.html()
+    fn __str__(&self, py: Python<'_>) -> PyResult<String> {
+        self.html(py)
     }
 
     fn __repr__(&self) -> PyResult<String> {

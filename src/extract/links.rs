@@ -254,7 +254,7 @@ impl<'a> NodeRef<'a> {
 fn collect_links<'a>(dom: &'a Dom, under: Option<NodeRef<'a>>, base: &str) -> Vec<Link<'a>> {
     let mut links: Vec<Link<'a>> = Vec::new();
     let mut collector = TextCollector {
-        noscript: dom.noscript_is_content,
+        noscript: dom.noscript_is_content(),
         ..TextCollector::default()
     };
     let push = |links: &mut Vec<Link<'a>>, node: NodeRef<'a>, href: &'a str| {
