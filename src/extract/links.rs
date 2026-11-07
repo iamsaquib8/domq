@@ -185,7 +185,7 @@ impl<'a> NodeRef<'a> {
     /// let dom = domq::parse(
     ///     r#"<div id=a><a href="/x">X</a></div><div id=b><a href="y">Y</a></div>"#,
     /// );
-    /// let b = dom.select_first("#b").unwrap();
+    /// let b = dom.find_by_tag("div").nth(1).unwrap();
     /// let links = b.links(Some("https://example.com/dir/"));
     /// assert_eq!(links.len(), 1);
     /// assert_eq!(links[0].url, "https://example.com/dir/y");
@@ -204,7 +204,7 @@ impl<'a> NodeRef<'a> {
     /// ```
     /// let dom = domq::parse(r#"<base href=/docs/><ul><li><a href=a.html>A</a></li></ul>"#);
     /// let base = dom.base_url(Some("https://example.com/"));
-    /// let li = dom.select_first("li").unwrap();
+    /// let li = dom.find_by_tag("li").next().unwrap();
     /// let links = li.links_resolved(base.as_deref());
     /// assert_eq!(links[0].url, "https://example.com/docs/a.html");
     /// ```
@@ -220,7 +220,7 @@ impl<'a> NodeRef<'a> {
     ///
     /// ```
     /// let dom = domq::parse(r#"<p id=a><img src=a.png></p><p id=b><img src=b.png></p>"#);
-    /// let b = dom.select_first("#b").unwrap();
+    /// let b = dom.find_by_tag("p").nth(1).unwrap();
     /// let found = b.resources(Some("https://example.com/"));
     /// assert_eq!(found.len(), 1);
     /// assert_eq!(found[0].url, "https://example.com/b.png");
@@ -236,7 +236,7 @@ impl<'a> NodeRef<'a> {
     /// ```
     /// let dom = domq::parse(r#"<p><img src=a.png></p>"#);
     /// let base = dom.base_url(Some("https://example.com/"));
-    /// let p = dom.select_first("p").unwrap();
+    /// let p = dom.find_by_tag("p").next().unwrap();
     /// assert_eq!(p.resources_resolved(base.as_deref())[0].url, "https://example.com/a.png");
     /// ```
     pub fn resources_resolved(&self, base: Option<&str>) -> Vec<Resource<'a>> {
