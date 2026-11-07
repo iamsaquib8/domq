@@ -588,7 +588,7 @@ be settled together. After 0.11, only additive changes until 1.0.
       defuddle, markdownify, turndown, htmd and mdream on the same corpora
       (AEB, WCXB, trafilatura's set, WebMainBench), published either way. ([#208](https://github.com/iamsaquib8/domq/issues/208))
 - [ ] **M** `rust` Close the real-page parsing gap: profile domq on the five
-      real pages (25–48% behind `tl`, more behind astral-html) and fix what
+      real pages (22–35% behind `tl`, more behind astral-html) and fix what
       generated inputs hid (attribute-heavy markup, scripts, long URLs). ([#73](https://github.com/iamsaquib8/domq/issues/73))
 - [ ] **M** `rust` `shell` Speed where people choose: HTML → Markdown against
       mdream, htmd and html-to-markdown-rs on mdream's pages; parsing against
