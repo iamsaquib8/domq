@@ -251,10 +251,11 @@ fn deep_mixed_structures() {
 
 #[test]
 fn deep_inline_marks() {
-    let dom = parse(&nested("<b><i><a href=/x><span>", "x"));
+    // (Not `<a>`: a link inside a link closes it, so they would not nest.)
+    let dom = parse(&nested("<b><i><del><span>", "x"));
     assert_eq!(dom.to_text(), "x");
     #[cfg(feature = "markdown")]
-    assert_eq!(dom.to_markdown(), "***[x](/x)***");
+    assert_eq!(dom.to_markdown(), "***~~x~~***");
 }
 
 #[test]
