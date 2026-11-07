@@ -1,6 +1,6 @@
 //! Behavioural tests for the parser and tree.
 
-use domq::{NodeKind, Token, parse, tokenize};
+use domq::{ErrorKind, NodeKind, Token, parse, tokenize};
 
 #[test]
 fn basic_nesting() {
@@ -240,6 +240,12 @@ fn deeply_nested_does_not_overflow() {
     assert!(dom.to_json().len() > depth);
 }
 
+/// Ceiling for the linear-time tests below. They guard against the quadratic
+/// case (tens of seconds at these sizes), not against a slow machine: a debug
+/// build on a loaded CI runner takes about a second, so the limit sits well
+/// above that and well below the failure it exists to catch (see #117).
+const LINEAR_TIME_LIMIT_MS: u128 = 5_000;
+
 #[test]
 fn stray_end_tags_on_a_deep_stack_are_linear() {
     // Each `</x>` has no open match. Scanning the whole open-element stack for
@@ -251,7 +257,7 @@ fn stray_end_tags_on_a_deep_stack_are_linear() {
     let start = std::time::Instant::now();
     let dom = parse(&html);
     assert!(
-        start.elapsed().as_millis() < 1000,
+        start.elapsed().as_millis() < LINEAR_TIME_LIMIT_MS,
         "took {:?}",
         start.elapsed()
     );
@@ -267,7 +273,7 @@ fn stray_end_tags_on_a_deep_stack_are_linear() {
     let start = std::time::Instant::now();
     let dom = parse(&html);
     assert!(
-        start.elapsed().as_millis() < 1000,
+        start.elapsed().as_millis() < LINEAR_TIME_LIMIT_MS,
         "took {:?}",
         start.elapsed()
     );
@@ -361,7 +367,7 @@ fn colliding_names_on_a_deep_stack_are_linear() {
             parse(&html).len()
         };
         assert!(
-            start.elapsed().as_millis() < 1000,
+            start.elapsed().as_millis() < LINEAR_TIME_LIMIT_MS,
             "{label} took {:?}",
             start.elapsed()
         );
@@ -756,6 +762,51 @@ fn entity_problems_are_reported_at_their_ampersand() {
     assert_eq!(positions(html), [9, html.find("&#").unwrap()]);
 }
 
+// An `=` where an attribute name starts begins the name (#235).
+
+#[test]
+fn an_equals_sign_before_an_attribute_name_starts_the_name() {
+    let dom = parse("<div =x>t</div>");
+    let div = dom.root().unwrap();
+    let attrs: Vec<_> = div.attributes().collect();
+    assert_eq!(attrs, [("=x", "")]);
+    assert_eq!(div.attr("x"), None);
+    #[cfg(feature = "query")]
+    assert_eq!(dom.select("[x]").count(), 0);
+    // A parse error is recorded, at the `=`.
+    let errors = dom.errors();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].kind, ErrorKind::UnexpectedEqualsSign);
+    assert_eq!(errors[0].position, 5);
+    // It survives a round trip.
+    assert_eq!(dom.to_html(), "<div =x>t</div>");
+    assert_eq!(
+        parse(&dom.to_html()).root().unwrap().attributes().count(),
+        1
+    );
+}
+
+#[test]
+fn equals_signs_around_attribute_names() {
+    for (html, want) in [
+        ("<div =>", vec![("=", "")]),
+        ("<div ==x a=b>", vec![("=", "x"), ("a", "b")]),
+        ("<div a =b>", vec![("a", "b")]),
+        ("<div a= =b>", vec![("a", "=b")]),
+        ("<div =\"x\">", vec![("=\"x\"", "")]),
+        ("<div =x=y>", vec![("=x", "y")]),
+    ] {
+        let dom = parse(html);
+        let got: Vec<_> = dom.root().unwrap().attributes().collect();
+        assert_eq!(got, want, "{html}");
+    }
+    // The tokenizer reports it too.
+    let toks: Vec<_> = tokenize("<div =x>").collect();
+    assert!(
+        matches!(&toks[0], Token::StartTag { attrs, .. } if attrs.len() == 1 && attrs[0].0 == "=x")
+    );
+}
+
 // One newline right after <pre>, <listing> and <textarea> is dropped (#75).
 
 #[test]
@@ -982,4 +1033,242 @@ fn links_in_separate_cells_and_scopes_are_untouched() {
         parse("<a href=/1>1</a><a href=/2>2</a>").to_html(),
         "<a href=\"/1\">1</a><a href=\"/2\">2</a>"
     );
+}
+
+// A `<` that starts no markup stays in its text (#76).
+
+fn text_children(html: &str) -> Vec<String> {
+    let dom = parse(html);
+    let p = dom.find_by_tag("p").next().unwrap();
+    p.children()
+        .filter_map(|c| c.text().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn a_stray_lt_does_not_split_the_text() {
+    let dom = parse("<p>if a < b then</p>");
+    let p = dom.root().unwrap();
+    assert_eq!(p.children().count(), 1);
+    assert_eq!(p.first_child().unwrap().text(), Some("if a < b then"));
+    for (html, want) in [
+        ("<p><3 and <- and < </p>", "<3 and <- and < "),
+        ("<p>1 <2 <3<4</p>", "1 <2 <3<4"),
+        ("<p>a <&amp; b</p>", "a <& b"),
+        ("<p>x <\u{e9}</p>", "x <\u{e9}"),
+        ("<p>x <", "x <"),
+        ("<p>x </", "x </"),
+    ] {
+        assert_eq!(text_children(html), [want], "{html}");
+    }
+    // Real markup still ends the run.
+    assert_eq!(
+        text_children("<p>a < b<!--c--> < d<b>e</b> <3"),
+        ["a < b", " < d", " <3"]
+    );
+    let dom = parse("<p>a <i>b</i> c <? d>");
+    assert_eq!(dom.find_by_tag("p").next().unwrap().children().count(), 4);
+}
+
+#[test]
+fn a_stray_lt_in_a_text_run_is_one_token() {
+    let toks: Vec<_> = tokenize("a < b <3 <").collect();
+    assert_eq!(toks, [Token::Text("a < b <3 <")]);
+    // The text keeps its source range.
+    let src = "<p>a < b</p>";
+    let dom = parse(src);
+    let text = dom.root().unwrap().first_child().unwrap();
+    assert_eq!(&src[text.source_range().unwrap()], "a < b");
+}
+
+#[test]
+fn an_empty_end_tag_makes_no_token() {
+    // `</>` is dropped (with a parse error); it must not leave an empty text.
+    let toks: Vec<_> = tokenize("a</>b</></>").collect();
+    assert_eq!(toks, [Token::Text("a"), Token::Text("b")]);
+    assert_eq!(parse("</>").roots().count(), 0);
+}
+
+// Tag names run to whitespace, `/` or `>` (#84).
+
+#[test]
+fn tag_names_may_hold_non_ascii_and_symbols() {
+    let html = "<my-élément>t</my-élément>";
+    let dom = parse(html);
+    assert_eq!(dom.root().unwrap().tag_name(), Some("my-élément"));
+    assert_eq!(dom.to_html(), html);
+    assert_eq!(dom.root().unwrap().attributes().count(), 0);
+    #[cfg(feature = "query")]
+    assert_eq!(dom.select("my-élément").count(), 1);
+    assert_eq!(dom.errors().len(), 0);
+
+    let dom = parse("<div$x>t</div$x>");
+    assert_eq!(dom.root().unwrap().tag_name(), Some("div$x"));
+    assert_eq!(dom.to_html(), "<div$x>t</div$x>");
+
+    // Attributes after such a name, a self-closing one, and only ASCII upper
+    // case is lowered. A name must still start with an ASCII letter.
+    let dom = parse("<X-Ünï-Tag a=1 b/>x<x-ÜNÏ-TAG>y");
+    let kids: Vec<_> = dom.roots().filter_map(|n| n.tag_name()).collect();
+    assert_eq!(kids, ["x-Ünï-tag", "x-ÜnÏ-tag"]);
+    assert_eq!(dom.root().unwrap().attr("a"), Some("1"));
+    // The end tag matches the start tag.
+    let dom = parse("<a-é><b>x</b></a-é>y");
+    assert_eq!(dom.to_html(), "<a-é><b>x</b></a-é>y");
+    assert_eq!(parse("<Ünï>").to_html(), "&lt;Ünï&gt;");
+    // Tokens carry the whole name.
+    let toks: Vec<_> = tokenize("<my-é x>").collect();
+    assert!(matches!(toks[0], Token::StartTag { name: "my-é", .. }));
+}
+
+// A script's `<!--<script>` is "double escaped": the next `</script>` does
+// not end the element (#234).
+
+fn script_text(html: &str) -> Option<String> {
+    let dom = parse(html);
+    let script = dom.find_by_tag("script").next()?;
+    Some(script.text_content())
+}
+
+#[test]
+fn a_double_escaped_script_ends_at_the_second_end_tag() {
+    let html = "<script><!--<script>a</script>b</script><p>x</p>";
+    let dom = parse(html);
+    assert_eq!(
+        script_text(html).as_deref(),
+        Some("<!--<script>a</script>b")
+    );
+    // `b</script>` is not left over as page text, and the paragraph follows.
+    assert_eq!(dom.to_text(), "x");
+    assert_eq!(dom.roots().count(), 2);
+    assert_eq!(dom.to_html(), html);
+}
+
+#[test]
+fn script_data_states() {
+    for (html, want) in [
+        // Escaped, but not double escaped: the first end tag ends it.
+        ("<script><!-- a </script>x", "<!-- a "),
+        ("<script><!--<b>a</script>x", "<!--<b>a"),
+        // `-->` leaves the escaped part, so a later `<script` is plain text.
+        (
+            "<script><!-- a --><script>b</script>x",
+            "<!-- a --><script>b",
+        ),
+        ("<script><!--<script>a--></script>x", "<!--<script>a-->"),
+        // `<!-->` and `<!--->` are `<!--` followed by `>`/`->`.
+        ("<script><!--><script>a</script>x", "<!--><script>a"),
+        ("<script><!---><script>a</script>x", "<!---><script>a"),
+        // In the double escaped part, `</script>` goes back to escaped, and a
+        // second `</script>` ends the element; names are case-insensitive and
+        // end at whitespace, `/` or `>`.
+        (
+            "<script><!--<script>a</script>b</script>x",
+            "<!--<script>a</script>b",
+        ),
+        (
+            "<SCRIPT><!--<ScRipT >a</sCRIPT/>b</SCRIPT >x",
+            "<!--<ScRipT >a</sCRIPT/>b",
+        ),
+        (
+            "<script><!--<script/>a</script\tb</script>x",
+            "<!--<script/>a</script\tb",
+        ),
+        // Not `script`: `<scripts`, `<script`+`x`, and an undelimited name.
+        ("<script><!--<scripts>a</script>b", "<!--<scripts>a"),
+        (
+            "<script><!--<script>a</scripts>b</script>x",
+            "<!--<script>a</scripts>b</script>x",
+        ),
+        // Dashes need to be adjacent.
+        (
+            "<script><!-- - -><script>a</script>x</script>y",
+            "<!-- - -><script>a</script>x",
+        ),
+        // The double escaped part does not nest: one `</script>` leaves it.
+        (
+            "<script><!--<script><script>a</script>b</script>c</script>x",
+            "<!--<script><script>a</script>b",
+        ),
+    ] {
+        assert_eq!(script_text(html).as_deref(), Some(want), "{html}");
+    }
+    // Style, title and textarea have no such state.
+    let dom = parse("<style><!--<script>a</style>b");
+    assert_eq!(
+        dom.find_by_tag("style").next().unwrap().text_content(),
+        "<!--<script>a"
+    );
+    assert_eq!(dom.to_text(), "b");
+}
+
+#[test]
+fn double_escaped_scripts_round_trip_and_stay_closed() {
+    for html in [
+        "<script><!--<script>a</script>b</script><p>x</p>",
+        "<script><!--<script>a</script></script></script><p>y</p>",
+        "<script><!--<script>a",
+        "<script><!--<script>a</script",
+        "<script>x</script</script><p>z</p>",
+    ] {
+        let once = parse(html);
+        let out = once.to_html();
+        let twice = parse(&out);
+        assert_eq!(out, twice.to_html(), "{html}");
+        assert_eq!(once.roots().count(), twice.roots().count(), "{html}");
+        // Whatever the text, the element is closed by its own end tag.
+        assert!(out.ends_with("</script>") || out.ends_with("</p>"), "{out}");
+    }
+    // The parsed text survives intact when it ends in plain script data.
+    let html = "<script><!--<script>a</script>b</script><p>x</p>";
+    assert_eq!(
+        script_text(&parse(html).to_html()).as_deref(),
+        Some("<!--<script>a</script>b")
+    );
+}
+
+#[test]
+fn editing_a_script_into_double_escaped_text_cannot_swallow_its_end_tag() {
+    let mut dom = parse("<script>1</script><p>after</p>");
+    let script = dom.find_by_tag("script").next().unwrap().id();
+    dom.set_text(script, "<!--<script>alert(1)");
+    let out = dom.to_html();
+    let again = parse(&out);
+    assert_eq!(again.roots().count(), 2, "{out}");
+    assert_eq!(again.to_text(), "after");
+    // An end tag in plain or escaped text is still written `<\/script`.
+    dom.set_text(script, "a</script><img src=x>");
+    assert_eq!(
+        dom.to_html(),
+        "<script>a<\\/script><img src=x></script><p>after</p>"
+    );
+    dom.set_text(script, "<!--a</script><img src=x>");
+    let again = parse(&dom.to_html());
+    assert_eq!(again.roots().count(), 2);
+}
+
+#[test]
+fn script_scanning_is_linear() {
+    // Many `<!--`, `-`, `<script` and `</script` pieces, and a long run of
+    // letters after a `<`: each byte is looked at a bounded number of times.
+    let n = 200_000;
+    for unit in [
+        "<!--<script>",
+        "-->",
+        "<scrip",
+        "<aaaaaaaaaaaaaaaaaaaaaaaa",
+        "--",
+        "</scriptx",
+    ] {
+        let html = format!("<script>{}</script><p>x</p>", unit.repeat(n));
+        let start = std::time::Instant::now();
+        let dom = parse(&html);
+        let _ = dom.to_html();
+        assert!(
+            start.elapsed().as_millis() < 2000,
+            "{unit}: took {:?}",
+            start.elapsed()
+        );
+        assert!(dom.roots().count() >= 1);
+    }
 }
