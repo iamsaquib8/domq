@@ -405,6 +405,40 @@ proptest! {
     }
 
     #[test]
+    fn has_agrees_with_scope_anchored_selection(
+        steps in proptest::collection::vec(
+            (select(&['>', '+', '~', ' '][..]), select(&["div", "p", "span", "i", "*"][..])),
+            1..5,
+        ),
+        lead in select(&['>', ' '][..]),
+        html in prop_oneof![soup(TREE_ATOMS, 48), siblings()],
+    ) {
+        // `:has(> a + b ~ c)` is what `:scope > a + b ~ c` finds below the
+        // subject: `:has` takes a bounded shortcut when it has no descendant
+        // combinator, `:scope` selection walks everything.
+        let mut rel = String::new();
+        for (i, (comb, tag)) in steps.iter().enumerate() {
+            let comb = if i == 0 { lead } else { *comb };
+            match comb {
+                ' ' => rel.push(' '),
+                c => rel.push_str(&format!(" {c} ")),
+            }
+            rel.push_str(tag);
+        }
+        let dom = parse(&html);
+        let has = Selector::parse(&format!("*:has({})", rel.trim())).unwrap();
+        let below = Selector::parse(&format!(":scope{rel}")).unwrap();
+        let expected = node_ids(
+            dom.nodes()
+                .filter(|n| n.is_element() && n.select(&below).next().is_some()),
+        );
+        prop_assert_eq!(node_ids(dom.select(&has)), expected.clone(), "{}", rel);
+        for node in dom.nodes().filter(|n| n.is_element()) {
+            prop_assert_eq!(node.matches(&has), expected.contains(&node.id()), "{} on {:?}", rel, node);
+        }
+    }
+
+    #[test]
     fn agrees_with_a_naive_backtracking_matcher_on_siblings(
         parts in proptest::collection::vec(part(&["i", "p"], &['+', '~']), 1..6),
         html in siblings(),
