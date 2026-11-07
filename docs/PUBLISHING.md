@@ -28,8 +28,9 @@ cargo doc --no-deps --all-features                                      # docs b
 cargo publish --dry-run                                                 # packaging
 ```
 
-Bump the versions (above), move the `CHANGELOG.md` "unreleased" section under
-the new version, and update ROADMAP's "Where we are", "What works where" and
+Bump the versions (above), run `python3 scripts/changelog.py release X.Y.Z` to
+turn the `changes/` fragments into the new `CHANGELOG.md` section (then add the
+summary and upgrade notes), and update ROADMAP's "Where we are", "What works where" and
 "Shipped". Merge that, then tag `main`:
 
 ```sh
@@ -72,7 +73,7 @@ wasm-pack build --target web --release
 node npm/finish.mjs                             # Node entry point + "exports" in pkg/package.json
 wasm-pack test --node                           # binding tests
 sh npm/smoke-test.sh                            # npm-pack pkg/, install it, run tests/node.mjs
-gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c    # expect ~65 KB (CI gate: 66560 bytes)
+gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c    # expect ~71 KB (CI gate: 80000 bytes)
 
 cd pkg
 npm pack --dry-run                              # expect 7 files, incl. LICENSE, node.js and the .wasm
