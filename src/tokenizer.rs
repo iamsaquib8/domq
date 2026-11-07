@@ -248,6 +248,12 @@ impl<'a> Tokenizer<'a> {
 
     fn read_attribute(&mut self) -> Option<(&'a str, AttrValue<'a>)> {
         let nstart = self.pos;
+        // An `=` where a name should start is the first character of the name
+        // (`<div =x>` has an attribute `=x`), as in browsers.
+        if self.peek() == Some(b'=') {
+            self.error(self.pos, ErrorKind::UnexpectedEqualsSign);
+            self.pos += 1;
+        }
         while let Some(b) = self.peek() {
             if b.is_ascii_whitespace() || matches!(b, b'=' | b'>' | b'/') {
                 break;
