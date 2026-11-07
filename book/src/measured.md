@@ -29,7 +29,7 @@ public benchmarks other extractors publish: the Zyte/ScrapingHub article
 extraction benchmark (AEB, 181 articles) and WCXB (2,008 pages in seven page
 types, with a held-out test split), each with its own scoring, next to the
 published scores of trafilatura, Readability.js, dom_smoothie and others.
-Today: **0.898 F1 on AEB** and **0.747 / 0.803 on WCXB** (dev / test), at a
+Today: **0.900 F1 on AEB** and **0.792 / 0.833 on WCXB** (dev / test), at a
 few milliseconds per page.
 
 [docs/reader-mode.md](https://github.com/iamsaquib8/domq/blob/main/docs/reader-mode.md)
