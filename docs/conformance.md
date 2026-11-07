@@ -12,8 +12,8 @@ regenerates it and fails when it differs. -->
 
 | Measure | Passing | Rate |
 |---|---:|---:|
-| Exact tree: the html5lib dump, line for line | 83 | 4.2% |
-| Same structure, in domq's model of HTML | 1210 | 61.8% |
+| Exact tree: the html5lib dump, line for line | 84 | 4.3% |
+| Same structure, in domq's model of HTML | 1213 | 61.9% |
 
 domq is a forgiving parser, not a spec-compliant one (see the
 [README](../README.md#what-it-handles)), so the exact rate is low by design:
@@ -35,8 +35,8 @@ text and comments. A test that fails here is a real difference from a browser.
 
 | Area | Tests | Exact | Structure |
 |---|---:|---:|---:|
-| General tree building | 647 | 1.5% | 66.0% |
-| Comments, doctypes, quirks | 87 | 0.0% | 81.6% |
+| General tree building | 647 | 1.7% | 66.3% |
+| Comments, doctypes, quirks | 87 | 0.0% | 82.8% |
 | Character references | 101 | 0.0% | 100.0% |
 | Raw text, script data, unsafe text | 380 | 0.0% | 55.5% |
 | Mis-nested formatting (adoption agency) | 86 | 0.0% | 26.7% |
@@ -84,7 +84,7 @@ text and comments. A test that fails here is a real difference from a browser.
 | `entities01.dat` | Character references | 75 | 0.0% | 100.0% |
 | `entities02.dat` | Character references | 26 | 0.0% | 100.0% |
 | `foreign-fragment.dat` | Foreign content (SVG, MathML) | 66 | 59.1% | 86.4% |
-| `html5test-com.dat` | Comments, doctypes, quirks | 30 | 0.0% | 60.0% |
+| `html5test-com.dat` | Comments, doctypes, quirks | 30 | 0.0% | 63.3% |
 | `inbody01.dat` | General tree building | 4 | 0.0% | 100.0% |
 | `isindex.dat` | General tree building | 4 | 0.0% | 100.0% |
 | `main-element.dat` | General tree building | 3 | 0.0% | 66.7% |
@@ -135,8 +135,8 @@ text and comments. A test that fails here is a real difference from a browser.
 | `tests_innerHTML_1.dat` | Fragments and context | 81 | 25.9% | 42.0% |
 | `tricky01.dat` | General tree building | 9 | 0.0% | 0.0% |
 | `void-in-phrasing.dat` | General tree building | 13 | 0.0% | 100.0% |
-| `webkit01.dat` | General tree building | 52 | 0.0% | 67.3% |
-| `webkit02.dat` | General tree building | 48 | 0.0% | 50.0% |
+| `webkit01.dat` | General tree building | 52 | 0.0% | 69.2% |
+| `webkit02.dat` | General tree building | 48 | 2.1% | 52.1% |
 
 To see the failures of one file or area:
 `cargo run --release --manifest-path conformance/Cargo.toml -- --failures tables01.dat`.

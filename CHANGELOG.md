@@ -13,10 +13,12 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ### Output changes
 
+- Parser: a tag name runs to the first whitespace, `/` or `>` instead of stopping at the first character that is not an ASCII letter, digit, `-`, `:`, `_` or `.` ([#84](https://github.com/iamsaquib8/domq/issues/84)). `<my-élément>` is one element (it used to be `<my- élément>` with an attribute), and `<div$x>` is an element named `div$x`. Selectors such as `my-élément` now match it.
 - CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
 
 ### Fixed
 
+- Parser: HTML conformance (same structure) goes from 1210 to 1213 of 1959 tests, and exact from 83 to 84, with no regressions (`html5test-com.dat:1`, `webkit01.dat:174`, `webkit02.dat:309`).
 - MCP: a request whose `_meta` specifies a handshake-era legacy version is served with legacy semantics rather than modern, allowing `initialize` and omitting modern result fields, and `clientCapabilities` is validated to be an object ([#159](https://github.com/iamsaquib8/domq/issues/159)).
 - CLI: `-1` is applied after attribute (`-a`) and whitespace (`-w`) filtering rather than before, and `-c` honours `-w` to skip blank matches ([#144](https://github.com/iamsaquib8/domq/issues/144)).
 - Reject Markdown options combined with another output format, regardless of flag order.
