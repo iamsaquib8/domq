@@ -42,4 +42,5 @@ and properly nested), `node.outer_html()` and `node.inner_html()`,
 raw-text elements is written so it cannot close its element early.
 
 From the shell, `domq -r 'script, .ad' -p` removes nodes and pretty-prints the
-rest.
+rest. A complete cleaning pass (remove, absolute URLs, strip attributes, round
+trip) is in [Clean HTML before storing it](clean-html.md).

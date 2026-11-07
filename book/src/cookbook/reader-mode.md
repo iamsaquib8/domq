@@ -141,7 +141,9 @@ for chunk in dom.to_markdown_chunks(500) {
 ```
 
 Chunks split at blank lines (never inside a code block), start new sections at
-headings, and carry the headings they sit under.
+headings, and carry the headings they sit under. The full pipeline (metadata,
+chunk size, what can go wrong) is in [Build a RAG index from web
+pages](rag-index.md).
 
 ## What gets dropped
 
