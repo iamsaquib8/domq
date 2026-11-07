@@ -2,23 +2,9 @@
 
 **Messy HTML in. Clean tree, text, Markdown, or JSON out.**
 
-domq is a forgiving HTML parser with CSS selectors. It is one small Rust
-crate with zero dependencies, and the same engine ships as:
-
-- a **Rust library** (`no_std` + `alloc`, `#![forbid(unsafe_code)]`, never
-  panics on any input);
-- a **command-line tool**, `domq`, a drop-in replacement for `htmlq` with
-  Markdown, JSON, CSV, extraction, reader mode and a linter on top;
-- a **~57 KB (gzipped) WebAssembly module**, or ~78 KB with reader mode and
-  the other extraction helpers (`domq-wasm/extract`), for browsers, Node, Deno, Bun and
-  edge workers (`npm install domq-wasm`);
-- a **Python package** (`pip install domq`);
-- an **MCP server** (`domq mcp`), so AI agents can turn the HTML they have into
-  Markdown, fields, links or lint findings.
-
-```sh
-curl -sL https://blog.rust-lang.org | domq --main --markdown
-```
+domq is a forgiving HTML parser with CSS selectors: one small Rust crate with
+zero dependencies, also available as a command-line tool, a WebAssembly module
+for JavaScript, a Python package and an MCP server.
 
 ## What do you want to do?
 
@@ -65,6 +51,25 @@ general case: select, read, repeat.
 
 Try it without installing anything in the
 [playground](https://iamsaquib8.github.io/domq/).
+
+## One engine, five ways in
+
+The Rust crate has zero dependencies, and the same engine ships as:
+
+- a **Rust library** (`no_std` + `alloc`, `#![forbid(unsafe_code)]`, never
+  panics on any input);
+- a **command-line tool**, `domq`, a drop-in replacement for `htmlq` with
+  Markdown, JSON, CSV, extraction, reader mode and a linter on top;
+- a **~57 KB (gzipped) WebAssembly module**, or ~78 KB with reader mode and
+  the other extraction helpers (`domq-wasm/extract`), for browsers, Node, Deno, Bun and
+  edge workers (`npm install domq-wasm`);
+- a **Python package** (`pip install domq`);
+- an **MCP server** (`domq mcp`), so AI agents can turn the HTML they have into
+  Markdown, fields, links or lint findings.
+
+```sh
+curl -sL https://blog.rust-lang.org | domq --main --markdown
+```
 
 ## What it is good at
 
