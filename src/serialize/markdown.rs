@@ -502,7 +502,12 @@ impl<'a> Markdown<'a> {
             "hr" if top => {
                 self.block(&mut f);
                 self.begin_block();
-                self.out.push_str("---");
+                // After a `-` bullet, `- ---` would be one thematic break and
+                // the list would be gone: a different character keeps the item.
+                let line = self.out.rsplit('\n').next().unwrap_or("");
+                let after_dashes =
+                    line.contains('-') && line.bytes().all(|b| matches!(b, b'-' | b' '));
+                self.out.push_str(if after_dashes { "***" } else { "---" });
             }
             "img" => self.image(node),
             "code" | "kbd" | "samp" | "tt" => self.start_code(&mut f, false, ""),
@@ -934,7 +939,11 @@ impl<'a> Markdown<'a> {
             if i > 0 {
                 self.next_line(false);
             }
-            self.out.push_str(part);
+            if self.heading > 0 && i == 0 {
+                self.out.push_str(part);
+            } else {
+                push_line_start_escaped(&mut self.out, part, i > 0);
+            }
         }
         self.line = line;
         self.line.clear();
@@ -1224,6 +1233,36 @@ fn code_lang<'a>(pre: NodeRef<'a>) -> &'a str {
         })
         .filter(|l| !l.contains('`'))
         .unwrap_or("")
+}
+
+/// Append a finished line of a paragraph, escaping the block syntax its text
+/// formed across nodes, where [`escape`] only saw one word at a time:
+/// `<span>1</span>. x` and `1<!-- -->. x` (React's server rendering) read as
+/// an ordered list, and, after a hard break (`later`), a line of only `|`,
+/// `-` and `:` is a table's delimiter row.
+fn push_line_start_escaped(out: &mut String, line: &str, later: bool) {
+    let digits = line.bytes().take_while(u8::is_ascii_digit).count();
+    let marker = (1..=9).contains(&digits)
+        && matches!(line.as_bytes().get(digits), Some(b'.' | b')'))
+        && matches!(line.as_bytes().get(digits + 1), None | Some(b' '));
+    if marker {
+        out.push_str(line.get(..digits).unwrap_or_default());
+        out.push('\\');
+        out.push_str(line.get(digits..).unwrap_or_default());
+    } else if later
+        && line.contains('|')
+        && line.contains('-')
+        && line.bytes().all(|b| matches!(b, b'|' | b'-' | b':' | b' '))
+    {
+        for c in line.chars() {
+            if c == '|' {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+    } else {
+        out.push_str(line);
+    }
 }
 
 /// Append one word (no whitespace) of text, escaping what Markdown would
