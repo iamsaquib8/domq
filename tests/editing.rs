@@ -201,8 +201,11 @@ fn attr_lookup_folds_edited_and_duplicate_names() {
     assert_eq!(node.attr("dAtA-mIxEd"), Some("2"));
     assert!(node.has_attr("DATA-mixed"));
     assert_eq!(dom.to_html(), r#"<p id="a" id="b" data-mixed="2">x</p>"#);
-    // Selectors and lookups agree.
-    assert_eq!(dom.select("[DATA-MIXED='2']").count(), 1);
+    #[cfg(feature = "query")]
+    {
+        // Selectors and lookups agree.
+        assert_eq!(dom.select("[DATA-MIXED='2']").count(), 1);
+    }
     // Non-elements have no attributes, in any case.
     let dom = parse("text");
     let t = dom.root().unwrap();
