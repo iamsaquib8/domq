@@ -41,16 +41,50 @@ fn property_and_name_alias_same_key_keeps_single_entry() {
         .collect();
     assert_eq!(og_descs, ["Shared desc"]);
     // Distinct properties still all survive (multi-image stays intact).
-    assert_eq!(
-        meta.og.iter().filter(|(k, _)| k == "og:image").count(),
-        2
-    );
+    assert_eq!(meta.og.iter().filter(|(k, _)| k == "og:image").count(), 2);
     assert_eq!(
         meta.twitter,
         pairs(&[("twitter:card", "summary_large_image")])
     );
     // And `name` lookup still sees the plain description.
     assert_eq!(meta.description, s("Plain description"));
+}
+
+/// Issue #36: one `<meta>` carrying both `property` and `name` for the same
+/// key records one og/twitter entry, not two.
+#[test]
+fn og_and_twitter_alias_on_one_tag_is_recorded_once() {
+    let meta = parse(
+        r#"<meta property="og:title" name="og:title" content="Hello">
+           <meta property="twitter:title" name="twitter:title" content="Hello">"#,
+    )
+    .metadata();
+    assert_eq!(meta.og, pairs(&[("og:title", "Hello")]));
+    assert_eq!(meta.twitter, pairs(&[("twitter:title", "Hello")]));
+}
+
+#[test]
+fn og_alias_dedupe_is_case_insensitive_and_keeps_distinct_keys() {
+    let meta = parse(
+        r#"<meta property="OG:Title" name="og:title" content="A">
+           <meta property="og:title" content="B">
+           <meta property="og:site_name" name="og:title" content="C">
+           <meta name="og:image" property="og:image" content="/i.png">
+           <meta property="og:image" content="/j.png">"#,
+    )
+    .metadata();
+    // Separate tags repeating a key stay; a differing `name` still counts.
+    assert_eq!(
+        meta.og,
+        pairs(&[
+            ("og:title", "A"),
+            ("og:title", "B"),
+            ("og:site_name", "C"),
+            ("og:title", "C"),
+            ("og:image", "/i.png"),
+            ("og:image", "/j.png"),
+        ])
+    );
 }
 
 #[test]

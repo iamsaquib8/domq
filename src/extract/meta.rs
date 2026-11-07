@@ -235,7 +235,10 @@ impl<'a> Scan<'a> {
             .attr("property")
             .and_then(non_empty)
             .map(str::to_ascii_lowercase);
-        let name = node.attr("name").and_then(non_empty).map(str::to_ascii_lowercase);
+        let name = node
+            .attr("name")
+            .and_then(non_empty)
+            .map(str::to_ascii_lowercase);
         // Many templates emit `<meta property="og:…" name="og:…">` (or the
         // same for `twitter:`) so indexers that ignore `property` still see
         // the value. Treat the two attributes as aliases: when both name the
@@ -251,9 +254,7 @@ impl<'a> Scan<'a> {
         if let Some(key) = &name {
             if key.starts_with("twitter:") && property.as_deref() != Some(key.as_str()) {
                 self.meta.twitter.push((key.clone(), String::from(content)));
-            } else if key.starts_with("og:")
-                && property.as_deref() != Some(key.as_str())
-            {
+            } else if key.starts_with("og:") && property.as_deref() != Some(key.as_str()) {
                 // A common mistake for `property="og:…"`.
                 self.meta.og.push((key.clone(), String::from(content)));
             }
