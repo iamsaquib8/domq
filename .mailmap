@@ -1,0 +1,5 @@
+# Canonical names and addresses for `git shortlog` and `git log --use-mailmap`.
+# This changes how history is displayed, not the history itself.
+Saquib <saquibulhassan6@gmail.com> Saquib Ul Hassan <saquibulhassan6@gmail.com>
+Saquib <saquibulhassan6@gmail.com> iamsaquib8 <saquibulhassan6@gmail.com>
+Saquib <saquibulhassan6@gmail.com> saquib ul hassan <iamsaquib@pop-os.localdomain>
