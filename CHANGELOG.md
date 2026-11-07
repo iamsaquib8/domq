@@ -13,6 +13,7 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ### Output changes
 
+- Markdown: `LinkStyle::Footer` writes `text [1]` inline instead of `[text][1]` ([#97](https://github.com/iamsaquib8/domq/issues/97)). The footer never had `[1]: url` definitions, so CommonMark rendered the old form as literal brackets. The `### Links` list now builds each entry from the link's content as it reads inline (escaped, with its emphasis and images), instead of `text_content()`: `<a href=/a>A *star*</a>` is `1. [A \*star\*](/a)` rather than `[A *star*](/a)`, which rendered as emphasis, hidden and script text is gone, and an image-only link keeps its image (`1. [![Logo](i.png)](/x)`) instead of showing its URL.
 - Parser: one newline (`\n` or `\r\n`) right after a `<pre>`, `<listing>` or `<textarea>` start tag is dropped, as in browsers ([#75](https://github.com/iamsaquib8/domq/issues/75)), so `<pre>\ncode</pre>` has the text `code`, not `\ncode`. `text_content()`, JSON, `#[derive(FromHtml)]` extraction, text and Markdown code blocks, and `<textarea>` values no longer start with that newline. `to_html()` writes a newline back after the start tag when the content starts with one, so `<pre>\n\nx</pre>` round-trips.
 - CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
 

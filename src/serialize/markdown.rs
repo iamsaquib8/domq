@@ -47,7 +47,7 @@ const MAX_NUMBER: i64 = 999_999_999;
 ///
 /// let dom = domq::parse("<p><a href='/a'>A</a></p>");
 /// let opts = MarkdownOptions::new().link_style(LinkStyle::Footer);
-/// assert_eq!(dom.to_markdown_with(&opts), "[A][1]\n\n### Links\n\n1. [A](/a)");
+/// assert_eq!(dom.to_markdown_with(&opts), "A [1]\n\n### Links\n\n1. [A](/a)");
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -58,8 +58,10 @@ pub enum LinkStyle {
     /// CommonMark reference-style links: `[text][1]` inline, with `[1]: url`
     /// definitions collected at the end of the document.
     Reference,
-    /// Summary links footer: `[text][1]` inline, with an ordered `### Links`
-    /// summary list at the end of the document.
+    /// Summary links footer: `text [1]` inline, with an ordered `### Links`
+    /// list at the end of the document that gives each number its link
+    /// (`1. [text](url)`). The number is a plain citation, not a Markdown
+    /// reference.
     Footer,
 }
 
@@ -310,6 +312,8 @@ struct Wrap<'a> {
     used: bool,
     /// Whitespace was pending when the element opened.
     spaced: bool,
+    /// Where its content starts in the current line, once `open`.
+    from: usize,
 }
 
 impl Wrap<'_> {
@@ -409,7 +413,9 @@ struct Markdown<'a> {
     wraps: Vec<Wrap<'a>>,
     /// Closing markers of spans that just ended, held back so an adjacent span
     /// of the same kind can continue instead.
-    closing: Vec<Mark<'a>>,
+    /// The marks to close before the next content, and where each one's
+    /// content starts in the line.
+    closing: Vec<(Mark<'a>, usize)>,
     /// An inline code span held back so adjacent `<code>`s join into one.
     code_run: String,
     heading: u8,
@@ -740,6 +746,7 @@ impl<'a> Markdown<'a> {
         }
         self.breaks = 0;
         self.space = false;
+        let footer = self.options.link_style == LinkStyle::Footer;
         for w in self.wraps.iter_mut().filter(|w| w.pending()) {
             w.open = true;
             w.used = true;
@@ -747,8 +754,11 @@ impl<'a> Markdown<'a> {
                 Mark::Strong => "**",
                 Mark::Emphasis => "*",
                 Mark::Strike => "~~",
+                // A footer link is `text [1]`: no brackets round the text.
+                Mark::Link(_) if footer => "",
                 Mark::Link(_) => "[",
             });
+            w.from = self.line.len();
         }
     }
 
@@ -759,10 +769,11 @@ impl<'a> Markdown<'a> {
             self.code_run.clear();
         }
         let marks = core::mem::take(&mut self.closing);
-        for mark in marks {
+        for (mark, from) in marks {
             push_close(
                 &mut self.line,
                 mark,
+                from,
                 self.options,
                 self.base.as_deref(),
                 &mut self.references,
@@ -787,7 +798,7 @@ impl<'a> Markdown<'a> {
             && self
                 .closing
                 .last()
-                .is_some_and(|m| mem::discriminant(m) == kind)
+                .is_some_and(|(m, _)| mem::discriminant(m) == kind)
             && !self.wraps.iter().any(Wrap::pending);
         if resume {
             self.closing.pop();
@@ -797,6 +808,7 @@ impl<'a> Markdown<'a> {
             open: resume,
             used: resume,
             spaced: self.space,
+            from: 0,
         });
         true
     }
@@ -823,7 +835,7 @@ impl<'a> Markdown<'a> {
         if let Some(w) = self.wraps.pop()
             && w.open
         {
-            self.closing.push(w.mark);
+            self.closing.push((w.mark, w.from));
         }
     }
 
@@ -939,10 +951,11 @@ impl<'a> Markdown<'a> {
         for i in (0..self.wraps.len()).rev() {
             if self.wraps[i].open {
                 self.wraps[i].open = false;
-                let mark = self.wraps[i].mark;
+                let (mark, from) = (self.wraps[i].mark, self.wraps[i].from);
                 push_close(
                     &mut self.line,
                     mark,
+                    from,
                     self.options,
                     self.base.as_deref(),
                     &mut self.references,
@@ -1126,11 +1139,17 @@ impl<'a> Markdown<'a> {
                         }
                         push_usize(&mut self.out, r.id);
                         self.out.push_str(". [");
-                        for c in r.text.chars() {
-                            if matches!(c, '[' | ']' | '\\') {
-                                self.out.push('\\');
+                        if r.text.is_empty() {
+                            // Nothing to read (an empty link): the URL.
+                            for c in r.url.chars() {
+                                if matches!(c, '[' | ']' | '\\') {
+                                    self.out.push('\\');
+                                }
+                                self.out.push(c);
                             }
-                            self.out.push(c);
+                        } else {
+                            // Already escaped Markdown.
+                            self.out.push_str(&r.text);
                         }
                         self.out.push_str("](");
                         push_destination(&mut self.out, &r.url);
@@ -1295,23 +1314,20 @@ fn record_reference(
         }
         clean_text.push_str(word);
     }
-    let text = if clean_text.is_empty() {
-        url.to_string()
-    } else {
-        clean_text
-    };
     references.push(RefDef {
         id,
         url: url.to_string(),
         title: title.map(String::from),
-        text,
+        text: clean_text,
     });
     id
 }
 
+/// Close `mark`, whose content starts at byte `from` of the line `out`.
 fn push_close(
     out: &mut String,
     mark: Mark<'_>,
+    from: usize,
     options: &MarkdownOptions,
     base: Option<&str>,
     references: &mut Vec<RefDef>,
@@ -1341,9 +1357,12 @@ fn push_close(
                     out.push(']');
                 }
                 LinkStyle::Footer => {
-                    let text = a.text_content();
+                    // The footer entry reads like the inline link: the
+                    // content as written (escaped, with its marks and
+                    // images), on one line.
+                    let text = out.get(from..).unwrap_or("").replace("\\\n", " ");
                     let id = record_reference(references, &url, title, &text);
-                    out.push_str("][");
+                    out.push_str(" [");
                     push_usize(out, id);
                     out.push(']');
                 }
