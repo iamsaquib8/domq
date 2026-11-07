@@ -11,19 +11,7 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ## [Unreleased]
 
-### Output changes
-
-- Chunks: `to_markdown_chunks_with` (and the Python and MCP `chunks` options) write links inline whatever the link style ([#94](https://github.com/iamsaquib8/domq/issues/94)). With `Reference` or `Footer`, every chunk but the last kept `[text][n]` with no definition (they sat at the end of the document), so the URL never reached the embedding or the prompt, and the footer's `### Links` became a chunk of its own, nested under the last section. Heading paths no longer contain reference numbers (`Docs1 home` is now `Docs home`), and `heading_text` skips a `][n]` label in Markdown you chunk with `Chunk::from_markdown`. The other Markdown options (images, data URIs, base URL) still apply.
-
-- Parser: one newline (`\n` or `\r\n`) right after a `<pre>`, `<listing>` or `<textarea>` start tag is dropped, as in browsers ([#75](https://github.com/iamsaquib8/domq/issues/75)), so `<pre>\ncode</pre>` has the text `code`, not `\ncode`. `text_content()`, JSON, `#[derive(FromHtml)]` extraction, text and Markdown code blocks, and `<textarea>` values no longer start with that newline. `to_html()` writes a newline back after the start tag when the content starts with one, so `<pre>\n\nx</pre>` round-trips.
-- CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
-
-### Fixed
-
-- Parser: HTML conformance (same structure) goes from 1210 to 1216 of 1959 tests, and exact from 83 to 87, with no regressions (`tests3.dat:63`, `:75`, `:89`, `:215`, `:227`, `tests7.dat:188`).
-- MCP: a request whose `_meta` specifies a handshake-era legacy version is served with legacy semantics rather than modern, allowing `initialize` and omitting modern result fields, and `clientCapabilities` is validated to be an object ([#159](https://github.com/iamsaquib8/domq/issues/159)).
-- CLI: `-1` is applied after attribute (`-a`) and whitespace (`-w`) filtering rather than before, and `-c` honours `-w` to skip blank matches ([#144](https://github.com/iamsaquib8/domq/issues/144)).
-- Reject Markdown options combined with another output format, regardless of flag order.
+Pending changes are files in [`changes/`](./changes/README.md).
 
 ## [0.6.0] — 2026-11-03
 
