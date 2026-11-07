@@ -61,9 +61,11 @@ pub struct Metadata {
     /// written with `property=`), in document order, keys lower-cased
     /// (`"twitter:card"`).
     pub twitter: Vec<(String, String)>,
-    /// The raw, trimmed contents of each non-empty `<script
-    /// type="application/ld+json">`, in document order. Not parsed: hand them
-    /// to a JSON parser.
+    /// The contents of each non-empty `<script type="application/ld+json">`,
+    /// in document order, ready for a JSON parser: trimmed, without the
+    /// `<![CDATA[ … ]]>` wrapper (also as `//<![CDATA[ … //]]>` or
+    /// `/*<![CDATA[*/ … /*]]>*/`) and the `<!-- … -->` wrapper that pages put
+    /// round it. Otherwise as written, and not parsed.
     pub json_ld: Vec<String>,
     /// The `href` of each `<link rel=alternate>` whose `type` is RSS
     /// (`application/rss+xml`), Atom (`application/atom+xml`) or JSON Feed
@@ -199,7 +201,10 @@ impl<'a> Scan<'a> {
                     let mime = t.split(';').next().unwrap_or("").trim();
                     mime.eq_ignore_ascii_case("application/ld+json")
                 });
-                if ld && let Some(json) = non_empty(&node.text_content()) {
+                if ld
+                    && let Some(json) = non_empty(&node.text_content()).map(strip_json_ld_wrappers)
+                    && !json.is_empty()
+                {
                     self.meta.json_ld.push(String::from(json));
                 }
                 return false;
@@ -385,4 +390,48 @@ impl serde::Serialize for Metadata {
         st.serialize_field("feeds", &self.feeds)?;
         st.end()
     }
+}
+
+/// A JSON-LD block without the `<!-- … -->` and `<![CDATA[ … ]]>` wrappers
+/// pages put round it (see [`Metadata::json_ld`]); trimmed.
+fn strip_json_ld_wrappers(raw: &str) -> &str {
+    let mut text = raw.trim();
+    // A comment round a CDATA section, or the other way round: a few rounds
+    // settle either, and a bound keeps hostile input from looping.
+    for _ in 0..4 {
+        let stripped = strip_wrapper(text, "<!--", "-->")
+            .or_else(|| strip_cdata(text))
+            .unwrap_or(text);
+        if stripped.len() == text.len() {
+            break;
+        }
+        text = stripped;
+    }
+    text
+}
+
+/// `text` without `open` and `close` when it starts and ends with them.
+fn strip_wrapper<'t>(text: &'t str, open: &str, close: &str) -> Option<&'t str> {
+    let inner = text.strip_prefix(open)?.trim_end().strip_suffix(close)?;
+    Some(inner.trim())
+}
+
+/// `text` without a `<![CDATA[ … ]]>` wrapper, which scripts also write as
+/// `//<![CDATA[ … //]]>` and `/*<![CDATA[*/ … /*]]>*/`.
+fn strip_cdata(text: &str) -> Option<&str> {
+    let head = text.strip_prefix("//").or_else(|| text.strip_prefix("/*"));
+    let head = head
+        .unwrap_or(text)
+        .trim_start()
+        .strip_prefix("<![CDATA[")?;
+    let head = head.trim_start();
+    let head = head.strip_prefix("*/").unwrap_or(head);
+    let tail = head.trim_end();
+    let tail = tail.strip_suffix("*/").unwrap_or(tail).trim_end();
+    let tail = tail.strip_suffix("]]>")?.trim_end();
+    let tail = tail
+        .strip_suffix("//")
+        .or_else(|| tail.strip_suffix("/*"))
+        .unwrap_or(tail);
+    Some(tail.trim())
 }

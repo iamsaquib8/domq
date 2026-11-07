@@ -46,8 +46,8 @@ assert_eq!(m.lang.as_deref(), Some("en"));
 ```
 
 `Metadata` also has `canonical`, `image`, `author`, `published`, `keywords`,
-the OpenGraph and Twitter tags as `(property, value)` pairs, raw JSON-LD
-blocks and feed URLs. `domq --meta` prints it as JSON.
+the OpenGraph and Twitter tags as `(property, value)` pairs, JSON-LD
+blocks (unparsed, minus any CDATA or comment wrapper) and feed URLs. `domq --meta` prints it as JSON.
 
 ## Tables
 

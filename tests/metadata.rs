@@ -378,3 +378,52 @@ fn serializes_with_serde() {
     assert_eq!(json["feeds"], serde_json::json!([]));
     assert_eq!(json.as_object().unwrap().len(), 13);
 }
+
+#[test]
+fn json_ld_wrappers_are_stripped() {
+    let json = r#"{"@context":"https://schema.org","@type":"Article","headline":"A \u2014 B"}"#;
+    for wrapped in [
+        format!("<![CDATA[\n  {json}\n  ]]>"),
+        format!("//<![CDATA[\n{json}\n//]]>"),
+        format!("/*<![CDATA[*/\n{json}\n/*]]>*/"),
+        format!("<!--\n{json}\n-->"),
+        format!("<!-- <![CDATA[ {json} ]]> -->"),
+        format!("  \n{json}\n  "),
+        json.to_string(),
+    ] {
+        let dom = parse(&format!(
+            "<script type=\"application/ld+json\">{wrapped}</script>"
+        ));
+        let meta = dom.metadata();
+        assert_eq!(meta.json_ld, [json], "{wrapped}");
+        let value: serde_json::Value = serde_json::from_str(&meta.json_ld[0]).unwrap();
+        assert_eq!(value["headline"], "A \u{2014} B");
+    }
+}
+
+#[test]
+fn json_ld_that_is_not_wrapped_is_left_alone() {
+    for (block, want) in [
+        // Only one half of a wrapper.
+        ("<![CDATA[ {\"a\":1}", Some("<![CDATA[ {\"a\":1}")),
+        ("{\"a\":1} ]]>", Some("{\"a\":1} ]]>")),
+        ("<!-- {\"a\":1}", Some("<!-- {\"a\":1}")),
+        // A wrapper round nothing is no block.
+        ("<![CDATA[ ]]>", None),
+        ("<!-- -->", None),
+        ("//<![CDATA[ //]]>", None),
+        // Text that merely contains them.
+        (r#"{"a":"<![CDATA[x]]>"}"#, Some(r#"{"a":"<![CDATA[x]]>"}"#)),
+        (r#"[{"a":"-->"}]"#, Some(r#"[{"a":"-->"}]"#)),
+    ] {
+        let dom = parse(&format!(
+            "<script type=\"application/ld+json\">{block}</script>"
+        ));
+        let meta = dom.metadata();
+        assert_eq!(meta.json_ld.first().map(String::as_str), want, "{block}");
+    }
+    // Nested wrappers do not loop.
+    let deep = format!("{}{{}}{}", "<!--".repeat(1000), "-->".repeat(1000));
+    let dom = parse(&format!("<script type=ld+json>{deep}</script>"));
+    assert!(dom.metadata().json_ld.len() <= 1);
+}
