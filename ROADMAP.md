@@ -64,9 +64,9 @@ gap (— means no plan yet).
 | declarative extraction | ✅ derive | ✅ `-e` | ✅ | 0.7 | ✅ dataclasses |
 | bytes in, encoding detection | 0.7 | ✅ | — | 0.7 | 0.7 |
 | page outline for agents (roles, names, refs) | ✅ | ✅ `--outline` | ✅ | 0.7 | ✅ |
-| editing | ✅ | `-r` only | — | 1.2 | 1.2 |
-| streaming events | ✅ | 1.2 `--stream` | — | 1.2 | 1.2 |
-| accessibility and markup lint | 1.1 | ✅ | ✅ | 1.1 | 1.1 |
+| editing | ✅ | `-r` only | — | 0.10 | 0.10 |
+| streaming events | ✅ | 0.10 `--stream` | — | 0.10 | 0.10 |
+| accessibility and markup lint | 0.9 | ✅ | ✅ | 0.9 | 0.9 |
 | parse errors with positions | ✅ | via lint | via lint | ✅ | ✅ |
 
 ## Principles
@@ -179,22 +179,24 @@ first issues. Every item is tagged with its size and with who it's for:
 1.0 is the promise that what people script against stops breaking: the
 crate API, CLI flags and output formats, the MCP tools and their schemas, and
 the JavaScript and Python APIs. So the plan front-loads the breaking work and
-the evidence, and leaves purely additive features (lint for teams, huge
-documents) for 1.x, where they don't put stability at risk.
+the evidence: features first (0.7–0.10), then one release that makes every
+remaining breaking change and publishes the comparisons (0.11), then release
+candidates.
 
 | release | theme | what it settles | target |
 |---|---|---|---|
 | 0.7 | Correct trees, Markdown built for models | the parser fixes real pages need, the wasm budget, Markdown that renders as written | Dec 2026 |
 | 0.8 | Drop-in, and agents that act on the page | BeautifulSoup / cheerio compatibility, `Dom::article()`, forms, selectors agents reuse | Jan 2027 |
-| 0.9 | Trust, compared, and the API frozen | every planned breaking change made, same-harness comparisons published, CI that catches API breaks | Mar 2027 |
-| 1.0-rc | Nothing new | release candidates on every registry; fuzzing, docs and the upgrade guide only | Mar–Apr 2027 |
-| 1.0 | Stable | the criteria in [1.0](#10--stable) all hold | Q2 2027 |
-| 1.1, 1.2 | Lint for teams; huge documents and full trees | additive, behind features where they cost size | after 1.0 |
+| 0.9 | Lint for teams | more rules, suppressions, SARIF, the linter in the library, a GitHub Action | Feb 2027 |
+| 0.10 | Huge documents and full trees | streaming selectors, a streaming rewriter, `domq diff`, editing in Python and JS | Apr 2027 |
+| 0.11 | Trust, compared, and the API frozen | every planned breaking change made, same-harness comparisons published, CI that catches API breaks | May 2027 |
+| 1.0-rc | Nothing new | release candidates on every registry; fuzzing, docs and the upgrade guide only | Jun 2027 |
+| 1.0 | Stable | the criteria in [1.0](#10--stable) all hold | Q3 2027 |
 
 Targets are where we aim, not promises; 1.0 ships when its criteria hold.
 Two clocks start now because 1.0 waits on them: continuous fuzzing
 ([#212](https://github.com/iamsaquib8/domq/issues/212); "months with no open crashers") and the output-stability policy
-holding across 0.7 and 0.8. Anything that would break an API after 0.9 waits
+holding across at least two minor releases. Anything that would break an API after 0.11 waits
 for 2.0, or ships as a new name next to the old one.
 
 ## Ongoing — Launch feedback and honest numbers
@@ -422,8 +424,9 @@ selectors they can reuse.
 
 ## Next in line
 
-Committed, but not yet placed in a release; each moves into whichever release
-has room, in this order.
+Committed for 1.0 but not yet placed: each lands in 0.8, 0.9 or 0.10,
+whichever has room, in this order, so its API is settled by the 0.11 freeze.
+Anything still open then ships after 1.0 as an additive feature.
 
 - [ ] **S** `ai` Token-aware chunking with your own tokenizer
       (`to_markdown_chunks_by(max, |s| tokens(s))`), overlap, stable chunk ids
@@ -447,11 +450,63 @@ has room, in this order.
 - [ ] **M** `rust` Custom Markdown handlers for chosen tags (closures), and
       keep / skip lists in the bindings. ([#201](https://github.com/iamsaquib8/domq/issues/201))
 
-## 0.9 — "Trust, compared, and the API frozen"
+## 0.9 — "Lint for teams"
+
+Everything a team needs to put `domq lint` in CI and keep it there, in one
+release.
+
+- [ ] **S** `ship` `--allow` / `--deny` per rule, a summary line, and
+      `--format sarif` for GitHub code scanning. ([#162](https://github.com/iamsaquib8/domq/issues/162), [#50](https://github.com/iamsaquib8/domq/issues/50))
+- [ ] **S** `ship` Inline suppressions (`<!-- domq-disable-next-line img-alt -->`)
+      and a config file, so a team can adopt the linter on an existing site. ([#163](https://github.com/iamsaquib8/domq/issues/163))
+- [ ] **M** `ship` More rules people expect: `html-lang`, `missing-title`,
+      `form-label`, `iframe-title`, nested interactive elements (an `<a>` in a
+      `<button>`), in-page anchors that point at no `id`, `target=_blank`
+      without `rel=noopener`, images without dimensions, positive `tabindex`,
+      invalid ARIA roles and attributes, buttons without `type` in forms,
+      deprecated elements, and tables without headers (markuplint, HTMLHint,
+      html-validate, axe-core's static subset). ([#214](https://github.com/iamsaquib8/domq/issues/214), [#155](https://github.com/iamsaquib8/domq/issues/155))
+- [ ] **M** `ship` `js` `py` The linter in the library (a `lint` feature), so
+      the JS and Python packages and editors can use it. ([#215](https://github.com/iamsaquib8/domq/issues/215))
+- [ ] **S** `ship` `ai` `domq llms-txt public/`: `llms.txt` and
+      `llms-full.txt` from a built static site, locally, with no crawling. ([#216](https://github.com/iamsaquib8/domq/issues/216))
+- [ ] **M** `ship` `rust` Local link checking: relative `href` / `src` that
+      point at files that don't exist, for static sites (no network). ([#217](https://github.com/iamsaquib8/domq/issues/217))
+- [ ] **M** `ship` A reusable GitHub Action for `domq lint` that annotates pull
+      requests. ([#218](https://github.com/iamsaquib8/domq/issues/218))
+- [ ] **S** `ship` A pre-commit hook for `domq lint`. ([#164](https://github.com/iamsaquib8/domq/issues/164))
+
+## 0.10 — "Huge documents and full trees"
+
+For inputs too big to hold as a tree, for comparing documents in tests, and
+for the rest of the binding parity.
+
+- [ ] **L** `rust` `shell` Streaming selectors: run a `Selector` over
+      `domq::events` for multi-gigabyte dumps without building a tree; CLI
+      `--stream`. ([#219](https://github.com/iamsaquib8/domq/issues/219))
+- [ ] **L** `js` `rust` A streaming rewriter: `domq::rewrite(src, rules)` over
+      the event stream (set or remove attributes, remove, insert, replace
+      text) with a JS API for Workers, Deno and Bun, behind a feature and
+      inside the wasm budget. (lol_html, `HTMLRewriter`, parse5's rewriting
+      stream.) ([#220](https://github.com/iamsaquib8/domq/issues/220))
+- [ ] **L** `rust` `shell` `domq diff a.html b.html`: a structural diff
+      (node-level, whitespace-insensitive) for snapshot tests of rendered pages. ([#221](https://github.com/iamsaquib8/domq/issues/221))
+- [ ] **M** `py` Python: editing API and `events()`. ([#222](https://github.com/iamsaquib8/domq/issues/222))
+- [ ] **M** `js` JavaScript: editing on `Document` and `events()` in the wasm
+      package, inside the size budget. ([#223](https://github.com/iamsaquib8/domq/issues/223))
+- [ ] **M** `rust` Optional `<tbody>`/`<colgroup>` insertion: a builder option
+      for browser-identical table structure. ([#224](https://github.com/iamsaquib8/domq/issues/224))
+- [ ] **M** `rust` Context-aware fragments: `append_html` and
+      `parse_fragment_in("tr", …)` parse in the parent's context (a `<td>`
+      inside a `<tr>`). ([#225](https://github.com/iamsaquib8/domq/issues/225), [#65](https://github.com/iamsaquib8/domq/issues/65))
+
+## 0.11 — "Trust, compared, and the API frozen"
 
 The remaining measurement work, against the tools people would otherwise pick,
 and every breaking change 1.0 needs, made in one release so there's a single
-upgrade to plan. After 0.9, only additive changes until 1.0.
+upgrade to plan. It comes last because 0.9 and 0.10 add API too (the linter
+in the library, editing in the bindings, the rewriter), and all of it should
+be settled together. After 0.11, only additive changes until 1.0.
 
 **The API freeze**
 
@@ -574,56 +629,6 @@ out for at least four weeks with no breaking change.
 - [ ] A written support policy for Python, Node and Deno versions. ([#131](https://github.com/iamsaquib8/domq/issues/131))
 - [ ] A security response target in [SECURITY.md](./SECURITY.md). ([#112](https://github.com/iamsaquib8/domq/issues/112))
 
-## 1.1 — "Lint for teams"
-
-Everything a team needs to put `domq lint` in CI and keep it there, in one
-release.
-
-- [ ] **S** `ship` `--allow` / `--deny` per rule, a summary line, and
-      `--format sarif` for GitHub code scanning. ([#162](https://github.com/iamsaquib8/domq/issues/162), [#50](https://github.com/iamsaquib8/domq/issues/50))
-- [ ] **S** `ship` Inline suppressions (`<!-- domq-disable-next-line img-alt -->`)
-      and a config file, so a team can adopt the linter on an existing site. ([#163](https://github.com/iamsaquib8/domq/issues/163))
-- [ ] **M** `ship` More rules people expect: `html-lang`, `missing-title`,
-      `form-label`, `iframe-title`, nested interactive elements (an `<a>` in a
-      `<button>`), in-page anchors that point at no `id`, `target=_blank`
-      without `rel=noopener`, images without dimensions, positive `tabindex`,
-      invalid ARIA roles and attributes, buttons without `type` in forms,
-      deprecated elements, and tables without headers (markuplint, HTMLHint,
-      html-validate, axe-core's static subset). ([#214](https://github.com/iamsaquib8/domq/issues/214), [#155](https://github.com/iamsaquib8/domq/issues/155))
-- [ ] **M** `ship` `js` `py` The linter in the library (a `lint` feature), so
-      the JS and Python packages and editors can use it. ([#215](https://github.com/iamsaquib8/domq/issues/215))
-- [ ] **S** `ship` `ai` `domq llms-txt public/`: `llms.txt` and
-      `llms-full.txt` from a built static site, locally, with no crawling. ([#216](https://github.com/iamsaquib8/domq/issues/216))
-- [ ] **M** `ship` `rust` Local link checking: relative `href` / `src` that
-      point at files that don't exist, for static sites (no network). ([#217](https://github.com/iamsaquib8/domq/issues/217))
-- [ ] **M** `ship` A reusable GitHub Action for `domq lint` that annotates pull
-      requests. ([#218](https://github.com/iamsaquib8/domq/issues/218))
-- [ ] **S** `ship` A pre-commit hook for `domq lint`. ([#164](https://github.com/iamsaquib8/domq/issues/164))
-
-## 1.2 — "Huge documents and full trees"
-
-For inputs too big to hold as a tree, for comparing documents in tests, and
-for the rest of the binding parity.
-
-- [ ] **L** `rust` `shell` Streaming selectors: run a `Selector` over
-      `domq::events` for multi-gigabyte dumps without building a tree; CLI
-      `--stream`. ([#219](https://github.com/iamsaquib8/domq/issues/219))
-- [ ] **L** `js` `rust` A streaming rewriter: `domq::rewrite(src, rules)` over
-      the event stream (set or remove attributes, remove, insert, replace
-      text) with a JS API for Workers, Deno and Bun, behind a feature and
-      inside the wasm budget. (lol_html, `HTMLRewriter`, parse5's rewriting
-      stream.) ([#220](https://github.com/iamsaquib8/domq/issues/220))
-- [ ] **L** `rust` `shell` `domq diff a.html b.html`: a structural diff
-      (node-level, whitespace-insensitive) for snapshot tests of rendered pages. ([#221](https://github.com/iamsaquib8/domq/issues/221))
-- [ ] **M** `py` Python: editing API and `events()`. ([#222](https://github.com/iamsaquib8/domq/issues/222))
-- [ ] **M** `js` JavaScript: editing on `Document` and `events()` in the wasm
-      package, inside the size budget. ([#223](https://github.com/iamsaquib8/domq/issues/223))
-- [ ] **M** `rust` Optional `<tbody>`/`<colgroup>` insertion: a builder option
-      for browser-identical table structure. ([#224](https://github.com/iamsaquib8/domq/issues/224))
-- [ ] **M** `rust` Context-aware fragments: `append_html` and
-      `parse_fragment_in("tr", …)` parse in the parent's context (a `<td>`
-      inside a `<tr>`). ([#225](https://github.com/iamsaquib8/domq/issues/225), [#65](https://github.com/iamsaquib8/domq/issues/65))
-
 ---
 
 ## Distribution
@@ -664,7 +669,7 @@ Ideas we like but haven't committed to. Prototypes and use-cases welcome.
 - **More bindings** (C ABI, Ruby, PHP, Go via wasm) if there's demand
   ([#237](https://github.com/iamsaquib8/domq/issues/237)).
 - **Language-server-lite** — lint diagnostics in editors, using source spans;
-  a natural follow-up to lint for teams (1.1).
+  a natural follow-up to lint for teams (0.9).
 - **`domq fmt`** — an HTML formatter built on the pretty-printer and spans.
 - **XPath subset** — parsel, lxml, xq and turbohtml users ask for it; still
   only with strong demand, since CSS covers most real queries.
