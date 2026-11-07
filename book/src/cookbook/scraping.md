@@ -44,9 +44,10 @@ assert!(link.matches(".card > a"));
 
 ## Reuse a selector
 
-A `&str` selector is parsed on every call. Parse it once when you run it on
-many documents; an invalid selector is an error with the position of the
-problem, never a silent empty result.
+A `&str` selector is parsed on every call, and an invalid one simply matches
+nothing. Parse it once with `Selector::parse` when you run it on many
+documents, or when it comes from outside your code: that returns an error
+with the position of the problem.
 
 ```rust
 # extern crate domq;

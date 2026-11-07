@@ -1,4 +1,4 @@
-# domq
+# domq guide
 
 **Messy HTML in. Clean tree, text, Markdown, or JSON out.**
 
@@ -20,6 +20,50 @@ crate with zero dependencies, and the same engine ships as:
 curl -sL https://blog.rust-lang.org | domq --main --markdown
 ```
 
+## What do you want to do?
+
+Each task goes to the page that does it, with the code for every surface that
+supports it (in italics).
+
+- [Turn a page into Markdown for an LLM](cookbook/reader-mode.md)
+  *(Rust, CLI, JavaScript, Python, MCP)*
+- [Get the article text without the navigation and footer](cookbook/reader-mode.md#the-article-as-plain-text)
+  *(Rust, CLI, JavaScript, Python, MCP)*
+- [Pull fields from a list of products](cookbook/extracting.md)
+  *(Rust, CLI, Python, MCP)*
+- [Scrape links, tables or metadata](cookbook/links-metadata-tables.md)
+  *(Rust, CLI, JavaScript, Python, MCP)*
+- [Check HTML for accessibility problems in CI](cookbook/lint.md)
+  *(CLI, MCP)*
+- [Give an agent a page outline and selectors it can act on](mcp.md)
+  *(MCP; the same outline from the CLI, Rust and Python)*
+- [Replace `htmlq` or `pup` in a shell script](migrating/htmlq.md)
+  *(CLI)*
+- [Edit or clean HTML and write it back](cookbook/editing.md)
+  *(Rust; the CLI can remove nodes)*
+- [Process a huge dump without building a tree](cookbook/streaming.md)
+  *(Rust)*
+- [Run it in a Worker, Deno or the browser](install.md#javascript-and-webassembly)
+  *(JavaScript)*
+
+Not on the list? [Scrape elements and attributes](cookbook/scraping.md) is the
+general case: select, read, repeat.
+
+## Pick how you will use it
+
+- [Quick start](quickstart.md): one task in Rust, the shell, JavaScript and
+  Python, side by side.
+- [Choose your surface](surfaces.md): when the library, the CLI,
+  `domq-wasm`, the Python package or the MCP server fits, and what each can do.
+- [Which API do I use?](which-api.md): text or Markdown or chunks, `find_by_*`
+  or `select`, `parse` or `events` or `tokenize`, `parse` or `parse_bytes`.
+- Coming from another tool? [htmlq](migrating/htmlq.md),
+  [scraper](migrating/scraper.md), [BeautifulSoup](migrating/beautifulsoup.md)
+  or [cheerio](migrating/cheerio.md).
+
+Try it without installing anything in the
+[playground](https://iamsaquib8.github.io/domq/).
+
 ## What it is good at
 
 - **Getting content out.** Readable text, CommonMark/GFM Markdown, RAG chunks
@@ -31,7 +75,7 @@ curl -sL https://blog.rust-lang.org | domq --main --markdown
 - **Messy input.** Unclosed tags, mis-nesting, stray end tags, unquoted
   attributes: repaired the way browsers repair the common cases, with every
   repair recorded as a diagnostic.
-- **Being small and boring to depend on.** One crate in your `cargo tree`, a
+- **Being small and boring to depend on.** One crate in your `cargo tree`, an
   about 1 s clean build, a static binary, a 57 KB wasm module (78 KB with extraction).
 
 ## What it is not
@@ -42,17 +86,3 @@ table content. How close its trees get to a browser's is
 [measured](measured.md). It is not a sanitizer either: use
 [`ammonia`](https://crates.io/crates/ammonia) or DOMPurify for untrusted HTML
 that you render.
-
-## Where to go next
-
-- [Install](install.md) it for your language or shell.
-- The [quick start](quickstart.md) shows the same task in Rust, the shell,
-  JavaScript and Python.
-- The [cookbook](cookbook/scraping.md) has recipes for scraping, extraction,
-  LLM pipelines, editing and CI.
-- Coming from another tool? See the guides for [htmlq](migrating/htmlq.md),
-  [scraper](migrating/scraper.md), [BeautifulSoup](migrating/beautifulsoup.md)
-  and [cheerio](migrating/cheerio.md).
-
-Try it without installing anything in the
-[playground](https://iamsaquib8.github.io/domq/).

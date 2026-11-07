@@ -14,3 +14,5 @@ git-repository-url = "https://github.com/iamsaquib8/domq"
 edit-url-template = "https://github.com/iamsaquib8/domq/edit/main/book/{path}"
 default-theme = "light"
 preferred-dark-theme = "navy"
+additional-css = ["theme/domq-tabs.css"]
+additional-js = ["theme/domq-tabs.js"]
