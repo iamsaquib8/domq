@@ -1257,7 +1257,8 @@ fn mcp_server_over_stdio() {
         lines[3]
     );
     assert!(
-        lines[4].contains(r##"Link [1]"##) && lines[4].contains(r##"https://example.com/page"##),
+        // `chunks` ignores the link style: a chunk stands alone.
+        lines[4].contains(r##"[Link](https://example.com/page)"##),
         "{}",
         lines[4]
     );

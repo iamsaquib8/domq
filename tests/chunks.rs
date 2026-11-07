@@ -383,3 +383,69 @@ fn serializes_with_serde() {
     let json = serde_json::to_string(&all).unwrap();
     assert_eq!(json, r##"[{"heading_path":["A"],"markdown":"# A\n\nb"}]"##);
 }
+
+// Links in chunks (#94).
+
+#[test]
+fn chunks_write_links_inline_whatever_the_link_style() {
+    use domq::{LinkStyle, MarkdownOptions};
+    let html = "<h1><a href=\"/docs\">Docs</a> home</h1>\
+                <p>Intro with <a href=\"https://a.example/x\">a link</a>.</p>\
+                <h2>Install</h2><p>Run <a href=\"https://b.example/y\" title=\"Y\">the installer</a>.</p>\
+                <h2>Usage</h2><p>Then <a href=\"https://c.example/z\">use it</a> well.</p>";
+    let dom = parse(html);
+    for style in [LinkStyle::Inline, LinkStyle::Reference, LinkStyle::Footer] {
+        let opts = MarkdownOptions::default().link_style(style);
+        let chunks = dom.to_markdown_chunks_with(60, &opts);
+        assert!(chunks.len() >= 3, "{style:?}: {chunks:?}");
+        for chunk in &chunks {
+            // Every link carries its own destination: no reference labels,
+            // definitions or footer list.
+            assert!(!chunk.markdown.contains("]["), "{style:?}: {chunk:?}");
+            assert!(!chunk.markdown.contains("]: "), "{style:?}: {chunk:?}");
+            assert!(
+                !chunk.markdown.contains("### Links"),
+                "{style:?}: {chunk:?}"
+            );
+            // Heading paths have no reference numbers.
+            assert!(
+                chunk
+                    .heading_path
+                    .iter()
+                    .all(|h| !h.contains(|c: char| c.is_ascii_digit())),
+                "{style:?}: {chunk:?}"
+            );
+        }
+        let joined: String = chunks.iter().map(|c| c.markdown.as_str()).collect();
+        for url in [
+            "/docs",
+            "https://a.example/x",
+            "https://b.example/y",
+            "https://c.example/z",
+        ] {
+            assert!(joined.contains(url), "{style:?}: {url} missing in {joined}");
+        }
+        assert_eq!(chunks[0].heading_path, ["Docs home"], "{style:?}");
+    }
+    // The element form agrees.
+    let root = dom.root().unwrap();
+    let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
+    let _ = root.to_markdown_chunks_with(60, &opts);
+    let h1 = parse("<article><h1>T</h1><p><a href=/x>a</a></p></article>");
+    let article = h1.find_by_tag("article").next().unwrap();
+    let chunks = article.to_markdown_chunks_with(500, &opts);
+    assert_eq!(chunks[0].markdown, "# T\n\n[a](/x)");
+}
+
+#[test]
+fn heading_paths_skip_reference_labels() {
+    // Markdown that is already in reference style (`Chunk::from_markdown`).
+    let md = "# [Docs][1] home\n\nIntro.\n\n## [Install][] & [more][ref]\n\nRun.\n\n[1]: /docs\n[Install]: /i\n[ref]: /r";
+    let chunks = Chunk::from_markdown(md, 30);
+    let paths: Vec<_> = chunks.iter().map(|c| c.heading_path.clone()).collect();
+    assert_eq!(paths[0], ["Docs home"]);
+    assert!(
+        paths.iter().any(|p| p == &["Docs home", "Install & more"]),
+        "{paths:?}"
+    );
+}
