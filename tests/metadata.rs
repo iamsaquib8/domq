@@ -15,10 +15,8 @@ fn pairs(v: &[(&str, &str)]) -> Vec<(String, String)> {
 #[test]
 fn blog_fixture() {
     let meta = parse(include_str!("pages/reader/blog-comments.html")).metadata();
-    assert_eq!(
-        meta.title,
-        s("Why we rewrote the importer in Rust – Field Notes")
-    );
+    // The JSON-LD `headline`, without the site name `<title>` adds.
+    assert_eq!(meta.title, s("Why we rewrote the importer in Rust"));
     assert_eq!(
         meta.description,
         s("Three months, one importer, and what changed when the hot path stopped allocating.")
@@ -63,10 +61,7 @@ fn blog_fixture() {
 #[test]
 fn news_fixture() {
     let meta = parse(include_str!("pages/reader/news.html")).metadata();
-    assert_eq!(
-        meta.title,
-        s("City council approves night-bus pilot | The Harbour Tribune")
-    );
+    assert_eq!(meta.title, s("City council approves night-bus pilot"));
     assert_eq!(meta.author, s("Lena Okafor"));
     assert_eq!(meta.keywords, ["transport", "night bus", "city council"]);
     // No canonical link: og:url.
@@ -426,4 +421,201 @@ fn json_ld_that_is_not_wrapped_is_left_alone() {
     let deep = format!("{}{{}}{}", "<!--".repeat(1000), "-->".repeat(1000));
     let dom = parse(&format!("<script type=ld+json>{deep}</script>"));
     assert!(dom.metadata().json_ld.len() <= 1);
+}
+
+// JSON-LD as a source (#100).
+
+fn ld(json: &str) -> Metadata {
+    parse(&format!(
+        "<head><title>Page | Site</title>\
+         <meta name=author content='Meta Author'>\
+         <meta property=article:published_time content='2000-01-01'>\
+         <meta property=og:image content='https://m.example/og.png'>\
+         <script type='application/ld+json'>{json}</script></head>"
+    ))
+    .metadata()
+}
+
+#[test]
+fn json_ld_article_fields_come_first() {
+    let meta = ld(r#"{
+        "@context": "https://schema.org", "@type": "NewsArticle",
+        "headline": "  The   real headline ",
+        "datePublished": "2024-05-06T07:08:09+00:00",
+        "author": {"@type": "Person", "name": "Jane Doe"},
+        "image": {"@type": "ImageObject", "url": "https://ld.example/a.jpg"}
+    }"#);
+    assert_eq!(meta.title.as_deref(), Some("The real headline"));
+    assert_eq!(meta.published.as_deref(), Some("2024-05-06T07:08:09+00:00"));
+    assert_eq!(meta.author.as_deref(), Some("Jane Doe"));
+    // `og:image` is an explicit choice of the page: it stays first.
+    assert_eq!(meta.image.as_deref(), Some("https://m.example/og.png"));
+    // The block itself is still there.
+    assert_eq!(meta.json_ld.len(), 1);
+}
+
+#[test]
+fn json_ld_forms_of_author_and_image() {
+    let author = |json: &str| ld(json).author;
+    assert_eq!(
+        author(r#"{"author": "Ann Lee"}"#).as_deref(),
+        Some("Ann Lee")
+    );
+    assert_eq!(
+        author(r#"{"author": [{"name": "A"}, "B", {"@type": "Person", "name": " C  D "}]}"#)
+            .as_deref(),
+        Some("A, B, C D")
+    );
+    // Empty or non-text authors fall back to the meta tag.
+    assert_eq!(author(r#"{"author": {}}"#).as_deref(), Some("Meta Author"));
+    assert_eq!(author(r#"{"author": 5}"#).as_deref(), Some("Meta Author"));
+    assert_eq!(author(r#"{"author": ""}"#).as_deref(), Some("Meta Author"));
+    // An `@id` reference into the graph, as WordPress writes it.
+    assert_eq!(
+        author(
+            r##"{"@graph": [
+                {"@type": "WebSite", "name": "Site"},
+                {"@type": "Article", "headline": "H", "author": {"@id": "https://x.example/#/schema/person/1"}},
+                {"@type": "Person", "@id": "https://x.example/#/schema/person/1", "name": "Pat"}
+            ]}"##
+        )
+        .as_deref(),
+        Some("Pat")
+    );
+    // Image forms, without an og:image.
+    let image = |json: &str| {
+        parse(&format!(
+            "<script type='application/ld+json'>{json}</script>"
+        ))
+        .metadata()
+        .image
+    };
+    assert_eq!(
+        image(r#"{"image": "https://i/a.png"}"#).as_deref(),
+        Some("https://i/a.png")
+    );
+    assert_eq!(
+        image(r#"{"image": ["https://i/1.png", "https://i/2.png"]}"#).as_deref(),
+        Some("https://i/1.png")
+    );
+    assert_eq!(
+        image(r#"{"image": [{"url": "https://i/3.png"}]}"#).as_deref(),
+        Some("https://i/3.png")
+    );
+    assert_eq!(
+        image(r#"{"image": {"contentUrl": "https://i/4.png"}}"#).as_deref(),
+        Some("https://i/4.png")
+    );
+    assert_eq!(image(r#"{"image": 7}"#), None);
+}
+
+#[test]
+fn json_ld_prefers_article_objects_and_walks_graphs_and_arrays() {
+    // The page's own entity comes before the article in the graph, and has
+    // a date; the article's date wins.
+    let meta = ld(r#"{"@graph": [
+        {"@type": "WebPage", "datePublished": "1999-01-01", "headline": "Page headline"},
+        {"@type": ["Thing", "BlogPosting"], "datePublished": "2024-02-03", "headline": "Post"}
+    ]}"#);
+    assert_eq!(meta.published.as_deref(), Some("2024-02-03"));
+    assert_eq!(meta.title.as_deref(), Some("Post"));
+    // A top-level array, several blocks, and a non-article for what the
+    // article lacks.
+    let meta = parse(
+        r#"<script type="application/ld+json">[{"@type":"Organization","name":"Acme"}]</script>
+           <script type="application/ld+json">[{"@type":"Article","headline":"H"},
+                                               {"@type":"WebPage","datePublished":"2023-01-02"}]</script>"#,
+    )
+    .metadata();
+    assert_eq!(meta.title.as_deref(), Some("H"));
+    assert_eq!(meta.published.as_deref(), Some("2023-01-02"));
+    // A type given as a URL.
+    let meta = ld(
+        r#"{"@type": "https://schema.org/Article", "headline": "U", "datePublished": "2022-01-01"}"#,
+    );
+    assert_eq!(meta.title.as_deref(), Some("U"));
+}
+
+#[test]
+fn json_ld_that_is_not_usable_changes_nothing() {
+    for json in [
+        "",
+        "not json",
+        "{",
+        r#"{"headline": "x""#,
+        r#"{"headline": "x"} trailing"#,
+        r#"{"headline": 5, "datePublished": null, "author": [], "image": {}}"#,
+        r#"[1, 2, {"a": [true, false, null, -1.5e3]}]"#,
+    ] {
+        let meta = ld(json);
+        assert_eq!(meta.title.as_deref(), Some("Page | Site"), "{json}");
+        assert_eq!(meta.author.as_deref(), Some("Meta Author"), "{json}");
+        assert_eq!(meta.published.as_deref(), Some("2000-01-01"), "{json}");
+    }
+}
+
+#[test]
+fn json_ld_strings_are_unescaped() {
+    let meta = ld(
+        r#"{"@type":"Article","headline":"Café 🦀 \"quoted\" \/ \\ \n tab\tend","author":"Zoë"}"#,
+    );
+    assert_eq!(
+        meta.title.as_deref(),
+        Some("Café \u{1f980} \"quoted\" / \\ tab end")
+    );
+    assert_eq!(meta.author.as_deref(), Some("Zoë"));
+    // A lone surrogate is U+FFFD; a raw line break inside a string is kept
+    // (and collapsed in the text field).
+    let meta = ld("{\"@type\":\"Article\",\"headline\":\"a\\ud800b\nc\"}");
+    assert_eq!(meta.title.as_deref(), Some("a\u{fffd}b c"));
+}
+
+#[test]
+fn json_ld_reading_is_bounded() {
+    // Deep nesting is refused, not recursed into: the fields come from
+    // the meta tags.
+    for open in ["[", "{\"a\":"] {
+        let close = if open == "[" { "]" } else { "}" };
+        let deep = format!("{}1{}", open.repeat(100_000), close.repeat(100_000));
+        let meta = ld(&deep);
+        assert_eq!(meta.title.as_deref(), Some("Page | Site"));
+    }
+    // Moderate nesting is fine.
+    let ok = format!(
+        r#"{{"@type":"Article","headline":"H","x":{}1{}}}"#,
+        "[".repeat(20),
+        "]".repeat(20)
+    );
+    assert_eq!(ld(&ok).title.as_deref(), Some("H"));
+    // A huge block is refused in linear time.
+    let many = format!("[{}]", "0,".repeat(1_000_000) + "0");
+    let start = std::time::Instant::now();
+    assert_eq!(ld(&many).title.as_deref(), Some("Page | Site"));
+    assert!(start.elapsed().as_secs() < 5, "took {:?}", start.elapsed());
+    // Many objects, each looked at: bounded too.
+    let objects = format!(
+        "[{}]",
+        r#"{"@type":"Thing"},"#.repeat(200_000) + r#"{"@type":"Article","headline":"late"}"#
+    );
+    let start = std::time::Instant::now();
+    let _ = ld(&objects);
+    assert!(start.elapsed().as_secs() < 5, "took {:?}", start.elapsed());
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::test_runner::Config { cases: 512, ..Default::default() })]
+
+    #[test]
+    fn json_ld_reading_never_panics(text in proptest::collection::vec(
+        proptest::sample::select(vec![
+            "{", "}", "[", "]", ",", ":", "\"", "\\", "\\u", "d800", "dc00", "@graph", "@type",
+            "Article", "headline", "author", "name", "@id", "image", "url", "datePublished",
+            "true", "null", "-1.5e+3", "é", "🦀", "\n", " ", "<", "a",
+        ]),
+        0..120,
+    )) {
+        let text: String = text.concat();
+        let meta = parse(&format!("<script type=application/ld+json>{text}</script>")).metadata();
+        let _ = (meta.title, meta.author, meta.published, meta.image);
+    }
 }
