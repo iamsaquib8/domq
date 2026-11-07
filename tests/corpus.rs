@@ -34,3 +34,4 @@ corpus_snapshot!(tables, html_tables, "tables.html");
 corpus_snapshot!(ruby, html_ruby, "ruby.html");
 corpus_snapshot!(select, html_select, "select.html");
 corpus_snapshot!(omitted, html_omitted, "omitted.html");
+corpus_snapshot!(end_tags, html_end_tags, "end_tags.html");

@@ -50,8 +50,9 @@ pub enum Event<'a> {
     /// (`<script>`, `<style>`, `<xmp>`, `<iframe>`, `<noembed>`, `<noframes>`,
     /// `<plaintext>`).
     /// CDATA sections are text too. Adjacent text can arrive in several
-    /// pieces (a stray `<` is its own piece), exactly like the tree's text
-    /// nodes.
+    /// pieces (the text on either side of a dropped `</>` or a CDATA section
+    /// is its own piece), exactly like the tree's text nodes. A `<` that
+    /// starts no markup (`a < b`) is part of its text.
     Text(Cow<'a, str>),
     /// The body of a comment (or of a bogus comment like `<?xml …>`).
     Comment(&'a str),

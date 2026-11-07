@@ -557,3 +557,15 @@ fn the_empty_document_has_no_events() {
     assert!(events.next().is_none());
     assert!(events.errors().is_empty());
 }
+
+#[test]
+fn a_stray_lt_stays_in_its_text() {
+    assert_eq!(
+        collect("<p>a < b</p>"),
+        [
+            (start("p", &[]), 0..3),
+            (text("a < b"), 3..8),
+            (end("p", false), 8..12),
+        ]
+    );
+}
