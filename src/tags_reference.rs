@@ -469,6 +469,7 @@ mod tests {
         EndScope as NewScope, NAMES, Search as NewSearch, Tag, implicitly_closes as new_closes,
         p_search as new_p_search, search as new_search,
     };
+    use alloc::string::ToString;
     use alloc::vec::Vec;
 
     fn names() -> Vec<&'static str> {
@@ -529,6 +530,30 @@ mod tests {
         for name in names() {
             let tag = Tag::of(name);
             assert_eq!(tag.is_void(), super::is_void(name), "{name}");
+            // The string functions the serializers use compare names as they
+            // are: not `BR`, nor `Script`.
+            for written in [
+                name.to_string(),
+                name.to_ascii_uppercase(),
+                name.to_string() + "x",
+            ] {
+                let written = written.as_str();
+                assert_eq!(
+                    super::super::is_void(written),
+                    super::is_void(written),
+                    "{written}"
+                );
+                assert_eq!(
+                    super::super::is_raw_text(written),
+                    super::is_raw_text(written),
+                    "{written}"
+                );
+                assert_eq!(
+                    super::super::ends_only_at_end_tag(written),
+                    super::ends_only_at_end_tag(written),
+                    "{written}"
+                );
+            }
             assert_eq!(tag.is_raw_text(), super::is_raw_text(name), "{name}");
             assert_eq!(tag.is_rawish(), super::ends_only_at_end_tag(name), "{name}");
             assert_eq!(tag.text_closes(), super::text_closes(name), "{name}");

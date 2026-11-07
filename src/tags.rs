@@ -5,43 +5,32 @@
 //! void-element and implicit-close behaviour. Names are compared
 //! case-insensitively by the callers, which lower-case before lookup.
 
+/// The [`Tag`] of `name` if it is written exactly as a known name (lower
+/// case), else [`Tag::OTHER`]: the serializers and the editing API compare
+/// names as they are.
+fn exact(name: &str) -> Tag {
+    let tag = Tag::of(name);
+    if tag.name() == name { tag } else { Tag::OTHER }
+}
+
 /// Elements that never have children and never take an end tag.
 /// (The HTML "void elements".)
 pub(crate) fn is_void(name: &str) -> bool {
-    matches!(
-        name,
-        "area"
-            | "base"
-            | "br"
-            | "col"
-            | "embed"
-            | "hr"
-            | "img"
-            | "input"
-            | "link"
-            | "meta"
-            | "param"
-            | "source"
-            | "track"
-            | "wbr"
-    )
+    exact(name).is_void()
 }
 
 /// Elements whose content is raw text: `<` does not start a tag inside them,
 /// and entities are *not* decoded. Scanning runs until the matching end tag
 /// (for `<plaintext>`, to the end of the input).
 pub(crate) fn is_raw_text(name: &str) -> bool {
-    matches!(
-        name,
-        "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext"
-    )
+    exact(name).is_raw_text()
 }
 
 /// Elements the tokenizer reads as text up to their end tag: the raw-text
 /// ones plus `title` and `textarea` (whose text is still entity-decoded).
 /// Whatever is serialized inside one must not contain that end tag.
 pub(crate) fn ends_only_at_end_tag(name: &str) -> bool {
-    is_raw_text(name) || matches!(name, "title" | "textarea")
+    exact(name).is_rawish()
 }
 
 /// Whether `name` can be written out as an attribute name as it is: not

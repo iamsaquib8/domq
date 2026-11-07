@@ -16,7 +16,7 @@ pub(crate) fn find_byte(needle: u8, haystack: &[u8]) -> Option<usize> {
     }
     #[cfg(not(feature = "simd"))]
     {
-        portable(needle, haystack)
+        portable_noting_amp(needle, haystack).0
     }
 }
 
@@ -70,43 +70,13 @@ pub(crate) fn find(needle: &[u8], haystack: &[u8]) -> Option<usize> {
 /// ~37 GB/s against ~4 GB/s for an iterator `position` loop, which the
 /// compiler does not vectorize because of the early exit; `memchr`'s NEON
 /// code does ~110 GB/s.
-#[cfg(any(not(feature = "simd"), test))]
-fn portable(needle: u8, haystack: &[u8]) -> Option<usize> {
-    const LO: u64 = 0x0101_0101_0101_0101;
-    const HI: u64 = 0x8080_8080_8080_8080;
-    // A word whose bytes are zero exactly where `w` holds `needle`; the
-    // returned mask flags them. Borrows only ever run towards higher bytes,
-    // so in little-endian order the lowest flag is the first match.
-    let splat = LO * u64::from(needle);
-    let flags = |w: u64| {
-        let x = w ^ splat;
-        x.wrapping_sub(LO) & !x & HI
-    };
-    // (Always `Some` on a 16-byte chunk; the fallback matches nothing.)
-    let word = |b: Option<&[u8; 8]>| b.map_or(splat ^ HI, |b| u64::from_le_bytes(*b));
-    let (chunks, tail) = haystack.as_chunks::<16>();
-    let mut offset = 0;
-    for chunk in chunks {
-        let (a, b) = (word(chunk.first_chunk()), word(chunk.last_chunk()));
-        let (fa, fb) = (flags(a), flags(b));
-        if fa | fb != 0 {
-            let bit = if fa != 0 {
-                fa.trailing_zeros()
-            } else {
-                64 + fb.trailing_zeros()
-            };
-            return Some(offset + bit as usize / 8);
-        }
-        offset += 16;
-    }
-    tail.iter().position(|&b| b == needle).map(|i| offset + i)
-}
-
-/// [`portable`] that also reports whether an `&` comes before the match
-/// ([`find_byte_noting_amp`]): the same two-word steps with a second set of
-/// flags. A flag is only ever wrong above a true match of its byte (the
-/// borrow runs towards higher bytes), so a flag below the first `needle`
-/// is a real `&`.
+///
+/// It also reports whether an `&` comes before the match
+/// ([`find_byte_noting_amp`]), with a second set of flags. A flag is only
+/// ever wrong above a true match of its byte (the borrow runs towards higher
+/// bytes), so a flag below the first `needle` is a real `&`. One function
+/// for both searches: [`find_byte`] drops the answer, which keeps a second
+/// copy of the loop out of the wasm build.
 #[cfg(any(not(feature = "simd"), test))]
 fn portable_noting_amp(needle: u8, haystack: &[u8]) -> (Option<usize>, bool) {
     const LO: u64 = 0x0101_0101_0101_0101;
@@ -155,6 +125,10 @@ fn portable_noting_amp(needle: u8, haystack: &[u8]) -> (Option<usize>, bool) {
 mod tests {
     use super::*;
     use alloc::vec::Vec;
+
+    fn portable(needle: u8, haystack: &[u8]) -> Option<usize> {
+        portable_noting_amp(needle, haystack).0
+    }
 
     /// Haystacks around the sizes where SIMD searches switch strategy (short
     /// tails, one vector, several vectors, unaligned starts).
