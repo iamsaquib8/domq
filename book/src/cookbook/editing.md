@@ -1,4 +1,4 @@
-# Edit and serialize
+# Edit HTML and write it back
 
 A parsed `Dom` can be rewritten in place and serialized back to HTML. Nodes
 are addressed by `NodeId` (`node.id()`); removing a node detaches it, so ids

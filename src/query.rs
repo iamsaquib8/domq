@@ -54,8 +54,9 @@
 //! Matching never recurses on document depth and never backtracks
 //! exponentially. Within one query ([`Dom::select`], [`NodeRef::select`],
 //! [`NodeRef::closest`]) it memoizes `:nth-*` positions (including
-//! `of S`, nested or not) and the nearest-match searches behind descendant and
-//! `~` combinators, so selectors like `li:nth-child(odd)`, `h2 ~ p` or
+//! `of S`, nested or not; `*-of-type` and `:only-of-type` count a sibling list
+//! with many distinct tag names in one pass) and the nearest-match searches
+//! behind descendant and `~` combinators, so selectors like `li:nth-child(odd)`, `h2 ~ p` or
 //! `div span` stay roughly linear on 50k-wide lists and 100k-deep nesting.
 //! The memo grows with what a query walks, so a query on one node or a small
 //! subtree costs the same late in a big document as early on (a loop of
@@ -501,6 +502,10 @@ struct Nth {
 /// depend on `An+B`, so a thousand `:nth-child()`s need one table, not a
 /// thousand.
 const SHARED_SLOTS: u32 = 4;
+
+/// Siblings of other types that `*-of-type` steps over, looking for one of its
+/// own type, before it counts the whole sibling list in one pass instead.
+const OTHER_TYPES: u32 = 8;
 
 fn shared_slot(last: bool, of_type: bool) -> u32 {
     u32::from(last) | u32::from(of_type) << 1
@@ -1351,11 +1356,25 @@ impl Simple {
                 .attr(name)
                 .is_some_and(|have| attr_matches(*op, have, value, *ci)),
             Simple::Nth(nth) => nth.matches(el, cx),
-            Simple::Only(of_type) => {
-                let same =
-                    |s: NodeRef<'_>| s.is_element() && (!of_type || s.tag_name() == el.tag_name());
-                !core::iter::successors(el.prev_sibling(), NodeRef::prev_sibling).any(same)
-                    && !core::iter::successors(el.next_sibling(), NodeRef::next_sibling).any(same)
+            // The same positions, from both ends, that `:first-of-type` and
+            // `:last-of-type` use (and memoize).
+            Simple::Only(true) => [false, true].into_iter().all(|last| {
+                let first = Nth {
+                    a: 0,
+                    b: 1,
+                    last,
+                    of_type: true,
+                    of: Vec::new(),
+                    slot: shared_slot(last, true),
+                };
+                first.position(el, cx) == Some(1)
+            }),
+            Simple::Only(false) => {
+                let element = |s: &NodeRef<'_>| s.is_element();
+                !core::iter::successors(el.prev_sibling(), NodeRef::prev_sibling)
+                    .any(|s| element(&s))
+                    && !core::iter::successors(el.next_sibling(), NodeRef::next_sibling)
+                        .any(|s| element(&s))
             }
             Simple::Empty => el
                 .children()
@@ -1436,7 +1455,7 @@ impl Nth {
                 n.prev_sibling()
             }
         };
-        let (mut walked, mut base) = (0u32, 0);
+        let (mut walked, mut skipped, mut base) = (0u32, 0u32, 0);
         let mut sib = step(el);
         while let Some(s) = sib {
             if s.is_element() && self.counts(s, el, cx) {
@@ -1450,6 +1469,13 @@ impl Nth {
                 // With a <= 0 no position past b can match: stop counting.
                 if self.a <= 0 && i64::from(walked) >= i64::from(self.b) {
                     return None;
+                }
+            } else if self.of_type && s.is_element() {
+                // Many siblings of other types and none of this one: stop
+                // walking one element at a time.
+                skipped += 1;
+                if skipped > OTHER_TYPES {
+                    return self.position_by_type(el, cx);
                 }
             }
             sib = step(s);
@@ -1468,6 +1494,60 @@ impl Nth {
             }
         }
         Some(pos)
+    }
+
+    /// `el`'s position among the siblings of its type, counted in one pass
+    /// over the whole sibling list that records every sibling's position (so
+    /// a list of any number of distinct tag names is walked once per query,
+    /// not once per element).
+    fn position_by_type<'a>(&self, el: NodeRef<'a>, cx: Ctx<'_, 'a>) -> Option<u32> {
+        let last = self.last;
+        let step = |n: NodeRef<'a>, back: bool| {
+            if back == last {
+                n.next_sibling()
+            } else {
+                n.prev_sibling()
+            }
+        };
+        let start = core::iter::successors(Some(el), |n| step(*n, true)).last()?;
+        // The pass costs a walk of the whole list anyway: keep its results
+        // even if the query is young, or it would repeat for the next element.
+        cx.memo.lookups.set(cx.memo.lookups.get().max(WARMUP));
+        // A trie of the tag names seen so far: `(byte, next sibling, first
+        // child, count)`, links as indexes, 0 for none (and for the root).
+        let mut trie = alloc::vec![(0u8, 0usize, 0usize, 0u32)];
+        let mut found = None;
+        for s in core::iter::successors(Some(start), |n| step(*n, false)) {
+            let Some(tag) = s.tag_name() else { continue };
+            let mut at = 0;
+            for b in tag.bytes() {
+                let mut c = trie.get(at).map_or(0, |n| n.2);
+                while let Some(&(byte, next, ..)) = trie.get(c) {
+                    if c == 0 || byte == b {
+                        break;
+                    }
+                    c = next;
+                }
+                if c == 0 {
+                    c = trie.len();
+                    let head = trie.get(at).map_or(0, |n| n.2);
+                    if let Some(n) = trie.get_mut(at) {
+                        n.2 = c;
+                    }
+                    trie.push((b, head, 0, 0));
+                }
+                at = c;
+            }
+            let Some(node) = trie.get_mut(at) else {
+                continue;
+            };
+            node.3 = node.3.saturating_add(1);
+            cx.memo.set(self.slot, s, node.3);
+            if s.id() == el.id() {
+                found = Some(node.3);
+            }
+        }
+        found
     }
 }
 

@@ -1,0 +1,1 @@
+Markdown: `LinkStyle::Reference` and `LinkStyle::Footer` look up repeated links in an index instead of scanning every earlier link, so a page with many distinct links serializes in linear time: 40,000 links took 1.7 s and now take about 40 ms. The output is unchanged ([#95](https://github.com/iamsaquib8/domq/issues/95)).

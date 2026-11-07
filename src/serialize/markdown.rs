@@ -20,6 +20,7 @@
 //! styling is lost. There is no pure-Markdown spelling of it that keeps the
 //! text unchanged.
 
+use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
 use core::mem;
@@ -209,7 +210,7 @@ impl Dom {
         let mut md = Markdown {
             options,
             base,
-            noscript: self.noscript_is_content,
+            noscript: self.noscript_is_content(),
             ..Markdown::default()
         };
         for root in self.roots() {
@@ -269,7 +270,7 @@ impl NodeRef<'_> {
             options,
             base,
             root: Some(self.id()),
-            noscript: self.dom().noscript_is_content,
+            noscript: self.dom().noscript_is_content(),
             ..Markdown::default()
         };
         walk(*self, |node, enter| md.visit(node, enter));
@@ -416,6 +417,17 @@ struct RefDef {
     text: String,
 }
 
+/// The link definitions of `LinkStyle::Reference` and `Footer`, in order of
+/// first use, with an index so that finding a repeated link is a lookup, not a
+/// scan of every earlier one.
+#[derive(Default)]
+struct References {
+    defs: Vec<RefDef>,
+    /// Position in `defs` of each distinct `(url, title)`, keyed by
+    /// [`reference_key`].
+    index: BTreeMap<String, usize>,
+}
+
 struct Markdown<'a> {
     out: String,
     /// Separation owed before the next block: 1 = new line, 2 = blank line.
@@ -453,7 +465,7 @@ struct Markdown<'a> {
     noscript: bool,
     options: &'a MarkdownOptions,
     base: Option<String>,
-    references: Vec<RefDef>,
+    references: References,
 }
 
 impl<'a> Default for Markdown<'a> {
@@ -480,7 +492,7 @@ impl<'a> Default for Markdown<'a> {
             noscript: false,
             options: &DEFAULT_OPTIONS,
             base: None,
-            references: Vec::new(),
+            references: References::default(),
         }
     }
 }
@@ -1166,14 +1178,14 @@ impl<'a> Markdown<'a> {
         self.flush();
         let end = self.out.trim_end().len();
         self.out.truncate(end);
-        if !self.references.is_empty() {
+        if !self.references.defs.is_empty() {
             match self.options.link_style {
                 LinkStyle::Inline => {}
                 LinkStyle::Reference => {
                     if !self.out.is_empty() {
                         self.out.push_str("\n\n");
                     }
-                    for (i, r) in self.references.iter().enumerate() {
+                    for (i, r) in self.references.defs.iter().enumerate() {
                         if i > 0 {
                             self.out.push('\n');
                         }
@@ -1189,7 +1201,7 @@ impl<'a> Markdown<'a> {
                         self.out.push_str("\n\n");
                     }
                     self.out.push_str("### Links\n\n");
-                    for (i, r) in self.references.iter().enumerate() {
+                    for (i, r) in self.references.defs.iter().enumerate() {
                         if i > 0 {
                             self.out.push('\n');
                         }
@@ -1476,19 +1488,35 @@ fn is_data_uri(url: &str) -> bool {
         .is_some_and(|p| p.eq_ignore_ascii_case(b"data:"))
 }
 
+/// One string for a `(url, title)` pair that no other pair shares: `-` for no
+/// title, else the title's length, `:` and the title, then the URL.
+fn reference_key(url: &str, title: Option<&str>) -> String {
+    let mut key = String::new();
+    match title {
+        None => key.push('-'),
+        Some(t) => {
+            push_usize(&mut key, t.len());
+            key.push(':');
+            key.push_str(t);
+        }
+    }
+    key.push_str(url);
+    key
+}
+
 fn record_reference(
-    references: &mut Vec<RefDef>,
+    references: &mut References,
     url: &str,
     title: Option<&str>,
     text: &str,
 ) -> usize {
-    if let Some(existing) = references
-        .iter()
-        .find(|r| r.url == url && r.title.as_deref() == title)
+    let key = reference_key(url, title);
+    if let Some(&at) = references.index.get(&key)
+        && let Some(existing) = references.defs.get(at)
     {
         return existing.id;
     }
-    let id = references.len() + 1;
+    let id = references.defs.len() + 1;
     let mut clean_text = String::new();
     for word in text.split(is_space).filter(|w| !w.is_empty()) {
         if !clean_text.is_empty() {
@@ -1496,12 +1524,13 @@ fn record_reference(
         }
         clean_text.push_str(word);
     }
-    references.push(RefDef {
+    references.defs.push(RefDef {
         id,
         url: url.to_string(),
         title: title.map(String::from),
         text: clean_text,
     });
+    references.index.insert(key, id - 1);
     id
 }
 
@@ -1512,7 +1541,7 @@ fn push_close(
     from: usize,
     options: &MarkdownOptions,
     base: Option<&str>,
-    references: &mut Vec<RefDef>,
+    references: &mut References,
 ) {
     match mark {
         Mark::Strong => out.push_str("**"),

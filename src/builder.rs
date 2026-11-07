@@ -52,9 +52,6 @@ pub(crate) fn parse_document(src: &str) -> Dom {
     let mut dom = builder.sink.dom;
     dom.errors = builder.errors;
     dom.release_spare_capacity();
-    if dom.has_noscript {
-        dom.noscript_is_content = crate::serialize::noscript_is_content(&dom);
-    }
     dom
 }
 

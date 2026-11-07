@@ -285,3 +285,29 @@ fn wide_ragged_tables_stay_linear() {
     assert!(md.len() < 20 * n * 3, "{} bytes", md.len());
     assert_eq!(md.matches('r').count(), n);
 }
+
+#[cfg(feature = "markdown")]
+#[test]
+fn many_distinct_links_stay_linear_in_every_link_style() {
+    // `Reference` and `Footer` look each link up among the definitions so far;
+    // a linear search made 40,000 distinct links take seconds (#95). The
+    // ceiling is far above a slow machine and far below the quadratic cost.
+    use domq::{LinkStyle, MarkdownOptions};
+    let n = 40_000;
+    let html: String = (0..n)
+        .map(|i| format!("<p><a href=\"https://example.com/articles/page-{i}\">link {i}</a></p>"))
+        .collect();
+    let dom = parse(&html);
+    for style in [LinkStyle::Reference, LinkStyle::Footer] {
+        let start = std::time::Instant::now();
+        let md = dom.to_markdown_with(&MarkdownOptions::new().link_style(style));
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "{style:?} took {:?}",
+            start.elapsed()
+        );
+        // Every link got its own definition, numbered in order of use.
+        assert!(md.contains(&format!("{n}")), "{style:?}");
+        assert_eq!(md.matches("https://example.com/articles/page-").count(), n);
+    }
+}

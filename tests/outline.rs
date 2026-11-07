@@ -227,3 +227,127 @@ fn explicit_roles_and_aria_levels() {
     assert_eq!(outline.nodes()[1].name.as_deref(), Some("Sub Section"));
     assert_eq!(outline.nodes()[2].role, "button");
 }
+
+// --- scaling (#90) -------------------------------------------------------------
+//
+// Each case used to take seconds to minutes at these sizes (every outline node
+// scanned the whole document). The ceiling is far above a slow or loaded
+// machine and far below that, so it guards the complexity, not the speed.
+
+/// Outline `html` within the time limit, expecting `nodes` nodes.
+fn scales(what: &str, html: &str, nodes: usize) -> domq::PageOutline {
+    let dom = parse(html);
+    let start = std::time::Instant::now();
+    let outline = dom.outline();
+    assert!(
+        start.elapsed().as_secs() < 5,
+        "{what}: took {:?}",
+        start.elapsed()
+    );
+    assert_eq!(outline.len(), nodes, "{what}");
+    outline
+}
+
+#[test]
+fn many_links_scale() {
+    let n = 20_000;
+    let html = format!(
+        "<ul>{}</ul>",
+        (0..n)
+            .map(|i| format!("<li><a href=/p{i}>link {i}</a></li>"))
+            .collect::<String>()
+    );
+    let outline = scales("links", &html, n);
+    assert_eq!(
+        outline.nodes()[n - 1].selector,
+        "ul > li:nth-of-type(20000) > a"
+    );
+}
+
+#[test]
+fn many_buttons_with_one_class_scale() {
+    let n = 20_000;
+    let html = format!("<div>{}</div>", "<button class=btn-i>go</button>".repeat(n));
+    let outline = scales("buttons", &html, n);
+    assert_eq!(outline.nodes()[7].selector, "div > button:nth-of-type(8)");
+}
+
+#[test]
+fn many_labels_and_inputs_scale() {
+    let n = 20_000;
+    let html: String = (0..n)
+        .map(|i| format!("<label for=i{i}>Label {i}</label><input id=i{i}>"))
+        .collect();
+    let outline = scales("labels", &html, n);
+    let last = &outline.nodes()[n - 1];
+    assert_eq!(last.name.as_deref(), Some("Label 19999"));
+    assert_eq!(last.selector, "#i19999");
+}
+
+#[test]
+fn many_inputs_in_one_label_scale() {
+    // Every input asks the same wrapping label for its name.
+    let n = 20_000;
+    let html = format!(
+        "<label>Pick one {}</label>",
+        "<input type=checkbox>".repeat(n)
+    );
+    let outline = scales("inputs in a label", &html, n);
+    assert_eq!(outline.nodes()[0].name.as_deref(), Some("Pick one"));
+}
+
+#[test]
+fn many_controls_naming_one_big_element_scale() {
+    let n = 20_000;
+    let html = format!(
+        "<div id=big>{}</div>{}",
+        "word ".repeat(n),
+        "<button aria-labelledby=big>b</button>".repeat(n)
+    );
+    let outline = scales("labelledby", &html, n);
+    let name = outline.nodes()[0].name.as_deref().unwrap_or("");
+    assert!(
+        name.starts_with("word word") && name.ends_with('…'),
+        "{name}"
+    );
+}
+
+#[test]
+fn deeply_nested_buttons_and_sections_with_short_selectors_scale() {
+    // A path selector is as long as the tree is deep, so an outline of nested
+    // elements without ids is quadratic in size on its own; a unique id ends
+    // the path, which leaves the names and the sectioning to be linear.
+    let n = 5_000;
+    let buttons: String = (0..n)
+        .map(|i| format!("<div role=button id=b{i}>text "))
+        .collect();
+    let outline = scales("nested buttons", &buttons, n);
+    let name = outline.nodes()[3].name.as_deref().unwrap_or("");
+    assert!(
+        name.starts_with("text text") && name.ends_with('…'),
+        "{name}"
+    );
+    assert_eq!(outline.nodes()[3].selector, "#b3");
+    let sections: String = (0..n)
+        .map(|i| format!("<section id=s{i}><header>h "))
+        .collect();
+    let outline = scales("nested sections", &sections, 2 * n);
+    // A header in a section is a plain header, not a banner.
+    assert_eq!(outline.nodes()[1].role, "header");
+}
+
+#[test]
+fn nested_elements_without_ids_take_time_in_proportion_to_their_selectors() {
+    // The case from the issue. The output is quadratic here (every selector
+    // lists every ancestor), so this is no guard against a slow algorithm,
+    // only a check that such a page still gets its outline.
+    let n = 1_000;
+    let buttons = "<div role=button>t ".repeat(n);
+    let outline = scales("nested role=button", &buttons, n);
+    assert_eq!(
+        outline.nodes()[n - 1].selector.matches(" > ").count(),
+        n - 1
+    );
+    let sections = "<section><header>h ".repeat(n);
+    scales("nested section/header", &sections, 2 * n);
+}
