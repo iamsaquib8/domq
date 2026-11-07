@@ -538,7 +538,7 @@ macro_rules! base_arg {
 macro_rules! markdown_options_args {
     () => {
         concat!(
-            r#""links":{"type":"string","enum":["inline","reference","footer"],"default":"inline","description":"Link formatting style: 'inline' ([text](url)), 'reference' ([text][1]), or 'footer' (summary list at end of document)."},"#,
+            r#""links":{"type":"string","enum":["inline","reference","footer"],"default":"inline","description":"Link formatting style: 'inline' ([text](url)), 'reference' ([text][1]), or 'footer' (summary list at end of document). Ignored by `chunks`, which always writes links inline so each chunk stands alone."},"#,
             r#""images":{"type":"string","enum":["keep","alt","drop"],"default":"keep","description":"Image formatting style: 'keep' (![alt](url)), 'alt' (only alt text), or 'drop' (omit images)."},"#,
             r#""drop_data_uris":{"type":"boolean","default":false,"description":"Strip data: URIs in links and images to reduce token usage."}"#
         )

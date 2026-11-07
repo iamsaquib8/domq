@@ -111,6 +111,51 @@ fn docs_page_with_nav_tree() {
 }
 
 #[test]
+fn listing_page_widens_a_tiny_winner() {
+    // The only paragraph that scores is the email-list notice; the cards are
+    // links, so they score nothing, and widening stops at them as boilerplate.
+    // The notice holds under a tenth of the page's text, so the winner is
+    // widened to the whole results area.
+    let dom = parse(include_str!("pages/reader/listing.html"));
+    let main = dom.main_content().unwrap();
+    assert_eq!(main.attr("class"), Some("page-width"));
+    check(
+        &dom,
+        &[
+            "Join our email list",
+            "Kestrel 40L Trekking Pack",
+            "$189.00",
+            "Osprey Ridge 35L",
+            "Knot 16L Sling",
+        ],
+        &["Northbound Outfitters", "Cart (0)", "Returns"],
+    );
+}
+
+#[test]
+fn a_winner_with_a_tenth_of_the_text_is_not_widened() {
+    // 80 of the page's 768 characters is just over a tenth: enough, and the
+    // paragraph's own `<div>` stays the answer.
+    let para = "word ".repeat(20); // 80 characters, spaces not counted
+    let links = "<a href=/x>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</a>"
+        .repeat(8);
+    let html = format!(
+        "<body><div class=wrap><div class=story><p>{para}</p></div><div class=more>{links}</div></div></body>"
+    );
+    let dom = parse(&html);
+    let main = dom.main_content().unwrap();
+    assert_eq!(main.attr("class"), Some("story"));
+    // Below a tenth, it widens; and never past `<body>`.
+    let links = links.repeat(2);
+    let html = format!(
+        "<body><div class=wrap><div class=story><p>{para}</p></div><div class=more>{links}</div></div></body>"
+    );
+    let dom = parse(&html);
+    let main = dom.main_content().unwrap();
+    assert_eq!(main.attr("class"), Some("wrap"));
+}
+
+#[test]
 fn product_page() {
     let dom = parse(include_str!("pages/reader/product.html"));
     let main = dom.main_content().unwrap();
