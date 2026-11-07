@@ -37,7 +37,8 @@ The WASI build works too: `"command": "wasmtime", "args": ["domq.wasm", "mcp"]`.
 | `lint` | `include_notes` | `{errors, warnings, notes, findings: [{line, column, level, rule, message}]}` |
 
 `main: true` keeps only the article ([reader mode](cookbook/reader-mode.md));
-`base_url` makes relative links absolute.
+`base_url` makes relative links absolute. A worked example, from `outline` to
+`extract`, is in [Give an agent a page](cookbook/agent-page.md).
 
 ## Safety
 

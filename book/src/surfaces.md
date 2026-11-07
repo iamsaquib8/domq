@@ -46,7 +46,7 @@ printf '<a href=/a>One</a> <a href=/b>Two</a>' | domq -a href a
 # /b
 ```
 
-Next: [Command line](cli.md) (every flag), [From htmlq](migrating/htmlq.md).
+Next: [Command line](cli.md) (every flag), [Replace htmlq and pup in shell scripts](cookbook/shell-scripts.md).
 
 ## JavaScript
 
@@ -64,7 +64,7 @@ select(html, "a[href]").map((a) => a.attrs.href);
 // ["/a", "/b"]
 ```
 
-Next: [Install](install.md#javascript-and-webassembly), [From cheerio](migrating/cheerio.md).
+Next: [Install](install.md#javascript-and-webassembly), [Use domq in a Cloudflare Worker, Deno or the browser](cookbook/edge.md), [From cheerio](migrating/cheerio.md).
 
 ## Python
 
@@ -104,7 +104,7 @@ gets:
   {"tag": "a", "attrs": {"href": "/b"}, "text": "Two"}]}
 ```
 
-Next: [AI agents (MCP)](mcp.md).
+Next: [Give an agent a page](cookbook/agent-page.md), [AI agents (MCP)](mcp.md).
 
 ## What each surface can do
 

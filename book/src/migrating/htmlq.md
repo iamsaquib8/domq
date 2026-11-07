@@ -46,3 +46,6 @@ unsupported selector is an error instead of an empty result.
 
 The binary is a single static file with no dependencies, also available as a
 WASI module.
+
+For scripts, with exit codes and extraction side by side, see [Replace htmlq
+and pup in shell scripts](../cookbook/shell-scripts.md).

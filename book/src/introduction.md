@@ -13,23 +13,25 @@ supports it (in italics).
 
 - [Turn a page into Markdown for an LLM](cookbook/reader-mode.md)
   *(Rust, CLI, JavaScript, Python, MCP)*
+- [Build a RAG index from web pages](cookbook/rag-index.md)
+  *(Rust, CLI, JavaScript, Python, MCP)*
 - [Get the article text without the navigation and footer](cookbook/reader-mode.md#the-article-as-plain-text)
   *(Rust, CLI, JavaScript, Python, MCP)*
 - [Pull fields from a list of products](cookbook/extracting.md)
   *(Rust, CLI, Python, MCP)*
-- [Scrape links, tables or metadata](cookbook/links-metadata-tables.md)
+- [Scrape links, tables or metadata](cookbook/links-metadata-tables.md), or [crawl results to a table](cookbook/crawl-to-table.md)
   *(Rust, CLI, JavaScript, Python, MCP)*
 - [Check HTML for accessibility problems in CI](cookbook/lint.md)
   *(CLI, MCP)*
-- [Give an agent a page outline and selectors it can act on](mcp.md)
+- [Give an agent a page outline and selectors it can act on](cookbook/agent-page.md)
   *(MCP; the same outline from the CLI, Rust and Python)*
-- [Replace `htmlq` or `pup` in a shell script](migrating/htmlq.md)
+- [Replace `htmlq` or `pup` in a shell script](cookbook/shell-scripts.md)
   *(CLI)*
-- [Edit or clean HTML and write it back](cookbook/editing.md)
+- [Edit or clean HTML and write it back](cookbook/clean-html.md)
   *(Rust; the CLI can remove nodes)*
 - [Process a huge dump without building a tree](cookbook/streaming.md)
   *(Rust)*
-- [Run it in a Worker, Deno or the browser](install.md#javascript-and-webassembly)
+- [Run it in a Worker, Deno or the browser](cookbook/edge.md)
   *(JavaScript)*
 
 Not on the list? [Scrape elements and attributes](cookbook/scraping.md) is the

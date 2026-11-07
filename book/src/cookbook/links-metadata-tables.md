@@ -68,3 +68,6 @@ print!("{}", domq::to_csv(&rows));
 ```sh
 domq --csv -1 '#results' < report.html > results.csv
 ```
+
+Links, resources and tables for a whole crawl, as CSV: [Crawl results to a
+table](crawl-to-table.md).

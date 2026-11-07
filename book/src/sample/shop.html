@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gadgets | Example Shop</title>
+  <meta name="description" content="Widgets, gizmos and gadgets, shipped in a week.">
+  <link rel="canonical" href="https://shop.example/gadgets">
+  <script>window.dataLayer = []; /* tracking */</script>
+</head>
+<body>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/gadgets">Gadgets</a>
+    <a href="/cart"><img src="/img/cart.svg"></a>
+  </nav>
+  <main>
+    <h1>Gadgets</h1>
+    <ul class="products">
+      <li class="product" data-sku="W-1">
+        <a href="/gadgets/widget"><img src="/img/widget.jpg" alt="Widget"></a>
+        <h2>Widget</h2>
+        <span class="price" data-value="9.5">$9.50</span>
+        <span class="tag">new</span> <span class="tag">blue</span>
+      <li class="product out-of-stock" data-sku="G-2">
+        <a href="/gadgets/gizmo"><img src="/img/gizmo.jpg" alt="Gizmo"></a>
+        <h2>Gizmo</h2>
+        <span class="price" data-value="12">$12</span>
+      <li class="product" data-sku="D-3">
+        <a href="/gadgets/doohickey"><img src="/img/doohickey.jpg"></a>
+        <h2>Doohickey</h2>
+        <span class="price" data-value="24.99">$24.99</span>
+        <span class="tag">sale</span>
+    </ul>
+    <h2>Specifications</h2>
+    <table id="specs">
+      <tr><th>Product<th>Weight (g)<th>Warranty
+      <tr><td>Widget<td>120<td rowspan="2">2 years
+      <tr><td>Gizmo<td>85
+      <tr><td>Doohickey<td>300<td>1 year
+    </table>
+  </main>
+  <footer>
+    <a href="/terms">Terms</a> <a href="https://twitter.com/shop_example">Twitter</a>
+  </footer>
+</body>
+</html>
