@@ -29,8 +29,8 @@ unless a benchmark is named. Corrections welcome.
 **Behind**
 
 - Reader-mode quality, now measured on the human-labelled corpora
-  ([docs/reader-quality.md](reader-quality.md)): AEB 0.898 (trafilatura
-  0.958, Readability.js 0.947, dom_smoothie 0.865) and WCXB 0.747 / 0.803
+  ([docs/reader-quality.md](reader-quality.md)): AEB 0.900 (trafilatura
+  0.958, Readability.js 0.947, dom_smoothie 0.865) and WCXB 0.792 / 0.830
   dev / test (rs-trafilatura 0.859 / 0.893, dom_smoothie 0.762 / 0.808).
   Precision and non-article page types (forums, listings) are the gaps.
 - No options on `to_markdown` / `to_text`; no confidence score from

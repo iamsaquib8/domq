@@ -240,6 +240,62 @@ fn ordered_lists() {
 }
 
 #[test]
+fn a_nested_ordered_list_not_starting_at_1_follows_a_blank_line() {
+    // An ordered list can only interrupt a paragraph when it starts at 1, so
+    // anything else after the item's text would be swallowed into it.
+    for (html, want) in [
+        (
+            "<ul><li>Item<ol start=5><li>five</li><li>six</li></ol></li></ul>",
+            "- Item\n\n  5. five\n  6. six",
+        ),
+        (
+            "<ul><li>Item<ol start=0><li>zero</li></ol></li></ul>",
+            "- Item\n\n  0. zero",
+        ),
+        (
+            "<ol><li>One<ol start=3><li>three</li></ol></li></ol>",
+            "1. One\n\n   3. three",
+        ),
+        (
+            "<ul><li>Item<ol reversed><li>a</li><li>b</li><li>c</li></ol></li></ul>",
+            "- Item\n\n  3. a\n  2. b\n  1. c",
+        ),
+        (
+            "<ol><li>One<ol reversed><li>a</li><li>b</li></ol></li></ol>",
+            "1. One\n\n   2. a\n   1. b",
+        ),
+        // The first item's own number counts.
+        (
+            "<ul><li>Item<ol><li value=7>a</li></ol></li></ul>",
+            "- Item\n\n  7. a",
+        ),
+        (
+            "<ul><li>Item<ol start=7><li value=1>a</li></ol></li></ul>",
+            "- Item\n  1. a",
+        ),
+        // Starting at 1 (the default), or a bullet list, stays tight.
+        (
+            "<ul><li>Item<ol><li>a</li></ol></li></ul>",
+            "- Item\n  1. a",
+        ),
+        (
+            "<ul><li>Item<ol start=1><li>a</li></ol></li></ul>",
+            "- Item\n  1. a",
+        ),
+        (
+            "<ol start=5><li>Item<ul><li>a</li></ul></li></ol>",
+            "5. Item\n   - a",
+        ),
+        (
+            "<ol reversed><li>Item<ol reversed><li>a</li></ol></li></ol>",
+            "1. Item\n   1. a",
+        ),
+    ] {
+        assert_eq!(md(html), want, "{html}");
+    }
+}
+
+#[test]
 fn list_item_values_and_reversed_lists() {
     // Numbers are what a browser shows (renderers only honour the first).
     assert_eq!(md("<ol><li>a<li value=7>b<li>c</ol>"), "1. a\n7. b\n8. c");
@@ -521,6 +577,47 @@ fn escapes_line_start_syntax() {
 }
 
 #[test]
+fn escapes_block_syntax_formed_across_nodes() {
+    // `<span>1</span>. x` and React's `1<!-- -->. x` read as an ordered list
+    // once the nodes are joined (checked with markdown-it and cmark-gfm).
+    assert_eq!(
+        md("<p><span>1</span>. Introduction</p>"),
+        r"1\. Introduction"
+    );
+    assert_eq!(md("<p>1<!-- -->. Introduction</p>"), r"1\. Introduction");
+    assert_eq!(md("<p>2024<!-- -->) was a year</p>"), r"2024\) was a year");
+    assert_eq!(
+        md("<p><b>1</b>. Not at the start</p>"),
+        "**1**. Not at the start"
+    );
+    // After a hard break, and as the first thing in an item or a quote.
+    assert_eq!(md("<p>a<br><i></i>3<!-- -->. b</p>"), "a\\\n3\\. b");
+    assert_eq!(md("<ul><li>1<!-- -->. x</li></ul>"), r"- 1\. x");
+    assert_eq!(md("<blockquote>1<!-- -->. x</blockquote>"), r"> 1\. x");
+    // Not a marker: a decimal, a longer run, no space, a heading's text.
+    assert_eq!(md("<p>1<!-- -->.5 apples</p>"), "1.5 apples");
+    assert_eq!(md("<p>1234567890<!-- -->. x</p>"), "1234567890. x");
+    assert_eq!(md("<h2><span>1</span>. Intro</h2>"), "## 1. Intro");
+    assert_eq!(md("<p>x<!-- -->1. y</p>"), "x1. y");
+    // A delimiter-row lookalike after a hard break would turn the line above
+    // into a table header.
+    assert_eq!(md("<p>a|b<br>|---|---|</p>"), "a|b\\\n\\|---\\|---\\|");
+    assert_eq!(md("<p>a|b<br>:-:|--</p>"), "a|b\\\n:-:\\|--");
+    assert_eq!(md("<p>|---|---|</p>"), "|---|---|");
+    assert_eq!(md("<p>a|b<br>x|---|</p>"), "a|b\\\nx|---|");
+}
+
+#[test]
+fn a_rule_first_in_a_bullet_item_stays_in_its_item() {
+    // `- ---` is one thematic break, and the list would be gone.
+    assert_eq!(md("<ul><li><hr></li></ul>"), "- ***");
+    assert_eq!(md("<ul><li><ul><li><hr></li></ul></li></ul>"), "- - ***");
+    assert_eq!(md("<ol><li><hr>x</li></ol>"), "1. ---\n\n   x");
+    assert_eq!(md("<ul><li>a<hr>b</li></ul>"), "- a\n\n  ---\n\n  b");
+    assert_eq!(md("<blockquote><hr></blockquote>"), "> ---");
+}
+
+#[test]
 fn does_not_over_escape_prose() {
     let prose = "Hello, world. It costs $3.50 - or 3.5 - and a-b is fine (really!) #hashtag C# 100% #1: ok?";
     assert_eq!(md(&format!("<p>{prose}</p>")), prose);
@@ -634,7 +731,7 @@ fn markdown_options_link_style_footer() {
     let opts = MarkdownOptions::default().link_style(LinkStyle::Footer);
     assert_eq!(
         dom.to_markdown_with(&opts),
-        "Visit [Example][1] and [again][1], then [Rust][2].\n\n\
+        "Visit Example [1] and again [1], then Rust [2].\n\n\
          ### Links\n\n\
          1. [Example](https://example.com \"Home\")\n\
          2. [Rust](https://rust-lang.org)"
@@ -734,12 +831,196 @@ fn markdown_options_chunks() {
     let opts = MarkdownOptions::default()
         .base_url("https://example.com/")
         .link_style(LinkStyle::Reference);
+    // The base URL applies; the reference style does not (a chunk stands
+    // alone, so its links are inline).
     let chunks = dom.to_markdown_chunks_with(1000, &opts);
     assert_eq!(chunks.len(), 1);
     assert_eq!(
         chunks[0].markdown,
-        "# Title\n\nVisit [Page][1].\n\n[1]: https://example.com/page"
+        "# Title\n\nVisit [Page](https://example.com/page)."
     );
+}
+
+// The footer link style (#97): `text [1]` with a list, no dangling references.
+
+#[test]
+fn footer_links_are_citations_and_entries_keep_their_markup() {
+    use domq::{LinkStyle, MarkdownOptions};
+    let opts = MarkdownOptions::default().link_style(LinkStyle::Footer);
+    let md = |html: &str| parse(html).to_markdown_with(&opts);
+    // The repro: an image-only link and a link with emphasis and underscores.
+    assert_eq!(
+        md("<p><a href=\"/x\"><img src=\"i.png\" alt=\"Logo\"></a> \
+            <a href=\"/y\"><b>bold *x*</b> text_with_under</a></p>"),
+        "![Logo](i.png) [1] **bold \\*x\\*** text_with_under [2]\n\n\
+         ### Links\n\n\
+         1. [![Logo](i.png)](/x)\n\
+         2. [**bold \\*x\\*** text_with_under](/y)"
+    );
+    // Link text is escaped in the list, like the text itself.
+    assert_eq!(
+        md("<p>See <a href=/a>A *star*</a>, <a href=/b title=T>[B]</a>.</p>"),
+        "See A \\*star\\* [1], \\[B\\] [2].\n\n\
+         ### Links\n\n\
+         1. [A \\*star\\*](/a)\n\
+         2. [\\[B\\]](/b \"T\")"
+    );
+    // Hidden content is not link text; a hard break is a space; an empty
+    // link reads as its URL, inline and in the list.
+    assert_eq!(
+        md(
+            "<p><a href=/x><span hidden>hid</span>shown</a> <a href=/z>a<br>b</a> <a href=/q></a></p>"
+        ),
+        "shown [1] a\\\nb [2] /q [3]\n\n\
+         ### Links\n\n\
+         1. [shown](/x)\n\
+         2. [a b](/z)\n\
+         3. [/q](/q)"
+    );
+    // The same link twice shares its number.
+    assert_eq!(
+        md("<p><a href=/x>A</a> and <a href=/x>again</a></p>"),
+        "A [1] and again [1]\n\n### Links\n\n1. [A](/x)"
+    );
+    // Without links there is no footer.
+    assert_eq!(md("<p>plain</p>"), "plain");
+}
+
+// Tables with colspan and rowspan (#98).
+
+/// The cells of a Markdown table's rows (the delimiter row skipped), split at
+/// unescaped pipes.
+fn md_table(md: &str) -> Vec<Vec<String>> {
+    md.lines()
+        .filter(|l| l.starts_with('|') && !l.starts_with("| ---"))
+        .map(|l| {
+            let inner = l.trim_start_matches('|').trim_end_matches('|');
+            inner.split(" |").map(|c| c.trim().to_string()).collect()
+        })
+        .collect()
+}
+
+#[test]
+fn spanned_cells_keep_their_columns() {
+    // The repro: `Rank` sat over column 3 and its value under column 4.
+    assert_eq!(
+        md(
+            "<table><tr><th>Name</th><th colspan=\"2\">Score</th><th>Rank</th></tr>\
+            <tr><td>A</td><td>1</td><td>2</td><td>3</td></tr></table>"
+        ),
+        "| Name | Score | | Rank |\n| --- | --- | --- | --- |\n| A | 1 | 2 | 3 |"
+    );
+    // A rowspan leaves empty cells below its anchor; row groups end it.
+    assert_eq!(
+        md(
+            "<table><thead><tr><th>Region</th><th>Q1</th><th>Q2</th></tr></thead>\
+            <tbody><tr><td rowspan=2>EU</td><td>10</td><td>12</td></tr>\
+            <tr><td colspan=2>n/a</td></tr></tbody></table>"
+        ),
+        "| Region | Q1 | Q2 |\n| --- | --- | --- |\n| EU | 10 | 12 |\n| | n/a | |"
+    );
+    assert_eq!(
+        md(
+            "<table><thead><tr><th rowspan=3>H</th><th>a</th></tr></thead>\
+            <tbody><tr><td>1</td><td>2</td></tr></tbody></table>"
+        ),
+        "| H | a |\n| --- | --- |\n| 1 | 2 |"
+    );
+    // `rowspan=0` covers the rest of its group.
+    assert_eq!(
+        md(
+            "<table><tr><td rowspan=0>a</td><td>b</td></tr><tr><td>c</td></tr><tr><td>d</td></tr></table>"
+        ),
+        "| a | b |\n| --- | --- |\n| | c |\n| | d |"
+    );
+    // Both at once, and a rowspan reaching past a short row.
+    assert_eq!(
+        md(
+            "<table><tr><td>x</td><td rowspan=2 colspan=2>big</td></tr><tr><td>y</td></tr>\
+            <tr><td>1</td><td>2</td><td>3</td></tr></table>"
+        ),
+        "| x | big | |\n| --- | --- | --- |\n| y | | |\n| 1 | 2 | 3 |"
+    );
+    // Invalid or missing spans are 1; formatting stays in the cell.
+    assert_eq!(
+        md("<table><tr><td colspan=x rowspan=-2><b>a</b></td><td colspan=' 2'>b</td></tr></table>"),
+        "| **a** | b | |\n| --- | --- | --- |"
+    );
+}
+
+#[test]
+fn the_markdown_grid_matches_table_rows() {
+    for html in [
+        "<table><tr><th>Name</th><th colspan=2>Score</th><th>Rank</th></tr><tr><td>A</td><td>1</td><td>2</td><td>3</td></tr></table>",
+        "<table><thead><tr><th>R</th><th>Q1</th><th>Q2</th></tr></thead><tbody><tr><td rowspan=2>EU</td><td>10</td><td>12</td></tr><tr><td colspan=2>n/a</td></tr></tbody></table>",
+        "<table><tr><td rowspan=0>a</td><td>b</td></tr><tr><td>c</td></tr><tr><td>d</td></tr></table>",
+        "<table><tr><td>x</td><td rowspan=2 colspan=2>big</td></tr><tr><td>y</td></tr><tr><td>1</td><td>2</td><td>3</td></tr></table>",
+        "<table><tr><td rowspan=4>a</td></tr><tr><td>b</td></tr></table>",
+        "<table><tr><td colspan=3>wide</td></tr><tr><td>1</td><td rowspan=2>2</td><td>3</td></tr><tr><td>4</td><td>5</td></tr></table>",
+        "<table><tbody><tr><td rowspan=5>a</td><td>b</td></tr></tbody><tbody><tr><td>c</td></tr><tr><td>d</td><td>e</td></tr></tbody></table>",
+    ] {
+        let dom = parse(html);
+        let table = dom.find_by_tag("table").next().unwrap();
+        let rows = table.table_rows();
+        let grid = md_table(&dom.to_markdown());
+        assert_eq!(grid.len(), rows.len(), "{html}");
+        let width = rows.iter().map(Vec::len).max().unwrap();
+        for (g, r) in grid.iter().zip(&rows) {
+            // The same number of columns in every row, and each cell either
+            // the text of its slot or empty (a slot a span covers).
+            assert_eq!(g.len(), width, "{html}: {grid:?}");
+            for (i, cell) in g.iter().enumerate() {
+                if let Some(want) = r.get(i) {
+                    assert!(
+                        cell.is_empty() || cell == want,
+                        "{html}: {grid:?} vs {rows:?}"
+                    );
+                }
+            }
+        }
+        // Every slot's text appears at its anchor: the first slot of each
+        // distinct run of equal cells in table_rows.
+        let texts = |rows: &[Vec<String>]| {
+            let mut all: Vec<String> = rows
+                .iter()
+                .flatten()
+                .filter(|c| !c.is_empty())
+                .cloned()
+                .collect();
+            all.dedup();
+            all
+        };
+        let anchors: Vec<String> = grid
+            .iter()
+            .flatten()
+            .filter(|c| !c.is_empty())
+            .cloned()
+            .collect();
+        for t in texts(&rows) {
+            assert!(anchors.contains(&t), "{html}: {t} missing from {grid:?}");
+        }
+    }
+}
+
+#[test]
+fn hostile_spans_are_bounded() {
+    // Every cell asks for 1000 x 1000; the budget turns most into 1 x 1.
+    let cell = "<td colspan=1000 rowspan=1000>x</td>";
+    let html = format!(
+        "<table>{}</table>",
+        format!("<tr>{}</tr>", cell.repeat(50)).repeat(50)
+    );
+    let start = std::time::Instant::now();
+    let out = md(&html);
+    assert!(start.elapsed().as_secs() < 5, "took {:?}", start.elapsed());
+    // Bounded by a fixed allowance plus a multiple of the table's own cells.
+    assert!(out.len() < 8_000_000, "{} bytes", out.len());
+    let html = format!(
+        "<table><tr>{}</tr></table>",
+        "<td colspan=1000>x</td>".repeat(5000)
+    );
+    let out = md(&html);
+    assert!(out.len() < 8_000_000, "{} bytes", out.len());
 }
 
 // Character references in link destinations and titles (#105).
