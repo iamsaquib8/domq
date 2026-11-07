@@ -1,6 +1,6 @@
 //! Behavioural tests for the parser and tree.
 
-use domq::{NodeKind, Token, parse, tokenize};
+use domq::{ErrorKind, NodeKind, Token, parse, tokenize};
 
 #[test]
 fn basic_nesting() {
@@ -754,4 +754,48 @@ fn entity_problems_are_reported_at_their_ampersand() {
     // In `<title>` and `<textarea>` (decoded raw text) too.
     let html = "<title>a &bogus;</title><textarea>\n&#xZZ;</textarea>";
     assert_eq!(positions(html), [9, html.find("&#").unwrap()]);
+}
+
+// An `=` where an attribute name starts begins the name (#235).
+
+#[test]
+fn an_equals_sign_before_an_attribute_name_starts_the_name() {
+    let dom = parse("<div =x>t</div>");
+    let div = dom.root().unwrap();
+    let attrs: Vec<_> = div.attributes().collect();
+    assert_eq!(attrs, [("=x", "")]);
+    assert_eq!(div.attr("x"), None);
+    assert_eq!(dom.select("[x]").count(), 0);
+    // A parse error is recorded, at the `=`.
+    let errors = dom.errors();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].kind, ErrorKind::UnexpectedEqualsSign);
+    assert_eq!(errors[0].position, 5);
+    // It survives a round trip.
+    assert_eq!(dom.to_html(), "<div =x>t</div>");
+    assert_eq!(
+        parse(&dom.to_html()).root().unwrap().attributes().count(),
+        1
+    );
+}
+
+#[test]
+fn equals_signs_around_attribute_names() {
+    for (html, want) in [
+        ("<div =>", vec![("=", "")]),
+        ("<div ==x a=b>", vec![("=", "x"), ("a", "b")]),
+        ("<div a =b>", vec![("a", "b")]),
+        ("<div a= =b>", vec![("a", "=b")]),
+        ("<div =\"x\">", vec![("=\"x\"", "")]),
+        ("<div =x=y>", vec![("=x", "y")]),
+    ] {
+        let dom = parse(html);
+        let got: Vec<_> = dom.root().unwrap().attributes().collect();
+        assert_eq!(got, want, "{html}");
+    }
+    // The tokenizer reports it too.
+    let toks: Vec<_> = tokenize("<div =x>").collect();
+    assert!(
+        matches!(&toks[0], Token::StartTag { attrs, .. } if attrs.len() == 1 && attrs[0].0 == "=x")
+    );
 }

@@ -13,6 +13,7 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ### Output changes
 
+- Tokenizer: an `=` where an attribute name starts begins the name, as in browsers ([#235](https://github.com/iamsaquib8/domq/issues/235)): `<div =x>` has an attribute named `=x` (it was `x`), and a parse error, the new `ErrorKind::UnexpectedEqualsSign`, is recorded at the `=`.
 - CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
 
 ### Fixed
