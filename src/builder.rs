@@ -506,6 +506,12 @@ struct OpenElements<O> {
     /// How many `<a>`, `<nobr>`, `<button>` and `<select>` are open (what a
     /// start tag of the same name closes, see [`tags::search`]).
     open_nested: usize,
+    /// How many `<svg>` and `<math>` are open: while none is, an `<image>`
+    /// is an `<img>` without looking at the stack.
+    open_foreign: usize,
+    /// How many times [`OpenElements::find_foreign`] scanned the stack.
+    #[cfg(test)]
+    foreign_scans: core::cell::Cell<usize>,
 }
 
 impl<O> Default for OpenElements<O> {
@@ -515,6 +521,9 @@ impl<O> Default for OpenElements<O> {
             open_p: 0,
             open_items: 0,
             open_nested: 0,
+            open_foreign: 0,
+            #[cfg(test)]
+            foreign_scans: core::cell::Cell::new(0),
         }
     }
 }
@@ -556,6 +565,7 @@ impl<O> OpenElements<O> {
         }
         let counter = match tag {
             Tag::P => &mut self.open_p,
+            Tag::SVG | Tag::MATH => &mut self.open_foreign,
             t if t.is_nested() => &mut self.open_nested,
             _ => &mut self.open_items,
         };
@@ -604,8 +614,14 @@ impl<O> OpenElements<O> {
 
     /// The stack index of the open `svg` or `math` (`tag`) that an `<image>`
     /// sits in: the innermost among the [`MAX_END_TAG_SEARCH`] innermost open
-    /// elements, else among the [`OUTER_END_TAG_SEARCH`] outermost.
+    /// elements, else among the [`OUTER_END_TAG_SEARCH`] outermost. `None`
+    /// when none is open, without looking at the stack.
     fn find_foreign(&self, tag: Tag) -> Option<usize> {
+        if self.open_foreign == 0 {
+            return None;
+        }
+        #[cfg(test)]
+        self.foreign_scans.set(self.foreign_scans.get() + 1);
         let named = |entry: &(O, Tag)| entry.1 == tag;
         let inner = self.stack.len().saturating_sub(MAX_END_TAG_SEARCH);
         if let Some(i) = self
@@ -680,5 +696,58 @@ pub(crate) fn lower(name: &str) -> Cow<'_, str> {
         Cow::Owned(name.to_ascii_lowercase())
     } else {
         Cow::Borrowed(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::format;
+    use alloc::string::String;
+
+    use super::*;
+
+    /// How many times the builder scanned the open elements for an `svg` or
+    /// `math` while building `src`.
+    fn foreign_scans(src: &str) -> usize {
+        let mut tk = Tokenizer::new(src);
+        let mut builder = TreeBuilder::new(DomSink::new(src.len()), src);
+        while let Some((tok, pos)) = tk.next_token() {
+            let end = tk.offset();
+            builder.token(tok, tk.tag(), tk.attrs(), pos, end);
+        }
+        builder.open.foreign_scans.get()
+    }
+
+    /// Not a timing test: an `<image>` with no `svg` or `math` open must not
+    /// scan the (here deep) stack at all, which is what made 200,000 of them
+    /// under 300 `<div>`s several times slower than the same stream of events.
+    #[test]
+    fn image_outside_svg_and_math_scans_nothing() {
+        let page: String = format!("{}{}", "<div>".repeat(300), "<image>".repeat(1000));
+        assert_eq!(foreign_scans(&page), 0);
+        // Closed ones are not open any more.
+        assert_eq!(foreign_scans("<svg></svg><math></math><image>"), 0);
+        assert_eq!(foreign_scans("<svg><g></svg><image>"), 0);
+    }
+
+    #[test]
+    fn image_inside_svg_or_math_still_looks_at_the_stack() {
+        assert!(foreign_scans("<svg><image>") > 0);
+        assert!(foreign_scans("<math><mi><image>") > 0);
+        // Out of the bounded search's reach, an `svg` is still counted open
+        // and the bounded scan decides, as before the counters.
+        let deep = format!("<svg>{}<image>", "<div>".repeat(MAX_END_TAG_SEARCH + 20));
+        assert!(foreign_scans(&deep) > 0);
+    }
+
+    #[test]
+    fn image_is_img_unless_in_svg_or_math() {
+        let started = |name: &str| {
+            crate::events("<image><svg><image></svg><math><image></math><image>")
+                .filter(|(e, _)| matches!(e, crate::Event::Start { name: n, .. } if n == name))
+                .count()
+        };
+        assert_eq!(started("img"), 2);
+        assert_eq!(started("image"), 2);
     }
 }

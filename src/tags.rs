@@ -330,11 +330,11 @@ impl Tag {
     }
 
     /// Whether the builder counts this element while it is open (see
-    /// `OpenElements`): a `<p>`, an item (what [`search`] closes), or one of the
-    /// elements closed by a start tag of their own name.
+    /// `OpenElements`): a `<p>`, an item (what [`search`] closes), one of the
+    /// elements closed by a start tag of their own name, or `svg`/`math`.
     #[inline]
     pub(crate) fn is_counted(self) -> bool {
-        self.has(ITEM | NESTED) || self == Tag::P
+        self.has(ITEM | NESTED) || matches!(self, Tag::P | Tag::SVG | Tag::MATH)
     }
 
     #[inline]

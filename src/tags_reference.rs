@@ -565,6 +565,8 @@ mod tests {
                         | "nobr"
                         | "button"
                         | "select"
+                        | "svg"
+                        | "math"
                 ),
                 "{name}"
             );
