@@ -1022,3 +1022,104 @@ fn hostile_spans_are_bounded() {
     let out = md(&html);
     assert!(out.len() < 8_000_000, "{} bytes", out.len());
 }
+
+// Character references in link destinations and titles (#105).
+
+/// What a CommonMark parser makes of a link destination: its backslash
+/// escapes and the few character references these tests use, decoded.
+fn commonmark_destination(dest: &str) -> String {
+    let dest = dest
+        .strip_prefix('<')
+        .and_then(|d| d.strip_suffix('>'))
+        .unwrap_or(dest);
+    let mut out = String::new();
+    let mut rest = dest;
+    while let Some(c) = rest.chars().next() {
+        rest = &rest[c.len_utf8()..];
+        match c {
+            '\\' if rest.starts_with(|n: char| n.is_ascii_punctuation()) => {
+                out.push_str(&rest[..1]);
+                rest = &rest[1..];
+            }
+            '&' => {
+                let end = rest.find(';').filter(|&e| e <= 32);
+                let decoded = end.and_then(|e| match &rest[..e] {
+                    "amp" => Some(('&', e)),
+                    "lt" => Some(('<', e)),
+                    "gt" => Some(('>', e)),
+                    "quot" => Some(('"', e)),
+                    n => n
+                        .strip_prefix('#')
+                        .and_then(|n| match n.strip_prefix(['x', 'X']) {
+                            Some(h) => u32::from_str_radix(h, 16).ok(),
+                            None => n.parse().ok(),
+                        })
+                        .and_then(char::from_u32)
+                        .map(|ch| (ch, e)),
+                });
+                match decoded {
+                    Some((ch, e)) => {
+                        out.push(ch);
+                        rest = &rest[e + 1..];
+                    }
+                    None => out.push('&'),
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+#[test]
+fn character_references_in_destinations_keep_the_url() {
+    for href in [
+        "/x?a=1&amp;b=2",
+        "/search?q=&lt;b&gt;",
+        "/x?a=1&b=2&c=3",
+        "/x?a=1&#38;b",
+        "/x&#x26;y;",
+        "/x?q=a&amp;amp;amp;b",
+        "/a&b;c",
+        "/a&copy=1&notin=2",
+        "/p&amp;",
+        "/&",
+        "/x y&amp;z",
+        "/x(1)&lt;",
+    ] {
+        // The attribute is decoded once by the HTML parser, then written.
+        let html = format!("<a href=\"{}\">t</a>", href.replace('&', "&amp;"));
+        let dom = parse(&html);
+        let want = dom.root().unwrap().attr("href").unwrap().to_string();
+        let out = dom.to_markdown();
+        let dest = out
+            .strip_prefix("[t](")
+            .and_then(|r| r.strip_suffix(')'))
+            .unwrap_or_else(|| panic!("{out}"));
+        assert_eq!(commonmark_destination(dest), want, "{href}: {out}");
+    }
+    assert_eq!(
+        md("<a href=\"/x?a=1&amp;amp;b=2\">q</a>"),
+        "[q](/x?a=1&amp;amp;b=2)"
+    );
+    assert_eq!(
+        md("<a href=\"/search?q=&amp;lt;b&amp;gt;\">x</a>"),
+        "[x](/search?q=&amp;lt;b&amp;gt;)"
+    );
+    // A plain `&` stays as written.
+    assert_eq!(md("<a href=\"/x?a=1&amp;b=2\">q</a>"), "[q](/x?a=1&b=2)");
+    assert_eq!(
+        md("<a href=\"/x?a=1&amp;b=2&amp;c=3\">q</a>"),
+        "[q](/x?a=1&b=2&c=3)"
+    );
+    // Images, titles and reference definitions too.
+    assert_eq!(
+        md("<img src=\"/i.png?x=1&amp;amp;y=2\" alt=a title=\"&amp;copy; &amp;amp; x&amp;y\">"),
+        "![a](/i.png?x=1&amp;amp;y=2 \"&amp;copy; &amp;amp; x&y\")"
+    );
+    let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
+    assert_eq!(
+        parse("<a href=\"/x?a=1&amp;amp;b=2\" title=\"&amp;lt;\">q</a>").to_markdown_with(&opts),
+        "[q][1]\n\n[1]: /x?a=1&amp;amp;b=2 \"&amp;lt;\""
+    );
+}

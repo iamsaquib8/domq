@@ -1582,7 +1582,7 @@ fn push_destination(out: &mut String, url: &str) {
     if pointy {
         out.push('<');
     }
-    for c in url.chars() {
+    for (i, c) in url.char_indices() {
         match c {
             '\n' | '\r' | '\t' => {}
             '\\' => out.push_str("\\\\"),
@@ -1590,6 +1590,10 @@ fn push_destination(out: &mut String, url: &str) {
                 out.push('\\');
                 out.push(c);
             }
+            // CommonMark decodes character references here, and a backslash
+            // does not stop it: `&amp;` is the only way to write a literal `&`
+            // where one would read as a reference.
+            '&' if url.get(i..).is_some_and(starts_char_reference) => out.push_str("&amp;"),
             c => out.push(c),
         }
     }
@@ -1598,17 +1602,35 @@ fn push_destination(out: &mut String, url: &str) {
     }
 }
 
+/// Whether `s` starts with a character reference as CommonMark reads one:
+/// `&name;` (letters and digits, up to 32 characters, starting with a letter),
+/// `&#` and 1–7 digits `;`, or `&#x` and 1–6 hex digits `;`. Whether the name
+/// is known does not matter: writing `&amp;` for the `&` is right either way.
+fn starts_char_reference(s: &str) -> bool {
+    let bytes = s.as_bytes().get(1..).unwrap_or(&[]);
+    let (skip, valid, max): (usize, fn(&u8) -> bool, usize) = match bytes {
+        [b'#', b'x' | b'X', ..] => (2, u8::is_ascii_hexdigit, 6),
+        [b'#', ..] => (1, u8::is_ascii_digit, 7),
+        [first, ..] if first.is_ascii_alphabetic() => (0, u8::is_ascii_alphanumeric, 32),
+        _ => return false,
+    };
+    let body = bytes.get(skip..).unwrap_or(&[]);
+    let run = body.iter().take_while(|b| valid(b)).count();
+    (1..=max).contains(&run) && body.get(run) == Some(&b';')
+}
+
 fn push_title(out: &mut String, title: Option<&str>) {
     let Some(title) = title.map(str::trim).filter(|t| !t.is_empty()) else {
         return;
     };
     out.push_str(" \"");
-    for c in title.chars() {
+    for (i, c) in title.char_indices() {
         match c {
             '"' | '\\' => {
                 out.push('\\');
                 out.push(c);
             }
+            '&' if title.get(i..).is_some_and(starts_char_reference) => out.push_str("&amp;"),
             c if is_space(c) => out.push(' '),
             c => out.push(c),
         }

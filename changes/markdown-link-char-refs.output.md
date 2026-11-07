@@ -1,0 +1,1 @@
+Markdown: a `&` that starts a character reference in a link destination, image source or title is written `&amp;` ([#105](https://github.com/iamsaquib8/domq/issues/105)). CommonMark decodes references there, so `href="/x?a=1&amp;amp;b=2"` was written `[q](/x?a=1&amp;b=2)` and rendered as `/x?a=1&b=2`; it is now `[q](/x?a=1&amp;amp;b=2)`. A plain `&` (`/x?a=1&b=2`) is unchanged.
