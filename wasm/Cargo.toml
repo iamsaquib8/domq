@@ -23,6 +23,15 @@ autotests = false
 # optimised module ~9 KB gzipped bigger (measured: 36,618 -> 45,370 bytes).
 crate-type = ["cdylib"]
 
+[features]
+# `extract` (on by default) adds the extraction API: mainContent, metadata,
+# links, resources, toMarkdownChunks, tables and toCsv (as Document methods
+# and as free functions). The npm package ships both builds: the core module
+# (`--no-default-features`, imported as `domq-wasm`) and the full one
+# (`domq-wasm/extract`). See npm/build.mjs.
+default = ["extract"]
+extract = []
+
 [dependencies]
 # `no_std`: drops std's panic/formatting machinery from the module.
 wasm-bindgen = { version = "0.2.100", default-features = false }

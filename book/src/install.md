@@ -45,16 +45,30 @@ with a `SHA256SUMS` file.
 npm install domq-wasm
 ```
 
-Node 22+, Bun and Deno use it directly (`import { select } from "domq-wasm"`).
-Browsers and bundlers call `await init()` once first. Without a bundler:
+The package has two entries, built from the same crate:
+
+| Import | What you get | `.wasm`, gzipped |
+|---|---|---:|
+| `domq-wasm` | the core: parse, select, text, Markdown, JSON, HTML, `Document` | 56.6 KB |
+| `domq-wasm/extract` | the core plus reader mode, metadata, links, chunks and tables | 77.8 KB |
+
+Node 22+, Bun and Deno use either directly
+(`import { select } from "domq-wasm"`,
+`import { mainContent } from "domq-wasm/extract"`). Browsers and bundlers call
+`await init()` once first. Without a bundler:
 
 ```html
 <script type="module">
-  import init, { toText } from "https://cdn.jsdelivr.net/npm/domq-wasm@0.6/domq_wasm.js";
+  import init, { toText } from "https://cdn.jsdelivr.net/npm/domq-wasm@0.7/domq_wasm.js";
   await init();
   console.log(toText("<p>Hello <b>world</b>"));
 </script>
 ```
+
+For the extraction API, load `domq-wasm@0.7/extract/domq_wasm.js` instead.
+Upgrading from 0.6? Extraction (`mainContent`, `metadata`, `links`,
+`resources`, `toMarkdownChunks`, `tables`, `toCsv`) is no longer exported by
+the root entry: import it from `domq-wasm/extract`.
 
 ## Python
 

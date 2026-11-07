@@ -6,7 +6,8 @@
 </picture>
 
 A tiny, zero-dependency, never-panicking HTML parser with CSS selectors —
-for Rust, your shell, JavaScript (a ~70 KB gzipped WebAssembly module) and Python.
+for Rust, your shell, JavaScript (a ~57 KB gzipped WebAssembly module, ~78 KB with
+reader mode and extraction) and Python.
 
 [![crates.io](https://img.shields.io/crates/v/domq.svg?logo=rust)](https://crates.io/crates/domq)
 [![npm](https://img.shields.io/npm/v/domq-wasm.svg?logo=npm)](https://www.npmjs.com/package/domq-wasm)
@@ -119,8 +120,8 @@ Also: 🤖 **AI agents** — `domq mcp` ([setup](#ai-agents-mcp)) · 🐍 **Pyth
   favourite, `:contains("text")`.
 - **Content out, not just a tree.** Readable text (`to_text`), CommonMark/GFM
   Markdown (`to_markdown`) for LLM prompts and RAG pipelines, JSON, and HTML.
-- **Runs everywhere.** `no_std + alloc`, `#![forbid(unsafe_code)]`, a ~70 KB
-  gzipped wasm module for browsers, Cloudflare Workers, Deno, Bun and Node, and a
+- **Runs everywhere.** `no_std + alloc`, `#![forbid(unsafe_code)]`, a ~57 KB
+  gzipped wasm module (~78 KB with extraction) for browsers, Cloudflare Workers, Deno, Bun and Node, and a
   single static binary for your shell.
 - **Fast for an owned tree.** 5.6–9.5× faster than `scraper` on real pages, with
   6–23 allocations per parse (benchmark inputs). Speed specialists that do less work are faster:
@@ -378,13 +379,16 @@ MCP config:
 
 ## JavaScript & WebAssembly
 
-The same parser — selectors, text, Markdown and all — in a ~71 KB (gzipped; 0.6.0
-was ~65 KB) wasm module with zero JS dependencies and full TypeScript types.
+The same parser — selectors, text, Markdown and all — in a ~57 KB (gzipped) wasm
+module, or ~78 KB with reader mode and the other extraction helpers, with zero JS
+dependencies and full TypeScript types.
 Works in the browser, Cloudflare Workers, Deno, Bun, and Node (no setup needed
 in Node). [Package docs →](./wasm) · [**Playground →**](https://iamsaquib8.github.io/domq/)
 
 ```js
-import init, { parse, select, toMarkdown, mainContent, toMarkdownChunks, Document } from "domq-wasm";
+// "domq-wasm/extract" = everything; plain "domq-wasm" is the smaller core without
+// mainContent, toMarkdownChunks, metadata, links, resources, tables and toCsv.
+import init, { parse, select, toMarkdown, mainContent, toMarkdownChunks, Document } from "domq-wasm/extract";
 await init(); // browsers and Workers; harmless in Node
 
 const tree = parse("<ul><li>a<li>b</ul>");   // typed tree: { type: "document", children: [...] }

@@ -62,21 +62,32 @@ setup: npmjs.com → `domq-wasm` → Settings → Trusted publishing → GitHub
 Actions, repository `iamsaquib8/domq`, workflow `release.yml`,
 environment `npm`. The manual steps below are the fallback.
 
-The npm version comes from `wasm/Cargo.toml`; bump it there. The
-package is one `--target web` build plus a small Node entry point
-(`npm/node.js`) and an `"exports"` map that `npm/finish.mjs` adds. Don't build
-with `--target nodejs` or `bundler`: the one package serves every runtime.
+The npm version comes from `wasm/Cargo.toml`; bump it there. The package is
+one `--target web` build per entry plus a small Node entry point
+(`npm/node.js`) and an `"exports"` map. Two builds from one crate (the
+`extract` cargo feature, on by default):
+
+- `domq-wasm`: the **core** (`--no-default-features`), in the package root;
+- `domq-wasm/extract`: the **full** build with extraction (`mainContent`,
+  `metadata`, `links`, `resources`, `toMarkdownChunks`, `tables`, `toCsv`),
+  in `extract/`.
+
+`npm/build.mjs` runs both `wasm-pack build`s and then `npm/finish.mjs`, which
+adds each entry's Node entry point, the `"exports"` map and the `files` list,
+and checks that the core's `.d.ts` declares none of the extraction API. Don't
+build with `--target nodejs` or `bundler`: the one package serves every runtime.
 
 ```sh
 cd wasm
-wasm-pack build --target web --release
-node npm/finish.mjs                             # Node entry point + "exports" in pkg/package.json
-wasm-pack test --node                           # binding tests
-sh npm/smoke-test.sh                            # npm-pack pkg/, install it, run tests/node.mjs
-gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c    # expect ~71 KB (CI gate: 80000 bytes)
+node npm/build.mjs                              # core -> pkg/, extract -> pkg/extract/, Node entry points, "exports"
+wasm-pack test --node                           # binding tests, extract build
+wasm-pack test --node -- --no-default-features  # binding tests, core build
+sh npm/smoke-test.sh                            # npm-pack pkg/, install it, run tests/node.mjs against both entries
+gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c            # core: expect ~56.6 KB (CI gate: 60000 bytes)
+gzip -9 -c pkg/extract/domq_wasm_bg.wasm | wc -c    # extract: expect ~77.8 KB (CI gate: 80000 bytes)
 
 cd pkg
-npm pack --dry-run                              # expect 7 files, incl. LICENSE, node.js and the .wasm
+npm pack --dry-run                              # expect 11 files: LICENSE, README.md, package.json, and per entry the .wasm, .js, .d.ts and node.js
 npm login
 npm publish --access public
 ```

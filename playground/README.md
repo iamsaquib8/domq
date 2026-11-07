@@ -8,6 +8,11 @@ Deployed to <https://iamsaquib8.github.io/domq/> on pushes to `main` by
 ## Run it locally
 
 The page imports the wasm build from `playground/pkg/`, which is not checked in.
+It uses the full `extract` build (the crate's default features), the same
+module as `domq-wasm/extract` on npm, so reader mode, metadata, chunks and the
+rest of the extraction API are available to it. The npm package's core build
+(`domq-wasm`) is smaller and leaves extraction out; see
+[`wasm/README.md`](../wasm/README.md).
 
 ```sh
 cd wasm

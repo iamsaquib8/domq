@@ -45,12 +45,14 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack@0.15.0,mdbook@0.5.4
+      # The full build (the default `extract` feature, what the npm package
+      # ships as `domq-wasm/extract`): the playground shows the extraction API.
       - name: Build the wasm module into playground/pkg
         working-directory: wasm
         run: wasm-pack build --target web --release --no-pack --out-dir ../playground/pkg
       - name: Report the module size
         run: |
-          echo "wasm: $(wc -c < playground/pkg/domq_wasm_bg.wasm) bytes," \
+          echo "wasm (extract build): $(wc -c < playground/pkg/domq_wasm_bg.wasm) bytes," \
                "$(gzip -9 -c playground/pkg/domq_wasm_bg.wasm | wc -c) gzipped"
       - name: Assemble the site (playground at /, guide at /docs/)
         run: |

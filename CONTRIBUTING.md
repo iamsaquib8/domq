@@ -37,8 +37,8 @@ cargo test -p domq-derive
 cargo test -p domq-cli
 cargo run -p domq-cli -- --help
 
-# WASM
-cd wasm && wasm-pack build --target web --release && wasm-pack test --node
+# WASM: the core and the extract build (one crate, the `extract` feature)
+cd wasm && node npm/build.mjs && wasm-pack test --node && wasm-pack test --node -- --no-default-features
 
 # Playground (after building the wasm into playground/pkg — see playground/README.md)
 python3 -m http.server -d playground 8000
