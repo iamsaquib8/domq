@@ -13,6 +13,7 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ### Output changes
 
+- Metadata: `Metadata::json_ld` blocks are ready for a JSON parser ([#99](https://github.com/iamsaquib8/domq/issues/99)). The `<![CDATA[ … ]]>` wrapper (also `//<![CDATA[ … //]]>` and `/*<![CDATA[*/ … /*]]>*/`) and a `<!-- … -->` wrapper round the block are stripped, and a block that is nothing but a wrapper is dropped. On Readability's 130 test pages, 33 of the 34 JSON-LD blocks parse with `serde_json` as returned (7 did before); `docs/reader-mode.md` reports it. `domq --meta`, the MCP `metadata` tool and the Python and JavaScript `metadata()` carry the same blocks.
 - Parser: one newline (`\n` or `\r\n`) right after a `<pre>`, `<listing>` or `<textarea>` start tag is dropped, as in browsers ([#75](https://github.com/iamsaquib8/domq/issues/75)), so `<pre>\ncode</pre>` has the text `code`, not `\ncode`. `text_content()`, JSON, `#[derive(FromHtml)]` extraction, text and Markdown code blocks, and `<textarea>` values no longer start with that newline. `to_html()` writes a newline back after the start tag when the content starts with one, so `<pre>\n\nx</pre>` round-trips.
 - CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
 
