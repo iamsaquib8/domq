@@ -1,27 +1,29 @@
 # Summary
 
-[Introduction](introduction.md)
+[domq guide](introduction.md)
 
-# Getting started
+# Start here
 
 - [Install](install.md)
 - [Quick start](quickstart.md)
+- [Choose your surface](surfaces.md)
+- [Which API do I use?](which-api.md)
 
-# Cookbook
+# Recipes
 
-- [Scrape elements and attributes](cookbook/scraping.md)
-- [Extract structured data](cookbook/extracting.md)
-- [Pages to Markdown for LLMs and RAG](cookbook/reader-mode.md)
+- [Turn a page into Markdown for an LLM](cookbook/reader-mode.md)
 - [Build a RAG index from web pages](cookbook/rag-index.md)
 - [Give an agent a page](cookbook/agent-page.md)
+- [Scrape elements and attributes](cookbook/scraping.md)
+- [Pull fields from a list of items](cookbook/extracting.md)
+- [Scrape links, metadata and tables](cookbook/links-metadata-tables.md)
 - [Crawl results to a table](cookbook/crawl-to-table.md)
 - [Replace htmlq and pup in shell scripts](cookbook/shell-scripts.md)
+- [Edit HTML and write it back](cookbook/editing.md)
 - [Clean HTML before storing it](cookbook/clean-html.md)
+- [Process a huge dump without building a tree](cookbook/streaming.md)
+- [Check HTML for accessibility problems in CI](cookbook/lint.md)
 - [Use domq in a Cloudflare Worker, Deno or the browser](cookbook/edge.md)
-- [Links, metadata and tables](cookbook/links-metadata-tables.md)
-- [Edit and serialize](cookbook/editing.md)
-- [Stream huge documents](cookbook/streaming.md)
-- [Lint HTML in CI](cookbook/lint.md)
 
 # Reference
 

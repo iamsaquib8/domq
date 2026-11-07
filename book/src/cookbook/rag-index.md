@@ -246,4 +246,4 @@ library upgrade cannot change your index.
 ## Reference
 
 [Turn a page into Markdown for an LLM](reader-mode.md), [Links, metadata and
-tables](links-metadata-tables.md).
+tables](links-metadata-tables.md), [Which API do I use?](../which-api.md).

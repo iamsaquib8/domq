@@ -1,4 +1,4 @@
-# Lint HTML in CI
+# Check HTML for accessibility problems in CI
 
 `domq lint` checks HTML for common accessibility and markup problems and
 prints one line per finding, in the `file:line:col` format editors and CI

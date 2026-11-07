@@ -153,7 +153,7 @@ functions (`toText(html)` and the others) take strings only; use
 - **JavaScript has no outline, lint, editing or declarative extraction.**
   The outline and `-e`-style extraction are in the CLI, the MCP server, Rust and
   Python (extraction as `Select` dataclasses); lint is in the CLI and the MCP
-  server; editing is in Rust.
+  server; editing is in Rust ([Choose your surface](../surfaces.md)).
 - **Limits of your platform are not domq's.** Memory and CPU limits of a
   Worker, and how large a page you can parse within them, are not measured
   here: test with your own pages.
@@ -164,5 +164,5 @@ functions (`toText(html)` and the others) take strings only; use
 
 ## Reference
 
-[Install](../install.md#javascript-and-webassembly) and the package README
-for every function.
+[Install](../install.md#javascript-and-webassembly), [Which API do I
+use?](../which-api.md) and the package README for every function.
