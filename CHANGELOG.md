@@ -14,10 +14,12 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 ### Output changes
 
 - Parser: a `<` that starts no markup (`a < b`, `<3`, `<-`) stays in its text run instead of splitting it into three nodes ([#76](https://github.com/iamsaquib8/domq/issues/76)). `<p>if a < b then</p>` has one text node, so `first_child().text()`, the JSON tree, `children()` walks and the `Event::Text` stream see the whole sentence. `tokenize` yields one `Text` token for the run, and no longer yields an empty `Text("")` for a dropped `</>`. (The text on either side of a `</>` is still two nodes.)
+- Parser: one newline (`\n` or `\r\n`) right after a `<pre>`, `<listing>` or `<textarea>` start tag is dropped, as in browsers ([#75](https://github.com/iamsaquib8/domq/issues/75)), so `<pre>\ncode</pre>` has the text `code`, not `\ncode`. `text_content()`, JSON, `#[derive(FromHtml)]` extraction, text and Markdown code blocks, and `<textarea>` values no longer start with that newline. `to_html()` writes a newline back after the start tag when the content starts with one, so `<pre>\n\nx</pre>` round-trips.
 - CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
 
 ### Fixed
 
+- Parser: HTML conformance (same structure) goes from 1210 to 1216 of 1959 tests, and exact from 83 to 87, with no regressions (`tests3.dat:63`, `:75`, `:89`, `:215`, `:227`, `tests7.dat:188`).
 - MCP: a request whose `_meta` specifies a handshake-era legacy version is served with legacy semantics rather than modern, allowing `initialize` and omitting modern result fields, and `clientCapabilities` is validated to be an object ([#159](https://github.com/iamsaquib8/domq/issues/159)).
 - CLI: `-1` is applied after attribute (`-a`) and whitespace (`-w`) filtering rather than before, and `-c` honours `-w` to skip blank matches ([#144](https://github.com/iamsaquib8/domq/issues/144)).
 - Reject Markdown options combined with another output format, regardless of flag order.
@@ -39,6 +41,7 @@ are `#[non_exhaustive]`, so they can grow without breaking you: build
 `match` on `LinkStyle` or `ImageStyle` a `_` arm.
 
 ### Added
+
 - **Python: reader mode and the data helpers.** `Document.main_content()`,
   `metadata()` (a `Metadata` object with `to_dict()`), `links()` and
   `resources()` (with `base_url`), `to_markdown_chunks(max_chars)` (each
@@ -85,6 +88,7 @@ are `#[non_exhaustive]`, so they can grow without breaking you: build
   still exit 0.
 
 ### Output changes
+
 - **`<noscript>` that holds the page is shown.** When a document has more
   text inside `<noscript>` than outside it (a page that renders with script
   and ships its content for clients without it, as Discourse forums do),
@@ -97,6 +101,7 @@ are `#[non_exhaustive]`, so they can grow without breaking you: build
   single-quoted; both used to cut the heading short.
 
 ### Fixed
+
 - **The guide is online.** The Pages deploy wrote the mdBook guide outside
   the uploaded site (mdBook 0.5 resolves `--dest-dir` against the current
   directory), so <https://iamsaquib8.github.io/domq/docs/> was a 404 since
@@ -111,6 +116,7 @@ are `#[non_exhaustive]`, so they can grow without breaking you: build
   the CLI, MCP server and Python bindings stay up on such input.
 
 ### Performance
+
 - Serializing or querying many subtrees no longer walks the whole document
   each time to decide whether `<noscript>` holds the page.
 
@@ -128,6 +134,7 @@ Markdown if exact text matters. `ErrorKind` gains `MissingSemicolon`
 (it is `#[non_exhaustive]`, so matches with a `_` arm keep compiling).
 
 ### Added
+
 - **`domq mcp`: an MCP server for AI agents.** The CLI serves the Model
   Context Protocol over stdio with nine read-only tools: `markdown`, `text`,
   `select`, `extract`, `chunks`, `links`, `metadata`, `tables` and `lint`.
@@ -176,6 +183,7 @@ content indexed with 0.4 if exact text matters.
   whole).
 
 ### Changed
+
 - **Better reader mode** (95.2% F1 against Readability, from 91.9%; the
   whole page scores 82.1%): a Schema.org `itemprop="articleBody"` is the
   first semantic hint, a block with no block inside it counts as a paragraph
@@ -211,6 +219,7 @@ content indexed with 0.4 if exact text matters.
     `<image>` is an `<img>` (outside SVG and MathML).
 
 ### Fixed
+
 - Docs: the README's Cargo snippet asked for `domq = "0.3"`, which does not
   exist under the new name, and the npm README's CDN URL pointed at the wrong
   package.
@@ -220,6 +229,7 @@ content indexed with 0.4 if exact text matters.
 "Declarative scraping", and one name everywhere.
 
 ### Changed
+
 - **Renamed to `domq`.** The crate is `domq` (was `dom-tree-rs`, imported as
   `domtree`), the CLI crate `domq-cli` with the binary `domq` (was
   `domtree-cli` / `domtree`), the npm package `domq-wasm` (was `dom-tree-wasm`; npm reserves plain `domq`), the
@@ -238,6 +248,7 @@ content indexed with 0.4 if exact text matters.
   `syn` 3.
 
 ### Added
+
 - **`#[derive(FromHtml)]`** (new `derive` feature, companion crate
   `domq-derive`): declarative extraction into structs with
   `#[html(select, attr, html, outer_html, markdown, default, with, skip)]`,
@@ -263,6 +274,7 @@ planned as phases 0.3 to 0.7, plus distribution (npm, PyPI, Homebrew, release
 binaries) and the fixes from two independent reviews.
 
 ### Added
+
 - **CSS selector engine v2** (`query` feature, now **on by default**):
   `+`/`~` combinators; every attribute operator (`^=` `$=` `*=` `~=` `|=`) with
   the `i`/`s` flags; `:first-child`, `:last-child`, `:only-child`,
@@ -360,6 +372,7 @@ binaries) and the fixes from two independent reviews.
 - Prebuilt CLI binaries for Linux arm64.
 
 ### Changed
+
 - Top-level nodes are now linked as siblings (`next_sibling`/`prev_sibling`),
   so sibling combinators and `:first-child` work on multi-root fragments.
 - Numeric character references in `0x80–0x9F` are remapped per the WHATWG
@@ -380,11 +393,11 @@ binaries) and the fixes from two independent reviews.
   and row groups.
 - Nodes are 64 bytes (were 80); `NodeId` is non-zero, so `Option<NodeId>` is
   4 bytes.
-
 - CLI: undeclared non-UTF-8 input now decodes as Windows-1252 (as browsers
   do) instead of lossy UTF-8, e.g. `caf\xe9` → `café`.
 
 ### Security / hardening
+
 - Edited content can no longer inject markup on output: text set inside
   `<script>`, `<style>`, `<textarea>` or `<title>` cannot close the element
   early (a `</script` is written `<\/script`; parsed documents serialize
@@ -401,6 +414,7 @@ binaries) and the fixes from two independent reviews.
   `base_url` ignores a `<base>` inside `<template>`, `<svg>` or `<math>`.
 
 ### Fixed
+
 - Linear-time fixes found in review: scoped selector queries
   (`tr.select(…)`, `matches`, `closest`) no longer pay for the whole document
   per call (160k rows: 18 s → 70 ms) and selector memo memory is bounded;
@@ -434,12 +448,14 @@ binaries) and the fixes from two independent reviews.
 ## [0.2.1] — 2026-06-24
 
 ### Added
+
 - Zero-dependency HTML re-serialization (`Dom::to_html`, `NodeRef::to_html`) —
   round-trips a parsed tree back to HTML with correct escaping and void/raw-text
   handling. Always available (no feature required).
 - `#![forbid(unsafe_code)]` — the crate contains no `unsafe`.
 
 ### Changed
+
 - Moved to **edition 2024**; minimum supported Rust is now **1.85**
   (developed and tested on the latest stable).
 
@@ -449,6 +465,7 @@ A full rewrite. The 0.1 line was a learning-project parser that panicked on
 almost any real-world HTML; 0.2 is a robust, tiny, zero-dependency library.
 
 ### Added
+
 - Error-tolerant parser that **never panics**; recovery diagnostics via
   `Dom::errors()`.
 - Streaming, allocation-light `Tokenizer` (`domtree::tokenize`) implementing
@@ -471,12 +488,14 @@ almost any real-world HTML; 0.2 is a robust, tiny, zero-dependency library.
 - `cargo-fuzz` harness, criterion benchmarks, and a full GitHub Actions CI.
 
 ### Changed
+
 - **Breaking:** the public API is redesigned. The crate is now used as `domtree`;
   `parse` returns an owned `Dom`; `NodeRef::kind()` returns a borrowed `Copy`
   `NodeKind<'a>`. The old owned `Node`/`Props`/`NodeData` types are gone.
 - `serde`/`serde_json` are no longer dependencies of the default build.
 
 ### Performance
+
 - ~250 MiB/s on a synthetic article workload — within ~5–15 % of `tl` and
   roughly on par on large documents — while remaining zero-dependency.
 
