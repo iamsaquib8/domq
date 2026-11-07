@@ -209,7 +209,7 @@ impl Dom {
     /// assert!(domq::parse("<nav><a href=/>Home</a></nav>").main_content().is_none());
     /// ```
     pub fn main_content(&self) -> Option<NodeRef<'_>> {
-        let noscript = self.noscript_is_content;
+        let noscript = self.noscript_is_content();
         let order: Vec<NodeRef<'_>> = document_order(self).collect();
         let size = self.len();
         let mut flags = vec![0u8; size];

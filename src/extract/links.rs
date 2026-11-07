@@ -135,7 +135,7 @@ impl Dom {
         let base = base.as_deref().unwrap_or("");
         let mut links: Vec<Link<'_>> = Vec::new();
         let mut collector = TextCollector {
-            noscript: self.noscript_is_content,
+            noscript: self.noscript_is_content(),
             ..TextCollector::default()
         };
         for root in self.roots() {

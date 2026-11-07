@@ -35,7 +35,7 @@ impl Dom {
     /// ```
     pub fn to_text(&self) -> String {
         let mut text = Text {
-            noscript: self.noscript_is_content,
+            noscript: self.noscript_is_content(),
             ..Text::default()
         };
         for root in self.roots() {
@@ -67,7 +67,7 @@ impl NodeRef<'_> {
     pub fn to_text(&self) -> String {
         let mut text = Text {
             root: Some(self.id()),
-            noscript: self.dom().noscript_is_content,
+            noscript: self.dom().noscript_is_content(),
             ..Text::default()
         };
         walk(*self, |node, enter| text.visit(node, enter));
