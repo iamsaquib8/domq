@@ -13,8 +13,9 @@ const manifestPath = resolve(pkgDir, "package.json");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 
 copyFileSync(new URL("node.js", here), resolve(pkgDir, "node.js"));
-// npm always packs a file named LICENSE, but not wasm-pack's LICENSE_MIT copy.
-copyFileSync(new URL("../LICENSE_MIT", here), resolve(pkgDir, "LICENSE"));
+// npm always packs a file named LICENSE; make sure it is there whatever
+// wasm-pack copied.
+copyFileSync(new URL("../LICENSE", here), resolve(pkgDir, "LICENSE"));
 
 const types = "./domq_wasm.d.ts";
 const ordered = {};
