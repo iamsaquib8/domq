@@ -158,7 +158,7 @@ $ curl -sL https://www.rust-lang.org | domq --links --jsonl header
 `--meta` prints the page's metadata as one object: `title`, `description`,
 `canonical`, `lang`, `site_name`, `image`, `author`, `published`, `keywords`,
 `og` and `twitter` (arrays of `[property, value]` pairs, repeats kept),
-`json_ld` (raw blocks) and `feeds`. Missing values are `null` or `[]`; with
+`json_ld` (blocks as written, minus any CDATA or comment wrapper) and `feeds`. Missing values are `null` or `[]`; with
 `-b`/`-B`, `canonical`, `image` and `feeds` are made absolute.
 
 ## Encodings

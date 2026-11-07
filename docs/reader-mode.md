@@ -48,6 +48,8 @@ Readability found a value; equal after collapsing whitespace.
 | language | 73 | 100.0% |
 | published time | 33 | 48.5% |
 
+`Metadata::json_ld` holds the page's JSON-LD blocks for a JSON parser: on 25 pages, 34 blocks, of which 33 parse with `serde_json` as returned.
+
 Readability's byline also comes from the page text ("By Jane Doe"), and its
 title drops a trailing site name ("Article | Site"); domq reads both from
 markup only, so those two rows count differences of convention too.
