@@ -13,6 +13,7 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ### Output changes
 
+- Markdown: GFM tables honour `colspan` and `rowspan` ([#98](https://github.com/iamsaquib8/domq/issues/98)). A spanning cell is written once and the slots it covers are empty, so later cells stay under their columns (`| Name | Score | | Rank |` for a `colspan=2` header; it was `| Name | Score | Rank | |`, with `Rank` over the wrong column). Spans follow `table_rows()`: values parse as HTML integers, stop at the end of their `<thead>`/`<tbody>`/`<tfoot>`, `rowspan=0` covers the rest of the group, and a table's spans add a bounded number of cells (the same budget as `table_rows()`).
 - Parser: one newline (`\n` or `\r\n`) right after a `<pre>`, `<listing>` or `<textarea>` start tag is dropped, as in browsers ([#75](https://github.com/iamsaquib8/domq/issues/75)), so `<pre>\ncode</pre>` has the text `code`, not `\ncode`. `text_content()`, JSON, `#[derive(FromHtml)]` extraction, text and Markdown code blocks, and `<textarea>` values no longer start with that newline. `to_html()` writes a newline back after the start tag when the content starts with one, so `<pre>\n\nx</pre>` round-trips.
 - CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
 

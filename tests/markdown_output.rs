@@ -741,3 +741,140 @@ fn markdown_options_chunks() {
         "# Title\n\nVisit [Page][1].\n\n[1]: https://example.com/page"
     );
 }
+
+// Tables with colspan and rowspan (#98).
+
+/// The cells of a Markdown table's rows (the delimiter row skipped), split at
+/// unescaped pipes.
+fn md_table(md: &str) -> Vec<Vec<String>> {
+    md.lines()
+        .filter(|l| l.starts_with('|') && !l.starts_with("| ---"))
+        .map(|l| {
+            let inner = l.trim_start_matches('|').trim_end_matches('|');
+            inner.split(" |").map(|c| c.trim().to_string()).collect()
+        })
+        .collect()
+}
+
+#[test]
+fn spanned_cells_keep_their_columns() {
+    // The repro: `Rank` sat over column 3 and its value under column 4.
+    assert_eq!(
+        md(
+            "<table><tr><th>Name</th><th colspan=\"2\">Score</th><th>Rank</th></tr>\
+            <tr><td>A</td><td>1</td><td>2</td><td>3</td></tr></table>"
+        ),
+        "| Name | Score | | Rank |\n| --- | --- | --- | --- |\n| A | 1 | 2 | 3 |"
+    );
+    // A rowspan leaves empty cells below its anchor; row groups end it.
+    assert_eq!(
+        md(
+            "<table><thead><tr><th>Region</th><th>Q1</th><th>Q2</th></tr></thead>\
+            <tbody><tr><td rowspan=2>EU</td><td>10</td><td>12</td></tr>\
+            <tr><td colspan=2>n/a</td></tr></tbody></table>"
+        ),
+        "| Region | Q1 | Q2 |\n| --- | --- | --- |\n| EU | 10 | 12 |\n| | n/a | |"
+    );
+    assert_eq!(
+        md(
+            "<table><thead><tr><th rowspan=3>H</th><th>a</th></tr></thead>\
+            <tbody><tr><td>1</td><td>2</td></tr></tbody></table>"
+        ),
+        "| H | a |\n| --- | --- |\n| 1 | 2 |"
+    );
+    // `rowspan=0` covers the rest of its group.
+    assert_eq!(
+        md(
+            "<table><tr><td rowspan=0>a</td><td>b</td></tr><tr><td>c</td></tr><tr><td>d</td></tr></table>"
+        ),
+        "| a | b |\n| --- | --- |\n| | c |\n| | d |"
+    );
+    // Both at once, and a rowspan reaching past a short row.
+    assert_eq!(
+        md(
+            "<table><tr><td>x</td><td rowspan=2 colspan=2>big</td></tr><tr><td>y</td></tr>\
+            <tr><td>1</td><td>2</td><td>3</td></tr></table>"
+        ),
+        "| x | big | |\n| --- | --- | --- |\n| y | | |\n| 1 | 2 | 3 |"
+    );
+    // Invalid or missing spans are 1; formatting stays in the cell.
+    assert_eq!(
+        md("<table><tr><td colspan=x rowspan=-2><b>a</b></td><td colspan=' 2'>b</td></tr></table>"),
+        "| **a** | b | |\n| --- | --- | --- |"
+    );
+}
+
+#[test]
+fn the_markdown_grid_matches_table_rows() {
+    for html in [
+        "<table><tr><th>Name</th><th colspan=2>Score</th><th>Rank</th></tr><tr><td>A</td><td>1</td><td>2</td><td>3</td></tr></table>",
+        "<table><thead><tr><th>R</th><th>Q1</th><th>Q2</th></tr></thead><tbody><tr><td rowspan=2>EU</td><td>10</td><td>12</td></tr><tr><td colspan=2>n/a</td></tr></tbody></table>",
+        "<table><tr><td rowspan=0>a</td><td>b</td></tr><tr><td>c</td></tr><tr><td>d</td></tr></table>",
+        "<table><tr><td>x</td><td rowspan=2 colspan=2>big</td></tr><tr><td>y</td></tr><tr><td>1</td><td>2</td><td>3</td></tr></table>",
+        "<table><tr><td rowspan=4>a</td></tr><tr><td>b</td></tr></table>",
+        "<table><tr><td colspan=3>wide</td></tr><tr><td>1</td><td rowspan=2>2</td><td>3</td></tr><tr><td>4</td><td>5</td></tr></table>",
+        "<table><tbody><tr><td rowspan=5>a</td><td>b</td></tr></tbody><tbody><tr><td>c</td></tr><tr><td>d</td><td>e</td></tr></tbody></table>",
+    ] {
+        let dom = parse(html);
+        let table = dom.find_by_tag("table").next().unwrap();
+        let rows = table.table_rows();
+        let grid = md_table(&dom.to_markdown());
+        assert_eq!(grid.len(), rows.len(), "{html}");
+        let width = rows.iter().map(Vec::len).max().unwrap();
+        for (g, r) in grid.iter().zip(&rows) {
+            // The same number of columns in every row, and each cell either
+            // the text of its slot or empty (a slot a span covers).
+            assert_eq!(g.len(), width, "{html}: {grid:?}");
+            for (i, cell) in g.iter().enumerate() {
+                if let Some(want) = r.get(i) {
+                    assert!(
+                        cell.is_empty() || cell == want,
+                        "{html}: {grid:?} vs {rows:?}"
+                    );
+                }
+            }
+        }
+        // Every slot's text appears at its anchor: the first slot of each
+        // distinct run of equal cells in table_rows.
+        let texts = |rows: &[Vec<String>]| {
+            let mut all: Vec<String> = rows
+                .iter()
+                .flatten()
+                .filter(|c| !c.is_empty())
+                .cloned()
+                .collect();
+            all.dedup();
+            all
+        };
+        let anchors: Vec<String> = grid
+            .iter()
+            .flatten()
+            .filter(|c| !c.is_empty())
+            .cloned()
+            .collect();
+        for t in texts(&rows) {
+            assert!(anchors.contains(&t), "{html}: {t} missing from {grid:?}");
+        }
+    }
+}
+
+#[test]
+fn hostile_spans_are_bounded() {
+    // Every cell asks for 1000 x 1000; the budget turns most into 1 x 1.
+    let cell = "<td colspan=1000 rowspan=1000>x</td>";
+    let html = format!(
+        "<table>{}</table>",
+        format!("<tr>{}</tr>", cell.repeat(50)).repeat(50)
+    );
+    let start = std::time::Instant::now();
+    let out = md(&html);
+    assert!(start.elapsed().as_secs() < 5, "took {:?}", start.elapsed());
+    // Bounded by a fixed allowance plus a multiple of the table's own cells.
+    assert!(out.len() < 8_000_000, "{} bytes", out.len());
+    let html = format!(
+        "<table><tr>{}</tr></table>",
+        "<td colspan=1000>x</td>".repeat(5000)
+    );
+    let out = md(&html);
+    assert!(out.len() < 8_000_000, "{} bytes", out.len());
+}
