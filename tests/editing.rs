@@ -188,6 +188,55 @@ fn attr_and_has_attr_are_ascii_case_insensitive() {
 }
 
 #[test]
+fn attr_lookup_folds_edited_and_duplicate_names() {
+    let mut dom = parse("<p ID=a id=b>x</p>");
+    let p = dom.root().unwrap().id();
+    // The first of two duplicates wins, whatever case it is looked up in.
+    assert_eq!(dom.get(p).unwrap().attr("Id"), Some("a"));
+    // `set_attr` stores the name lower-cased, so any case finds it again.
+    dom.set_attr(p, "Data-Mixed", "1");
+    dom.set_attr(p, "DATA-MIXED", "2");
+    let node = dom.get(p).unwrap();
+    assert_eq!(node.attr("data-mixed"), Some("2"));
+    assert_eq!(node.attr("dAtA-mIxEd"), Some("2"));
+    assert!(node.has_attr("DATA-mixed"));
+    assert_eq!(dom.to_html(), r#"<p id="a" id="b" data-mixed="2">x</p>"#);
+    // Selectors and lookups agree.
+    assert_eq!(dom.select("[DATA-MIXED='2']").count(), 1);
+    // Non-elements have no attributes, in any case.
+    let dom = parse("text");
+    let t = dom.root().unwrap();
+    assert_eq!(t.attr("ID"), None);
+    assert!(!t.has_attr("ID"));
+}
+
+#[test]
+fn attr_lookup_folds_ascii_only() {
+    // A non-ASCII name must not panic, and only its ASCII letters fold: the
+    // parser stores `data-É` as `data-É`, so `data-é` is a different name.
+    let mut dom = parse("<p DATA-É=1 データ=2 data-ß=3>x</p>");
+    let p = dom.root().unwrap().id();
+    let node = dom.get(p).unwrap();
+    assert_eq!(node.attr("data-É"), Some("1"));
+    assert_eq!(node.attr("DATA-É"), Some("1"));
+    assert_eq!(node.attr("data-é"), None);
+    assert!(!node.has_attr("data-é"));
+    assert_eq!(node.attr("データ"), Some("2"));
+    assert_eq!(node.attr("data-ß"), Some("3"));
+    assert_eq!(node.attr("data-ẞ"), None);
+    assert_eq!(node.attr("data-SS"), None);
+    // Same for names built through the editing API.
+    dom.set_attr(p, "Ünï", "4");
+    let node = dom.get(p).unwrap();
+    assert_eq!(node.attr("Ünï"), Some("4"));
+    assert_eq!(node.attr("ünï"), None);
+    // Odd lookups just miss.
+    assert_eq!(node.attr(""), None);
+    assert!(!node.has_attr("\u{0}"));
+    assert!(!node.has_attr("\u{1F600}"));
+}
+
+#[test]
 fn attribute_edits_ignore_non_elements() {
     let mut dom = parse("text");
     let t = dom.root().unwrap().id();

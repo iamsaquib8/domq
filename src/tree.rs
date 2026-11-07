@@ -553,29 +553,42 @@ impl<'a> NodeRef<'a> {
     /// The value of attribute `name`, if this is an element with that
     /// attribute. With duplicate attributes, the first one wins.
     ///
-    /// Names are matched ASCII case-insensitively (stored keys are lower-cased
-    /// at parse time), matching `set_attr`, `remove_attr`, and selectors.
+    /// Names are matched ASCII case-insensitively, as HTML does (domq stores
+    /// them lower-cased, whatever the markup or [`Dom::set_attr`] call said).
+    /// Only ASCII letters fold: `É` and `é` are different names.
+    ///
+    /// ```
+    /// let dom = domq::parse("<a HREF=/x Data-Id=7>x</a>");
+    /// let a = dom.root().unwrap();
+    /// assert_eq!(a.attr("href"), Some("/x"));
+    /// assert_eq!(a.attr("HREF"), Some("/x"));
+    /// assert_eq!(a.attr("DATA-ID"), Some("7"));
+    /// assert_eq!(a.attr("title"), None);
+    /// ```
     pub fn attr(&self, name: &str) -> Option<&'a str> {
         let dom = self.dom;
         self.attr_spans()
             .iter()
-            .find(|&&(k, _)| {
-                let key = dom.span_str(k);
-                // Exact match first: callers usually pass lower-case names.
-                key == name || key.eq_ignore_ascii_case(name)
-            })
+            .find(|&&(k, _)| dom.span_str(k).eq_ignore_ascii_case(name))
             .map(|&(_, v)| dom.span_str(v))
     }
 
     /// Whether attribute `name` is present (including valueless boolean attrs).
-    ///
     /// Names are matched ASCII case-insensitively; see [`Self::attr`].
+    ///
+    /// ```
+    /// let dom = domq::parse("<input DISABLED value=''>");
+    /// let input = dom.root().unwrap();
+    /// assert!(input.has_attr("disabled"));
+    /// assert!(input.has_attr("Disabled"));
+    /// assert!(input.has_attr("VALUE")); // present, though empty
+    /// assert!(!input.has_attr("checked"));
+    /// ```
     pub fn has_attr(&self, name: &str) -> bool {
         let dom = self.dom;
-        self.attr_spans().iter().any(|&(k, _)| {
-            let key = dom.span_str(k);
-            key == name || key.eq_ignore_ascii_case(name)
-        })
+        self.attr_spans()
+            .iter()
+            .any(|&(k, _)| dom.span_str(k).eq_ignore_ascii_case(name))
     }
 
     /// Whether this element hides itself: a `hidden` attribute, or an inline
