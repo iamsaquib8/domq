@@ -11,7 +11,7 @@ description = "Tiny, forgiving HTML parser written in Rust: CSS selectors, reada
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE-MIT"]
 authors = [{ name = "iamsaquib8", email = "saquibulhassan6@gmail.com" }]
 keywords = ["html", "parser", "css-selector", "markdown", "scraping", "llm", "rag"]
 classifiers = [
