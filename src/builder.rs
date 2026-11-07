@@ -605,19 +605,29 @@ impl<O> OpenElements<O> {
     /// closes: by [`tags::p_search`] with `p`, else by [`tags::search`];
     /// looking at the [`MAX_END_TAG_SEARCH`] innermost elements.
     fn closed_by(&self, opening: Tag, p: bool) -> Option<usize> {
-        let (search, open): (tags::SearchFn, usize) = if p {
-            (tags::p_search, self.open_p)
+        if p {
+            self.scan_closed_by(self.open_p, |open| tags::p_search(opening, open))
         } else if opening.is_nested() {
-            (tags::search, self.open_nested)
+            self.scan_closed_by(self.open_nested, |open| tags::search(opening, open))
         } else {
-            (tags::search, self.open_items)
-        };
+            self.scan_closed_by(self.open_items, |open| tags::search(opening, open))
+        }
+    }
+
+    /// [`OpenElements::closed_by`] for one `search`: nothing to find while
+    /// `open` (how many elements it could close are open) is zero.
+    #[inline(always)]
+    fn scan_closed_by(
+        &self,
+        open: usize,
+        search: impl Fn(Tag) -> Option<tags::Search>,
+    ) -> Option<usize> {
         if open == 0 {
             return None;
         }
         let inner = self.stack.len().saturating_sub(MAX_END_TAG_SEARCH);
         for i in (inner..self.stack.len()).rev() {
-            match search(opening, self.stack.get(i)?.1)? {
+            match search(self.stack.get(i)?.1)? {
                 tags::Search::Closes => return Some(i),
                 tags::Search::Stops => return None,
                 tags::Search::Continue => {}

@@ -58,26 +58,33 @@ pub(crate) fn is_valid_tag_name(name: &str) -> bool {
 // integer test on the tag's id or its flag bits. Unknown names (`<my-tag>`)
 // are [`Tag::OTHER`], which has no flags.
 
-const VOID: u16 = 1 << 0;
-const RAW_TEXT: u16 = 1 << 1;
+const VOID: u32 = 1 << 0;
+const RAW_TEXT: u32 = 1 << 1;
 /// The tokenizer reads the content as text up to the end tag: `RAW_TEXT`
 /// plus `title` and `textarea`.
-const RAWISH: u16 = 1 << 2;
-const CLOSES_P: u16 = 1 << 3;
-const SPECIAL: u16 = 1 << 4;
-const SCOPE: u16 = 1 << 5;
-const HEADING: u16 = 1 << 6;
-const IN_HEAD: u16 = 1 << 7;
-const TABLE_STRUCT: u16 = 1 << 8;
-const P_STOP: u16 = 1 << 9;
-const END_OPTIONAL: u16 = 1 << 10;
+const RAWISH: u32 = 1 << 2;
+const CLOSES_P: u32 = 1 << 3;
+const SPECIAL: u32 = 1 << 4;
+const SCOPE: u32 = 1 << 5;
+const HEADING: u32 = 1 << 6;
+const IN_HEAD: u32 = 1 << 7;
+const TABLE_STRUCT: u32 = 1 << 8;
+const P_STOP: u32 = 1 << 9;
+const END_OPTIONAL: u32 = 1 << 10;
 /// List items, cells, rows, table sections and captions: what [`search`]
 /// closes (counted in the builder's `open_items`).
-const ITEM: u16 = 1 << 11;
+const ITEM: u32 = 1 << 11;
 /// `a`, `nobr`, `button` and `select`: closed by a start tag of the same name.
-const NESTED: u16 = 1 << 12;
-const DROPS_LF: u16 = 1 << 13;
-const TEXT_CLOSES: u16 = 1 << 14;
+const NESTED: u32 = 1 << 12;
+const DROPS_LF: u32 = 1 << 13;
+const TEXT_CLOSES: u32 = 1 << 14;
+/// `p`, counted in `open_p`.
+const P_OPEN: u32 = 1 << 15;
+/// `svg` and `math`, counted in `open_foreign`.
+const FOREIGN: u32 = 1 << 16;
+/// An open element a following start tag may implicitly close (see
+/// [`implicitly_closes`]); any other is skipped with one test.
+const CLOSABLE: u32 = 1 << 17;
 
 /// A tag name classified once: an id for the names the builder has rules for
 /// (`0` for any other name) that indexes the flag table.
@@ -97,7 +104,7 @@ macro_rules! tags {
         /// The lower-case names, in id order (id `n` is `NAMES[n - 1]`).
         const NAMES: &[&str] = &[$($name),*];
         /// The flags of each id (`0`, no flags, for [`Tag::OTHER`]).
-        const FLAGS: &[u16] = &[0, $($flags),*];
+        const FLAGS: &[u32] = &[0, $($flags),*];
     };
 }
 
@@ -115,17 +122,17 @@ tags! {
     BODY "body" SPECIAL|END_OPTIONAL,
     BR "br" VOID|SPECIAL,
     BUTTON "button" SPECIAL|P_STOP|NESTED,
-    CAPTION "caption" SPECIAL|SCOPE|TABLE_STRUCT|P_STOP|END_OPTIONAL|ITEM,
+    CAPTION "caption" SPECIAL|SCOPE|TABLE_STRUCT|P_STOP|END_OPTIONAL|ITEM|CLOSABLE,
     CENTER "center" CLOSES_P|SPECIAL,
     COL "col" VOID|SPECIAL|TABLE_STRUCT,
-    COLGROUP "colgroup" SPECIAL|TABLE_STRUCT|END_OPTIONAL|TEXT_CLOSES,
-    DD "dd" CLOSES_P|SPECIAL|END_OPTIONAL|ITEM,
+    COLGROUP "colgroup" SPECIAL|TABLE_STRUCT|END_OPTIONAL|TEXT_CLOSES|CLOSABLE,
+    DD "dd" CLOSES_P|SPECIAL|END_OPTIONAL|ITEM|CLOSABLE,
     DETAILS "details" CLOSES_P|SPECIAL,
     DIALOG "dialog" CLOSES_P|SPECIAL,
     DIR "dir" CLOSES_P|SPECIAL,
     DIV "div" CLOSES_P|SPECIAL,
     DL "dl" CLOSES_P|SPECIAL,
-    DT "dt" CLOSES_P|SPECIAL|END_OPTIONAL|ITEM,
+    DT "dt" CLOSES_P|SPECIAL|END_OPTIONAL|ITEM|CLOSABLE,
     EMBED "embed" VOID|SPECIAL,
     FIELDSET "fieldset" CLOSES_P|SPECIAL,
     FIGCAPTION "figcaption" CLOSES_P|SPECIAL,
@@ -134,13 +141,13 @@ tags! {
     FORM "form" CLOSES_P|SPECIAL,
     FRAME "frame" SPECIAL,
     FRAMESET "frameset" SPECIAL,
-    H1 "h1" CLOSES_P|SPECIAL|HEADING,
-    H2 "h2" CLOSES_P|SPECIAL|HEADING,
-    H3 "h3" CLOSES_P|SPECIAL|HEADING,
-    H4 "h4" CLOSES_P|SPECIAL|HEADING,
-    H5 "h5" CLOSES_P|SPECIAL|HEADING,
-    H6 "h6" CLOSES_P|SPECIAL|HEADING,
-    HEAD "head" SPECIAL|END_OPTIONAL|TEXT_CLOSES,
+    H1 "h1" CLOSES_P|SPECIAL|HEADING|CLOSABLE,
+    H2 "h2" CLOSES_P|SPECIAL|HEADING|CLOSABLE,
+    H3 "h3" CLOSES_P|SPECIAL|HEADING|CLOSABLE,
+    H4 "h4" CLOSES_P|SPECIAL|HEADING|CLOSABLE,
+    H5 "h5" CLOSES_P|SPECIAL|HEADING|CLOSABLE,
+    H6 "h6" CLOSES_P|SPECIAL|HEADING|CLOSABLE,
+    HEAD "head" SPECIAL|END_OPTIONAL|TEXT_CLOSES|CLOSABLE,
     HEADER "header" CLOSES_P|SPECIAL,
     HGROUP "hgroup" CLOSES_P|SPECIAL,
     HR "hr" VOID|CLOSES_P|SPECIAL,
@@ -150,12 +157,12 @@ tags! {
     IMG "img" VOID|SPECIAL,
     INPUT "input" VOID|SPECIAL,
     KEYGEN "keygen" SPECIAL,
-    LI "li" CLOSES_P|SPECIAL|END_OPTIONAL|ITEM,
+    LI "li" CLOSES_P|SPECIAL|END_OPTIONAL|ITEM|CLOSABLE,
     LINK "link" VOID|SPECIAL|IN_HEAD,
     LISTING "listing" CLOSES_P|SPECIAL|DROPS_LF,
     MAIN "main" CLOSES_P|SPECIAL,
     MARQUEE "marquee" SPECIAL|SCOPE|P_STOP,
-    MATH "math" SPECIAL|P_STOP,
+    MATH "math" SPECIAL|P_STOP|FOREIGN,
     MENU "menu" CLOSES_P|SPECIAL,
     META "meta" VOID|SPECIAL|IN_HEAD,
     NAV "nav" CLOSES_P|SPECIAL,
@@ -165,16 +172,16 @@ tags! {
     NOSCRIPT "noscript" SPECIAL|IN_HEAD,
     OBJECT "object" SPECIAL|SCOPE|P_STOP,
     OL "ol" CLOSES_P|SPECIAL,
-    OPTGROUP "optgroup" END_OPTIONAL,
-    OPTION "option" END_OPTIONAL,
-    P "p" CLOSES_P|SPECIAL|END_OPTIONAL,
+    OPTGROUP "optgroup" END_OPTIONAL|CLOSABLE,
+    OPTION "option" END_OPTIONAL|CLOSABLE,
+    P "p" CLOSES_P|SPECIAL|END_OPTIONAL|CLOSABLE|P_OPEN,
     PARAM "param" VOID|SPECIAL,
     PLAINTEXT "plaintext" RAW_TEXT|RAWISH|CLOSES_P|SPECIAL,
     PRE "pre" CLOSES_P|SPECIAL|DROPS_LF,
-    RB "rb" END_OPTIONAL,
-    RP "rp" END_OPTIONAL,
-    RT "rt" END_OPTIONAL,
-    RTC "rtc" END_OPTIONAL,
+    RB "rb" END_OPTIONAL|CLOSABLE,
+    RP "rp" END_OPTIONAL|CLOSABLE,
+    RT "rt" END_OPTIONAL|CLOSABLE,
+    RTC "rtc" END_OPTIONAL|CLOSABLE,
     SCRIPT "script" RAW_TEXT|RAWISH|SPECIAL|IN_HEAD,
     SEARCH "search" CLOSES_P|SPECIAL,
     SECTION "section" CLOSES_P|SPECIAL,
@@ -182,17 +189,17 @@ tags! {
     SOURCE "source" VOID|SPECIAL,
     STYLE "style" RAW_TEXT|RAWISH|SPECIAL|IN_HEAD,
     SUMMARY "summary" CLOSES_P|SPECIAL,
-    SVG "svg" SPECIAL|P_STOP,
+    SVG "svg" SPECIAL|P_STOP|FOREIGN,
     TABLE "table" CLOSES_P|SPECIAL|SCOPE|P_STOP,
-    TBODY "tbody" SPECIAL|TABLE_STRUCT|END_OPTIONAL|ITEM,
-    TD "td" SPECIAL|SCOPE|P_STOP|END_OPTIONAL|ITEM,
+    TBODY "tbody" SPECIAL|TABLE_STRUCT|END_OPTIONAL|ITEM|CLOSABLE,
+    TD "td" SPECIAL|SCOPE|P_STOP|END_OPTIONAL|ITEM|CLOSABLE,
     TEMPLATE "template" SPECIAL|SCOPE|IN_HEAD|P_STOP,
     TEXTAREA "textarea" RAWISH|SPECIAL|DROPS_LF,
-    TFOOT "tfoot" SPECIAL|TABLE_STRUCT|END_OPTIONAL|ITEM,
-    TH "th" SPECIAL|SCOPE|P_STOP|END_OPTIONAL|ITEM,
-    THEAD "thead" SPECIAL|TABLE_STRUCT|END_OPTIONAL|ITEM,
+    TFOOT "tfoot" SPECIAL|TABLE_STRUCT|END_OPTIONAL|ITEM|CLOSABLE,
+    TH "th" SPECIAL|SCOPE|P_STOP|END_OPTIONAL|ITEM|CLOSABLE,
+    THEAD "thead" SPECIAL|TABLE_STRUCT|END_OPTIONAL|ITEM|CLOSABLE,
     TITLE "title" RAWISH|SPECIAL|IN_HEAD,
-    TR "tr" SPECIAL|END_OPTIONAL|ITEM,
+    TR "tr" SPECIAL|END_OPTIONAL|ITEM|CLOSABLE,
     TRACK "track" VOID|SPECIAL,
     UL "ul" CLOSES_P|SPECIAL,
     WBR "wbr" VOID|SPECIAL,
@@ -210,7 +217,7 @@ const fn hash(name: &[u8]) -> usize {
     let mut h: u32 = 0;
     let mut i = 0;
     while i < name.len() {
-        h = h.wrapping_mul(31).wrapping_add((name[i] | 0x20) as u32);
+        h = h.rotate_left(5) ^ (name[i] | 0x20) as u32;
         i += 1;
     }
     ((h ^ (h >> 7)) as usize) & (TABLE_SIZE - 1)
@@ -270,7 +277,7 @@ impl Tag {
     }
 
     #[inline]
-    fn has(self, flag: u16) -> bool {
+    fn has(self, flag: u32) -> bool {
         FLAGS
             .get(usize::from(self.0))
             .is_some_and(|f| f & flag != 0)
@@ -323,7 +330,7 @@ impl Tag {
     /// elements closed by a start tag of their own name, or `svg`/`math`.
     #[inline]
     pub(crate) fn is_counted(self) -> bool {
-        self.has(ITEM | NESTED) || matches!(self, Tag::P | Tag::SVG | Tag::MATH)
+        self.has(ITEM | NESTED | P_OPEN | FOREIGN)
     }
 
     #[inline]
@@ -391,6 +398,9 @@ impl Tag {
 /// `xmp`).
 #[inline]
 pub(crate) fn implicitly_closes(opening: Tag, open: Tag) -> bool {
+    if !open.has(CLOSABLE) {
+        return false;
+    }
     match open {
         Tag::P => opening.closes_p(),
         Tag::LI => opening == Tag::LI,
@@ -411,9 +421,6 @@ pub(crate) fn implicitly_closes(opening: Tag, open: Tag) -> bool {
         _ => false,
     }
 }
-
-/// [`search`] or [`p_search`].
-pub(crate) type SearchFn = fn(Tag, Tag) -> Option<Search>;
 
 /// What a start tag finds at one open element while looking past the
 /// current node for an element it closes (see [`search`]).
