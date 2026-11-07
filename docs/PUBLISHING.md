@@ -28,8 +28,9 @@ cargo doc --no-deps --all-features                                      # docs b
 cargo publish --dry-run                                                 # packaging
 ```
 
-Bump the versions (above), move the `CHANGELOG.md` "unreleased" section under
-the new version, and update ROADMAP's "Where we are", "What works where" and
+Bump the versions (above), run `python3 scripts/changelog.py release X.Y.Z` to
+turn the `changes/` fragments into the new `CHANGELOG.md` section (then add the
+summary and upgrade notes), and update ROADMAP's "Where we are", "What works where" and
 "Shipped". Merge that, then tag `main`:
 
 ```sh
