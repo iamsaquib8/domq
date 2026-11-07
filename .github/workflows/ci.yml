@@ -193,10 +193,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            wasm
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
       - uses: taiki-e/install-action@v2
         with:
-          tool: mdbook@0.5.4
+          tool: mdbook@0.5.4,wasm-pack
       # The book's Rust examples link against the library alone, built into
       # its own target dir so exactly one `domq` rlib is on the path.
       - name: Test the book's Rust examples
@@ -205,6 +214,13 @@ jobs:
           mdbook test book -L target/book/debug/deps
       - name: Build the book
         run: mdbook build book
+      # The JavaScript and Python reference pages must list every public name:
+      # the .d.ts files come from the npm build, the Python names from the stub.
+      - name: Build the npm package (for its .d.ts files)
+        working-directory: wasm
+        run: node npm/build.mjs
+      - name: Check the reference pages against the package APIs
+        run: python3 book/check-api.py
 
   fuzz:
     name: fuzz (build + smoke)

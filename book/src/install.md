@@ -52,6 +52,8 @@ The package has two entries, built from the same crate:
 | `domq-wasm` | the core: parse, select, text, Markdown, JSON, HTML, `Document` | 56.6 KB |
 | `domq-wasm/extract` | the core plus reader mode, metadata, links, chunks and tables | 77.8 KB |
 
+Every function and type: [JavaScript API](javascript.md).
+
 Node 22+, Bun and Deno use either directly
 (`import { select } from "domq-wasm"`,
 `import { mainContent } from "domq-wasm/extract"`). Browsers and bundlers call
@@ -79,7 +81,7 @@ pip install domq
 ```
 
 Wheels for Python 3.11+ on Linux, macOS and Windows (abi3, so one wheel per
-platform covers every version).
+platform covers every version). Every function and class: [Python API](python.md).
 
 ## MCP server
 
