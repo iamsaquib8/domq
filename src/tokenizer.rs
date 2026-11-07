@@ -124,60 +124,80 @@ impl<'a> Tokenizer<'a> {
         if let Some(end_name) = self.raw_text_end.take() {
             return Some((self.read_raw_text(end_name), start));
         }
-        let tok = match self.peek() {
-            Some(b'<') => self.read_markup(),
-            _ => self.read_text(),
-        };
-        Some((tok, start))
+        // `</>` is dropped, so it has no token: read on.
+        let mut start = start;
+        loop {
+            let tok = match self.peek() {
+                Some(b'<') => self.read_markup(),
+                _ => Some(self.read_text()),
+            };
+            if let Some(tok) = tok {
+                return Some((tok, start));
+            }
+            if self.pos >= self.bytes.len() {
+                return None;
+            }
+            start = self.pos;
+        }
     }
 
+    /// A text run: up to the next `<` that starts markup. A `<` that cannot
+    /// (`a < b`, `<3`, `<-`, and `<` or `</` at the very end) is literal text
+    /// and stays in the run, so a browser's one text node is one token.
     fn read_text(&mut self) -> Token<'a> {
         let start = self.pos;
-        // Scan to the next '<' in one shot, not a byte-at-a-time `peek` loop.
-        self.skip_to(b'<');
+        loop {
+            // Scan to the next '<' in one shot, not a byte-at-a-time `peek`
+            // loop.
+            self.skip_to(b'<');
+            let literal = match self.peek_at(1) {
+                None => true,
+                Some(b'/') => self.peek_at(2).is_none(),
+                Some(c) => !(c.is_ascii_alphabetic() || matches!(c, b'!' | b'?')),
+            };
+            if !literal || self.pos >= self.bytes.len() {
+                break;
+            }
+            self.pos += 1; // the '<'
+        }
         Token::Text(self.slice(start, self.pos))
     }
 
-    fn read_markup(&mut self) -> Token<'a> {
-        match self.peek_at(1) {
+    /// The markup at a `<`; `None` for a `</>`, which is dropped.
+    fn read_markup(&mut self) -> Option<Token<'a>> {
+        Some(match self.peek_at(1) {
             Some(b'/') => match self.peek_at(2) {
                 Some(c) if c.is_ascii_alphabetic() => self.read_end_tag(),
                 // `</>` is dropped, as in browsers.
                 Some(b'>') => {
-                    let s = self.slice(self.pos, self.pos);
                     self.error(self.pos, ErrorKind::StrayEndTag);
                     self.pos += 3;
-                    Token::Text(s)
+                    return None;
                 }
                 // `</` at the end of the input is text.
-                None => {
-                    let s = self.slice(self.pos, self.pos + 2);
-                    self.pos += 2;
-                    Token::Text(s)
-                }
+                None => return Some(self.read_text()),
                 // `</ x>`, `</#>`: a bogus comment.
                 Some(_) => self.read_bogus_comment(),
             },
             Some(b'!') => self.read_bang(),
             Some(b'?') => self.read_bogus_comment(),
             Some(c) if c.is_ascii_alphabetic() => self.read_start_tag(),
-            _ => {
-                // A lone '<' that doesn't begin markup is literal text.
-                let s = self.slice(self.pos, self.pos + 1);
-                self.pos += 1;
-                Token::Text(s)
-            }
-        }
+            // A lone '<' that doesn't begin markup is literal text; only a
+            // run that starts with one gets here (`read_text` keeps the rest
+            // of them in the run).
+            _ => return Some(self.read_text()),
+        })
     }
 
+    /// A tag name runs to the first whitespace, `/` or `>` (or NUL), whatever
+    /// else it holds: `<my-élément>` and `<div$x>` are names, as in browsers.
     fn read_tag_name(&mut self) -> &'a str {
         let start = self.pos;
         while let Some(b) = self.peek() {
-            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b':' | b'_' | b'.') {
-                self.pos += 1;
-            } else {
+            if b.is_ascii_whitespace() || matches!(b, b'/' | b'>' | 0) {
                 break;
             }
+            self.pos += 1;
         }
         self.slice(start, self.pos)
     }

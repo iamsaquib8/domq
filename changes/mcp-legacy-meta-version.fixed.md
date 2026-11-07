@@ -1,0 +1,1 @@
+MCP: a request whose `_meta` specifies a handshake-era legacy version is served with legacy semantics rather than modern, allowing `initialize` and omitting modern result fields, and `clientCapabilities` is validated to be an object ([#159](https://github.com/iamsaquib8/domq/issues/159)).

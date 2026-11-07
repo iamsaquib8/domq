@@ -240,6 +240,12 @@ fn deeply_nested_does_not_overflow() {
     assert!(dom.to_json().len() > depth);
 }
 
+/// Ceiling for the linear-time tests below. They guard against the quadratic
+/// case (tens of seconds at these sizes), not against a slow machine: a debug
+/// build on a loaded CI runner takes about a second, so the limit sits well
+/// above that and well below the failure it exists to catch (see #117).
+const LINEAR_TIME_LIMIT_MS: u128 = 5_000;
+
 #[test]
 fn stray_end_tags_on_a_deep_stack_are_linear() {
     // Each `</x>` has no open match. Scanning the whole open-element stack for
@@ -251,7 +257,7 @@ fn stray_end_tags_on_a_deep_stack_are_linear() {
     let start = std::time::Instant::now();
     let dom = parse(&html);
     assert!(
-        start.elapsed().as_millis() < 1000,
+        start.elapsed().as_millis() < LINEAR_TIME_LIMIT_MS,
         "took {:?}",
         start.elapsed()
     );
@@ -267,7 +273,7 @@ fn stray_end_tags_on_a_deep_stack_are_linear() {
     let start = std::time::Instant::now();
     let dom = parse(&html);
     assert!(
-        start.elapsed().as_millis() < 1000,
+        start.elapsed().as_millis() < LINEAR_TIME_LIMIT_MS,
         "took {:?}",
         start.elapsed()
     );
@@ -361,7 +367,7 @@ fn colliding_names_on_a_deep_stack_are_linear() {
             parse(&html).len()
         };
         assert!(
-            start.elapsed().as_millis() < 1000,
+            start.elapsed().as_millis() < LINEAR_TIME_LIMIT_MS,
             "{label} took {:?}",
             start.elapsed()
         );
@@ -1027,4 +1033,90 @@ fn links_in_separate_cells_and_scopes_are_untouched() {
         parse("<a href=/1>1</a><a href=/2>2</a>").to_html(),
         "<a href=\"/1\">1</a><a href=\"/2\">2</a>"
     );
+}
+
+// A `<` that starts no markup stays in its text (#76).
+
+fn text_children(html: &str) -> Vec<String> {
+    let dom = parse(html);
+    let p = dom.find_by_tag("p").next().unwrap();
+    p.children()
+        .filter_map(|c| c.text().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn a_stray_lt_does_not_split_the_text() {
+    let dom = parse("<p>if a < b then</p>");
+    let p = dom.root().unwrap();
+    assert_eq!(p.children().count(), 1);
+    assert_eq!(p.first_child().unwrap().text(), Some("if a < b then"));
+    for (html, want) in [
+        ("<p><3 and <- and < </p>", "<3 and <- and < "),
+        ("<p>1 <2 <3<4</p>", "1 <2 <3<4"),
+        ("<p>a <&amp; b</p>", "a <& b"),
+        ("<p>x <\u{e9}</p>", "x <\u{e9}"),
+        ("<p>x <", "x <"),
+        ("<p>x </", "x </"),
+    ] {
+        assert_eq!(text_children(html), [want], "{html}");
+    }
+    // Real markup still ends the run.
+    assert_eq!(
+        text_children("<p>a < b<!--c--> < d<b>e</b> <3"),
+        ["a < b", " < d", " <3"]
+    );
+    let dom = parse("<p>a <i>b</i> c <? d>");
+    assert_eq!(dom.find_by_tag("p").next().unwrap().children().count(), 4);
+}
+
+#[test]
+fn a_stray_lt_in_a_text_run_is_one_token() {
+    let toks: Vec<_> = tokenize("a < b <3 <").collect();
+    assert_eq!(toks, [Token::Text("a < b <3 <")]);
+    // The text keeps its source range.
+    let src = "<p>a < b</p>";
+    let dom = parse(src);
+    let text = dom.root().unwrap().first_child().unwrap();
+    assert_eq!(&src[text.source_range().unwrap()], "a < b");
+}
+
+#[test]
+fn an_empty_end_tag_makes_no_token() {
+    // `</>` is dropped (with a parse error); it must not leave an empty text.
+    let toks: Vec<_> = tokenize("a</>b</></>").collect();
+    assert_eq!(toks, [Token::Text("a"), Token::Text("b")]);
+    assert_eq!(parse("</>").roots().count(), 0);
+}
+
+// Tag names run to whitespace, `/` or `>` (#84).
+
+#[test]
+fn tag_names_may_hold_non_ascii_and_symbols() {
+    let html = "<my-élément>t</my-élément>";
+    let dom = parse(html);
+    assert_eq!(dom.root().unwrap().tag_name(), Some("my-élément"));
+    assert_eq!(dom.to_html(), html);
+    assert_eq!(dom.root().unwrap().attributes().count(), 0);
+    #[cfg(feature = "query")]
+    assert_eq!(dom.select("my-élément").count(), 1);
+    assert_eq!(dom.errors().len(), 0);
+
+    let dom = parse("<div$x>t</div$x>");
+    assert_eq!(dom.root().unwrap().tag_name(), Some("div$x"));
+    assert_eq!(dom.to_html(), "<div$x>t</div$x>");
+
+    // Attributes after such a name, a self-closing one, and only ASCII upper
+    // case is lowered. A name must still start with an ASCII letter.
+    let dom = parse("<X-Ünï-Tag a=1 b/>x<x-ÜNÏ-TAG>y");
+    let kids: Vec<_> = dom.roots().filter_map(|n| n.tag_name()).collect();
+    assert_eq!(kids, ["x-Ünï-tag", "x-ÜnÏ-tag"]);
+    assert_eq!(dom.root().unwrap().attr("a"), Some("1"));
+    // The end tag matches the start tag.
+    let dom = parse("<a-é><b>x</b></a-é>y");
+    assert_eq!(dom.to_html(), "<a-é><b>x</b></a-é>y");
+    assert_eq!(parse("<Ünï>").to_html(), "&lt;Ünï&gt;");
+    // Tokens carry the whole name.
+    let toks: Vec<_> = tokenize("<my-é x>").collect();
+    assert!(matches!(toks[0], Token::StartTag { name: "my-é", .. }));
 }

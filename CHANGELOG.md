@@ -11,22 +11,7 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ## [Unreleased]
 
-### Output changes
-
-- Tokenizer: an `=` where an attribute name starts begins the name, as in browsers ([#235](https://github.com/iamsaquib8/domq/issues/235)): `<div =x>` has an attribute named `=x` (it was `x`), and a parse error, the new `ErrorKind::UnexpectedEqualsSign`, is recorded at the `=`.
-- Parser: an end tag no longer closes an element beyond a scope boundary ([#67](https://github.com/iamsaquib8/domq/issues/67)). A `</div>`, `</span>` or `</a>` inside a `<td>`, `<th>` or `<caption>` whose element opened outside the table is ignored, instead of closing the cell, the row and the table, so later cells and rows stay in the table. Tables, `table_rows()`, CSV and Markdown tables change on pages with mis-nested markup in cells. Other end tags stop at `applet caption html table td th marquee object template`; table end tags (`</td>`, `</tr>`, `</table>`, …) stop at `table template html`; `</body>`, `</html>` and `</template>` look through everything, as before.
-- Parser: any heading end tag closes the innermost open heading of any level, so `<h2>Title</h3>` closes the `<h2>` ([#68](https://github.com/iamsaquib8/domq/issues/68)). The paragraphs after such a heading no longer land inside it, which fixes `to_markdown()` heading lines and chunk heading paths on those pages.
-- Parser: `<a>`, `<button>`, `<nobr>` and `<select>` no longer nest: a start tag closes an open element of the same name, looking past anything but a scope boundary ([#69](https://github.com/iamsaquib8/domq/issues/69)). `<a>One<a>Two` gives two sibling links, as in browsers, so link text and Markdown no longer swallow the following link. Formatting elements in between are closed with the link and not reopened (that belongs to the adoption agency, which domq does not implement).
-- Parser: one newline (`\n` or `\r\n`) right after a `<pre>`, `<listing>` or `<textarea>` start tag is dropped, as in browsers ([#75](https://github.com/iamsaquib8/domq/issues/75)), so `<pre>\ncode</pre>` has the text `code`, not `\ncode`. `text_content()`, JSON, `#[derive(FromHtml)]` extraction, text and Markdown code blocks, and `<textarea>` values no longer start with that newline. `to_html()` writes a newline back after the start tag when the content starts with one, so `<pre>\n\nx</pre>` round-trips.
-- CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
-
-### Fixed
-
-- Parser: HTML conformance (same structure) goes from 1216 to 1226 of 1959 tests, with no regressions: 3 tests from #67 (`template.dat:78`, `template.dat:1224`, `tests16.dat:2587`), 2 from #68 (`tests19.dat:277`, `tests19.dat:305`) and 5 from #69 (`tests20.dat:1`, `tests26.dat:381`, `tests3.dat:256`, `tests3.dat:271`, `tests6.dat:166`).
-- Parser: HTML conformance (same structure) goes from 1210 to 1216 of 1959 tests, and exact from 83 to 87, with no regressions (`tests3.dat:63`, `:75`, `:89`, `:215`, `:227`, `tests7.dat:188`).
-- MCP: a request whose `_meta` specifies a handshake-era legacy version is served with legacy semantics rather than modern, allowing `initialize` and omitting modern result fields, and `clientCapabilities` is validated to be an object ([#159](https://github.com/iamsaquib8/domq/issues/159)).
-- CLI: `-1` is applied after attribute (`-a`) and whitespace (`-w`) filtering rather than before, and `-c` honours `-w` to skip blank matches ([#144](https://github.com/iamsaquib8/domq/issues/144)).
-- Reject Markdown options combined with another output format, regardless of flag order.
+Pending changes are files in [`changes/`](./changes/README.md).
 
 ## [0.6.0] — 2026-11-03
 

@@ -234,7 +234,7 @@ pseudo-elements, `:hover` and other interactive states, namespaces, and
 
 The module contains the parser, the selector engine, data extraction (reader
 mode, metadata, links, chunks, tables), and the text, Markdown, JSON and HTML
-serializers. CI fails if the gzipped `.wasm` grows past 70 KiB (0.6.0 shipped ~65 KB).
+serializers. CI fails if the gzipped `.wasm` grows past 80,000 bytes (0.6.0 shipped ~65 KB; `main` is ~71 KB). The limit is temporary: the plan is a second, optional module for the extraction helpers (#111).
 
 ## Upgrading from 0.1 or 0.2
 
