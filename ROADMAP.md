@@ -33,7 +33,7 @@ The [guide](https://iamsaquib8.github.io/domq/docs/) covers every surface. See
    chunks for a prompt or an index, at the edge, on a server or as an agent's
    MCP tool, without a headless browser.
 4. **JavaScript on the edge** `js` — Workers, Deno, Bun, the browser: no DOM
-   needed, and a ~65 KB gzipped wasm module.
+   needed, and a ~71 KB gzipped wasm module.
 5. **Python scraping and data code** `py` — where most scraping and RAG code
    lives; a fast, never-panicking parser with selectors and Markdown.
 6. **People who ship HTML** `ship` — docs sites, static-site generators, email
@@ -90,7 +90,7 @@ Numbers we hold ourselves to (✅ = enforced in CI):
 | budget | limit | today |
 |---|---|---|
 | runtime dependencies, default build | **0** ✅ | 0 |
-| gzipped wasm, all bindings | **< 65 KiB** ✅ (was 45 KiB; see below) | ~64.5 KB (0.6.0: +21.4 KB for reader mode, metadata, links, chunks, tables and Markdown options) |
+| gzipped wasm, all bindings | **< 80,000 bytes** ✅ (temporary; was 45 KiB; see below) | ~71 KB (0.6.0: 64.5 KB, +21.4 KB for reader mode, metadata, links, chunks, tables and Markdown options; since then bytes-in and tokenizer fixes) |
 | panics or hangs on any input (HTML, selectors, edits) | **none** ✅ proptest + fuzz | none known |
 | stack use on deeply nested input | **bounded** ✅ 100k-deep tests | bounded |
 | super-linear time on adversarial input | **none** — every fix gets a timing test | none known |
@@ -101,8 +101,8 @@ Numbers we hold ourselves to (✅ = enforced in CI):
 | CLI binary size, wheel size | to be set (0.9) | ~0.9 MB CLI (Apple Silicon) |
 
 Bringing reader mode, chunks and the data helpers to JavaScript (0.6) took the
-module from 43.1 KB to 64.5 KB, so the CI gate was raised to 65 KiB. The plan
-is to win it back ([#111](https://github.com/iamsaquib8/domq/issues/111)):
+module from 43.1 KB to 64.5 KB, and the 0.7 correctness fixes and JSON-LD add
+more, so the CI gate is a temporary 80,000 bytes. The plan is to win it back ([#111](https://github.com/iamsaquib8/domq/issues/111)):
 find where the bytes go, and ship the extraction helpers as a second,
 optional wasm module, so the core is back under 45 KiB for people who only
 select and convert.
@@ -143,7 +143,7 @@ In short:
 
 - **Where domq leads:** one zero-dependency, never-panicking core that does
   selectors, reader mode, Markdown, chunks, metadata, links, tables, lint and
-  MCP, on every surface, in ~65 KB of gzipped wasm; the only forgiving parser
+  MCP, on every surface, in ~71 KB of gzipped wasm; the only forgiving parser
   with a published conformance report; an MCP server with no network or file
   access; the maintained successor to htmlq and pup.
 - **Where it's behind:** reader-mode quality is measured only as agreement

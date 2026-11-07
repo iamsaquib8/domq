@@ -1,0 +1,1 @@
+Parser: HTML conformance (same structure) goes from 1216 to 1226 of 1959 tests, with no regressions: 3 tests from #67 (`template.dat:78`, `template.dat:1224`, `tests16.dat:2587`), 2 from #68 (`tests19.dat:277`, `tests19.dat:305`) and 5 from #69 (`tests20.dat:1`, `tests26.dat:381`, `tests3.dat:256`, `tests3.dat:271`, `tests6.dat:166`).
