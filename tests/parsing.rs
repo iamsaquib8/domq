@@ -765,7 +765,7 @@ fn stray_end_tag_does_not_close_the_table() {
     let html = "<div class=wrap><table><tr><th><a href=/x><div>Logo</a><a href=/x>Acme</a></div></th>\
                 <td>$5</td></tr><tr><th>Beta</th><td>$7</td></tr></table></div>";
     let dom = parse(html);
-    assert_eq!(dom.select("table td").count(), 2);
+    assert_eq!(dom.find_by_tag("td").count(), 2);
     assert_eq!(
         dom.to_html(),
         "<div class=\"wrap\"><table><tr><th><a href=\"/x\"><div>Logo</div></a><a href=\"/x\">Acme</a></th>\
@@ -813,7 +813,7 @@ fn table_end_tags_still_close_through_cell_content() {
     );
     // `</td>` does not reach a `<td>` outside a nested table.
     let dom = parse("<table><tr><td><table><tr><td>a</td>b</td>c</tr></table>d</td></tr></table>");
-    assert_eq!(dom.select("td").count(), 2);
+    assert_eq!(dom.find_by_tag("td").count(), 2);
 }
 
 #[test]
@@ -836,7 +836,10 @@ fn a_mismatched_heading_end_tag_closes_the_open_heading() {
         dom.to_html(),
         "<h2>Shipping</h2><p>We ship worldwide.</p><p>Returns are free.</p><ul><li>Fast</li></ul>"
     );
-    assert_eq!(dom.select("h2").next().unwrap().text_content(), "Shipping");
+    assert_eq!(
+        dom.find_by_tag("h2").next().unwrap().text_content(),
+        "Shipping"
+    );
     // The innermost heading closes, and what it holds with it.
     assert_eq!(parse("<h1>a<b>b</h4>c").to_html(), "<h1>a<b>b</b></h1>c");
 }
@@ -845,7 +848,7 @@ fn a_mismatched_heading_end_tag_closes_the_open_heading() {
 fn a_heading_end_tag_does_not_cross_a_cell() {
     // The `<h2>` is outside the table: `</h3>` in the cell is stray.
     let dom = parse("<h2>Title<table><tr><td>a</h3>b</td><td>c</td></tr></table>");
-    assert_eq!(dom.select("td").count(), 2);
+    assert_eq!(dom.find_by_tag("td").count(), 2);
     let table = dom.find_by_tag("table").next().unwrap();
     assert_eq!(table.table_rows(), [vec!["ab", "c"]]);
     // A heading inside the cell closes as usual.
@@ -893,7 +896,15 @@ fn links_in_separate_cells_and_scopes_are_untouched() {
     // A table cell is a scope boundary: a link in a cell inside a link nests,
     // as in browsers.
     let dom = parse("<a href=/o>x<table><tr><td><a href=/i>y</a></td></tr></table></a>");
-    assert_eq!(dom.select("a a").count(), 1);
+    assert_eq!(dom.find_by_tag("a").count(), 2);
+    let outer = dom.find_by_tag("a").next().unwrap();
+    assert_eq!(
+        outer
+            .descendants()
+            .filter(|n| n.tag_name() == Some("a"))
+            .count(),
+        1
+    );
     // Sibling and consecutive links are fine.
     assert_eq!(
         parse("<a href=/1>1</a><a href=/2>2</a>").to_html(),
