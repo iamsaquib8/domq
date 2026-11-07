@@ -13,7 +13,7 @@ regenerates it and fails when it differs. -->
 | Measure | Passing | Rate |
 |---|---:|---:|
 | Exact tree: the html5lib dump, line for line | 88 | 4.5% |
-| Same structure, in domq's model of HTML | 1229 | 62.7% |
+| Same structure, in domq's model of HTML | 1279 | 65.3% |
 
 domq is a forgiving parser, not a spec-compliant one (see the
 [README](../README.md#what-it-handles)), so the exact rate is low by design:
@@ -38,7 +38,7 @@ text and comments. A test that fails here is a real difference from a browser.
 | General tree building | 647 | 2.3% | 67.9% |
 | Comments, doctypes, quirks | 87 | 0.0% | 82.8% |
 | Character references | 101 | 0.0% | 100.0% |
-| Raw text, script data, unsafe text | 380 | 0.0% | 55.8% |
+| Raw text, script data, unsafe text | 380 | 0.0% | 68.9% |
 | Mis-nested formatting (adoption agency) | 86 | 0.0% | 27.9% |
 | Tables and foster parenting | 63 | 0.0% | 42.9% |
 | Foreign content (SVG, MathML) | 202 | 19.3% | 71.3% |
@@ -80,7 +80,7 @@ text and comments. A test that fails here is a real difference from a browser.
 | `blocks.dat` | General tree building | 48 | 0.0% | 100.0% |
 | `comments01.dat` | Comments, doctypes, quirks | 16 | 0.0% | 100.0% |
 | `doctype01.dat` | Comments, doctypes, quirks | 37 | 0.0% | 97.3% |
-| `domjs-unsafe.dat` | Raw text, script data, unsafe text | 49 | 0.0% | 40.8% |
+| `domjs-unsafe.dat` | Raw text, script data, unsafe text | 49 | 0.0% | 51.0% |
 | `entities01.dat` | Character references | 75 | 0.0% | 100.0% |
 | `entities02.dat` | Character references | 26 | 0.0% | 100.0% |
 | `foreign-fragment.dat` | Foreign content (SVG, MathML) | 66 | 59.1% | 86.4% |
@@ -98,7 +98,7 @@ text and comments. A test that fails here is a real difference from a browser.
 | `processing-instructions.dat` | Processing instructions (new in the spec) | 124 | 0.0% | 32.3% |
 | `quirks01.dat` | Comments, doctypes, quirks | 4 | 0.0% | 25.0% |
 | `ruby.dat` | General tree building | 21 | 0.0% | 100.0% |
-| `scriptdata01.dat` | Raw text, script data, unsafe text | 26 | 0.0% | 61.5% |
+| `scriptdata01.dat` | Raw text, script data, unsafe text | 26 | 0.0% | 96.2% |
 | `scripted_adoption01.dat` | Mis-nested formatting (adoption agency) | 0 | — | — |
 | `scripted_ark.dat` | Mis-nested formatting (adoption agency) | 0 | — | — |
 | `scripted_foster01.dat` | Tables and foster parenting | 0 | — | — |
@@ -113,7 +113,7 @@ text and comments. A test that fails here is a real difference from a browser.
 | `tests12.dat` | Foreign content (SVG, MathML) | 2 | 0.0% | 100.0% |
 | `tests14.dat` | General tree building | 7 | 0.0% | 100.0% |
 | `tests15.dat` | Raw text, script data, unsafe text | 14 | 0.0% | 35.7% |
-| `tests16.dat` | Raw text, script data, unsafe text | 191 | 0.0% | 74.3% |
+| `tests16.dat` | Raw text, script data, unsafe text | 191 | 0.0% | 93.2% |
 | `tests17.dat` | Raw text, script data, unsafe text | 13 | 0.0% | 38.5% |
 | `tests18.dat` | General tree building | 36 | 0.0% | 50.0% |
 | `tests19.dat` | General tree building | 107 | 0.0% | 41.1% |
