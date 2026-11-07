@@ -174,6 +174,24 @@ first issues. Every item is tagged with its size and with who it's for:
 - **M**: medium, touches several areas or a binding.
 - **L**: large, new infrastructure, a new crate, or a research-style project.
 
+**Epics.** Every open issue is a sub-issue of exactly one epic, so progress
+shows on the epic itself. Each release has an epic and a milestone; the other
+epics are themes that cut across releases:
+
+| epic | what it holds |
+|---|---|
+| [#249](https://github.com/iamsaquib8/domq/issues/249) 0.7 · [#250](https://github.com/iamsaquib8/domq/issues/250) 0.8 · [#251](https://github.com/iamsaquib8/domq/issues/251) 0.9 · [#252](https://github.com/iamsaquib8/domq/issues/252) 0.10 · [#253](https://github.com/iamsaquib8/domq/issues/253) 0.11 · [#254](https://github.com/iamsaquib8/domq/issues/254) 1.0 | the release's roadmap items and their issues |
+| [#255](https://github.com/iamsaquib8/domq/issues/255) Next in line | committed, placed in 0.8–0.10 as room allows |
+| [#256](https://github.com/iamsaquib8/domq/issues/256) Agents, bindings and distribution | open 0.5.x and 0.6 items |
+| [#257](https://github.com/iamsaquib8/domq/issues/257) Bugs and performance traps | correctness and super-linear cases to clear by 0.7 |
+| [#258](https://github.com/iamsaquib8/domq/issues/258) Tests, CI and release engineering | fuzz targets, hardening, release automation |
+| [#259](https://github.com/iamsaquib8/domq/issues/259) Docs and the guide | README, guide, contributor docs |
+| [#260](https://github.com/iamsaquib8/domq/issues/260) Anytime | small items for whichever release is next |
+| [#261](https://github.com/iamsaquib8/domq/issues/261) Community | maintainers, review speed, adoption, credit |
+| [#262](https://github.com/iamsaquib8/domq/issues/262) Exploring | proposals not yet committed to a release |
+
+An issue not under an epic is a bug in this table's logic: open one.
+
 ## Path to 1.0
 
 1.0 is the promise that what people script against stops breaking: the
@@ -183,15 +201,15 @@ the evidence: features first (0.7–0.10), then one release that makes every
 remaining breaking change and publishes the comparisons (0.11), then release
 candidates.
 
-| release | theme | what it settles | target |
-|---|---|---|---|
-| 0.7 | Correct trees, Markdown built for models | the parser fixes real pages need, the wasm budget, Markdown that renders as written | Dec 2026 |
-| 0.8 | Drop-in, and agents that act on the page | BeautifulSoup / cheerio compatibility, `Dom::article()`, forms, selectors agents reuse | Jan 2027 |
-| 0.9 | Lint for teams | more rules, suppressions, SARIF, the linter in the library, a GitHub Action | Feb 2027 |
-| 0.10 | Huge documents and full trees | streaming selectors, a streaming rewriter, `domq diff`, editing in Python and JS | Apr 2027 |
-| 0.11 | Trust, compared, and the API frozen | every planned breaking change made, same-harness comparisons published, CI that catches API breaks | May 2027 |
-| 1.0-rc | Nothing new | release candidates on every registry; fuzzing, docs and the upgrade guide only | Jun 2027 |
-| 1.0 | Stable | the criteria in [1.0](#10--stable) all hold | Q3 2027 |
+| release | theme | what it settles | target | tracking |
+|---|---|---|---|---|
+| 0.7 | Correct trees, Markdown built for models | the parser fixes real pages need, the wasm budget, Markdown that renders as written | Dec 2026 | [#249](https://github.com/iamsaquib8/domq/issues/249) · [milestone](https://github.com/iamsaquib8/domq/milestone/1) |
+| 0.8 | Drop-in, and agents that act on the page | BeautifulSoup / cheerio compatibility, `Dom::article()`, forms, selectors agents reuse | Jan 2027 | [#250](https://github.com/iamsaquib8/domq/issues/250) · [milestone](https://github.com/iamsaquib8/domq/milestone/2) |
+| 0.9 | Lint for teams | more rules, suppressions, SARIF, the linter in the library, a GitHub Action | Feb 2027 | [#251](https://github.com/iamsaquib8/domq/issues/251) · [milestone](https://github.com/iamsaquib8/domq/milestone/3) |
+| 0.10 | Huge documents and full trees | streaming selectors, a streaming rewriter, `domq diff`, editing in Python and JS | Apr 2027 | [#252](https://github.com/iamsaquib8/domq/issues/252) · [milestone](https://github.com/iamsaquib8/domq/milestone/4) |
+| 0.11 | Trust, compared, and the API frozen | every planned breaking change made, same-harness comparisons published, CI that catches API breaks | May 2027 | [#253](https://github.com/iamsaquib8/domq/issues/253) · [milestone](https://github.com/iamsaquib8/domq/milestone/5) |
+| 1.0-rc | Nothing new | release candidates on every registry; fuzzing, docs and the upgrade guide only | Jun 2027 | [#254](https://github.com/iamsaquib8/domq/issues/254) |
+| 1.0 | Stable | the criteria in [1.0](#10--stable) all hold | Q3 2027 | [#254](https://github.com/iamsaquib8/domq/issues/254) · [milestone](https://github.com/iamsaquib8/domq/milestone/6) |
 
 Targets are where we aim, not promises; 1.0 ships when its criteria hold.
 Two clocks start now because 1.0 waits on them: continuous fuzzing
@@ -247,6 +265,8 @@ an `html` argument, so the agent re-types the whole page as output tokens:
 tens of thousands for an ordinary article, which is slower and costlier than
 reading the HTML. This release makes the MCP server cheap to use on real pages.
 
+**Tracking:** [#256](https://github.com/iamsaquib8/domq/issues/256) (carry-over epic).
+
 - [x] **L** `ai` `domq mcp`: an MCP server over stdio exposing select, text,
       Markdown, chunks, links, metadata, tables, extract and lint on HTML the
       agent provides (still no fetching). Speaks MCP 2026-07-28 and the
@@ -283,6 +303,8 @@ Reader mode, chunks and the data helpers are what personas 3–5 come for, and
 today they exist only in Rust, the CLI and MCP. In Python, turbohtml and
 justhtml now pitch the same "replace readability + markdownify" story; in JS,
 defuddle and mdream. Bring everything to the bindings before anything else.
+
+**Tracking:** [#256](https://github.com/iamsaquib8/domq/issues/256) (open items). Shipped in [0.6.0](#060--2026-11-03--where-people-are).
 
 - [x] **M** `py` Python: `main_content()`, `metadata()`, `links()` /
       `resources()`, `to_markdown_chunks()`, `table_rows()` and CSV,
@@ -326,6 +348,8 @@ hit most (each prototyped against the conformance suite and 2,050 real
 pages), the reader-mode gap on non-article pages, Markdown that renders as
 written, and the first Markdown features models need. The wasm budget is
 decided first, because every JavaScript item after it depends on the answer.
+
+**Tracking:** epic [#249](https://github.com/iamsaquib8/domq/issues/249) · [milestone](https://github.com/iamsaquib8/domq/milestone/1) · bugs and performance traps to clear alongside: [#257](https://github.com/iamsaquib8/domq/issues/257).
 
 - [ ] **S** `js` Decide the wasm budget: win back the ~21 KB that 0.6 added,
       or split the extraction helpers into a second, optional module, and
@@ -376,6 +400,8 @@ run on domq with one changed import. And give browser-free agents what they
 need to *find* things (the article and how sure we are, the login form, the
 content links, the next page) the way an accessibility tree does, with
 selectors they can reuse.
+
+**Tracking:** epic [#250](https://github.com/iamsaquib8/domq/issues/250) · [milestone](https://github.com/iamsaquib8/domq/milestone/2).
 
 - [ ] **M** `py` `js` Drop-in compatibility layers: a `domq.bs4` subset of
       BeautifulSoup and a cheerio-style `$` for JavaScript, read-only first,
@@ -428,6 +454,8 @@ Committed for 1.0 but not yet placed: each lands in 0.8, 0.9 or 0.10,
 whichever has room, in this order, so its API is settled by the 0.11 freeze.
 Anything still open then ships after 1.0 as an additive feature.
 
+**Tracking:** epic [#255](https://github.com/iamsaquib8/domq/issues/255).
+
 - [ ] **S** `ai` Token-aware chunking with your own tokenizer
       (`to_markdown_chunks_by(max, |s| tokens(s))`), overlap, stable chunk ids
       for incremental re-indexing, table headers repeated in every chunk of a
@@ -455,6 +483,8 @@ Anything still open then ships after 1.0 as an additive feature.
 Everything a team needs to put `domq lint` in CI and keep it there, in one
 release.
 
+**Tracking:** epic [#251](https://github.com/iamsaquib8/domq/issues/251) · [milestone](https://github.com/iamsaquib8/domq/milestone/3).
+
 - [ ] **S** `ship` `--allow` / `--deny` per rule, a summary line, and
       `--format sarif` for GitHub code scanning. ([#162](https://github.com/iamsaquib8/domq/issues/162), [#50](https://github.com/iamsaquib8/domq/issues/50))
 - [ ] **S** `ship` Inline suppressions (`<!-- domq-disable-next-line img-alt -->`)
@@ -480,6 +510,8 @@ release.
 
 For inputs too big to hold as a tree, for comparing documents in tests, and
 for the rest of the binding parity.
+
+**Tracking:** epic [#252](https://github.com/iamsaquib8/domq/issues/252) · [milestone](https://github.com/iamsaquib8/domq/milestone/4).
 
 - [ ] **L** `rust` `shell` Streaming selectors: run a `Selector` over
       `domq::events` for multi-gigabyte dumps without building a tree; CLI
@@ -507,6 +539,8 @@ and every breaking change 1.0 needs, made in one release so there's a single
 upgrade to plan. It comes last because 0.9 and 0.10 add API too (the linter
 in the library, editing in the bindings, the rewriter), and all of it should
 be settled together. After 0.11, only additive changes until 1.0.
+
+**Tracking:** epic [#253](https://github.com/iamsaquib8/domq/issues/253) · [milestone](https://github.com/iamsaquib8/domq/milestone/5); CI and release engineering: [#258](https://github.com/iamsaquib8/domq/issues/258).
 
 **The API freeze**
 
@@ -561,6 +595,8 @@ be settled together. After 0.11, only additive changes until 1.0.
 Small, high-value polish that doesn't need a release of its own. Most items are
 good first issues; each lands in whichever release is next.
 
+**Tracking:** epic [#260](https://github.com/iamsaquib8/domq/issues/260).
+
 - [ ] **S** `shell` Several inputs in one run (`-f` repeatable, globs), with
       grep-style `FILE:` prefixes and a `file` field in `--jsonl`; batch output
       with `-o DIR --keep-dirs --parallel N` and `--deduplicate`. ([#26](https://github.com/iamsaquib8/domq/issues/26))
@@ -611,6 +647,8 @@ good first issues; each lands in whichever release is next.
 goes out on crates.io, npm and PyPI with an upgrade guide from 0.x, and stays
 out for at least four weeks with no breaking change.
 
+**Tracking:** epic [#254](https://github.com/iamsaquib8/domq/issues/254) · [milestone](https://github.com/iamsaquib8/domq/milestone/6).
+
 - [ ] The public API is reviewed against the Rust API Guidelines, with
       `#[non_exhaustive]` where growth is expected and no known breaking
       changes pending. ([#82](https://github.com/iamsaquib8/domq/issues/82), [#57](https://github.com/iamsaquib8/domq/issues/57))
@@ -648,6 +686,8 @@ project meets its notability bar.
 
 ## Community
 
+**Tracking:** epic [#261](https://github.com/iamsaquib8/domq/issues/261).
+
 - [ ] `good first issue`s kept stocked; first response on issues within 48
       hours.
 - [ ] A "used by" section and credit for every contributor in release notes. ([#233](https://github.com/iamsaquib8/domq/issues/233))
@@ -662,6 +702,8 @@ project meets its notability bar.
 ## Exploring
 
 Ideas we like but haven't committed to. Prototypes and use-cases welcome.
+
+**Tracking:** epic [#262](https://github.com/iamsaquib8/domq/issues/262).
 
 - **More encodings in the CLI** (Shift_JIS, GBK, EUC-KR, ISO-8859-x) through
   an optional `encoding_rs` feature, used in the release binaries.
