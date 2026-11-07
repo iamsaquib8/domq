@@ -181,6 +181,28 @@ const SIBLING_ATOMS: &[&str] = &[
     "t",
 ];
 
+/// Siblings of many different types (more than `*-of-type` steps over before
+/// counting a whole list), with repeats, text and comments between them.
+const TYPE_ATOMS: &[&str] = &[
+    "<t0/>",
+    "<t1/>",
+    "<t2/>",
+    "<t3/>",
+    "<t4/>",
+    "<t5/>",
+    "<t6/>",
+    "<t7/>",
+    "<t8/>",
+    "<t9/>",
+    "<t10/>",
+    "<t11/>",
+    "<t0/>",
+    "<t1/>",
+    "t",
+    "<!--c-->",
+    "<u><t0/><t1/><t2/></u>",
+];
+
 fn soup(atoms: &'static [&'static str], max: usize) -> impl Strategy<Value = String> {
     proptest::collection::vec(select(atoms), 0..max).prop_map(|v| v.concat())
 }
@@ -402,6 +424,88 @@ proptest! {
         html in prop_oneof![soup(TREE_ATOMS, 48), siblings()],
     ) {
         agrees_with_naive(&parts, &html)?;
+    }
+
+    #[test]
+    fn of_type_pseudo_classes_agree_with_counting_siblings(
+        html in soup(TYPE_ATOMS, 80),
+        a in -3i32..=3,
+        b in -3i32..=4,
+    ) {
+        let dom = parse(&html);
+        // Position among same-type siblings, from the start and from the end.
+        let positions = |el: NodeRef<'_>| {
+            let same = |s: &NodeRef<'_>| s.tag_name() == el.tag_name();
+            let from = prev_elements(el).filter(same).count();
+            let to = next_elements(el).filter(same).count();
+            (from as i32 + 1, to as i32 + 1)
+        };
+        let fits = |pos: i32, a: i32, b: i32| (0..=100).any(|k| a * k + b == pos);
+        let selectors = [
+            "*:first-of-type".to_string(),
+            "*:last-of-type".to_string(),
+            "*:only-of-type".to_string(),
+            format!("*:nth-of-type({a}n{b:+})"),
+            format!("*:nth-last-of-type({a}n{b:+})"),
+        ];
+        let want = |kind: usize, from: i32, to: i32| match kind {
+            0 => from == 1,
+            1 => to == 1,
+            2 => from == 1 && to == 1,
+            3 => fits(from, a, b),
+            _ => fits(to, a, b),
+        };
+        for (kind, s) in selectors.iter().enumerate() {
+            let sel = Selector::parse(s).unwrap();
+            let expected = node_ids(dom.nodes().filter(|n| {
+                n.is_element() && {
+                    let (from, to) = positions(*n);
+                    want(kind, from, to)
+                }
+            }));
+            prop_assert_eq!(node_ids(dom.select(&sel)), expected.clone(), "{}", s);
+            for node in dom.nodes().filter(|n| n.is_element()) {
+                prop_assert_eq!(sel.matches(node), expected.contains(&node.id()), "{} on {:?}", s, node);
+            }
+            for root in dom.roots() {
+                let scoped = node_ids(root.descendants().filter(|d| expected.contains(&d.id())));
+                prop_assert_eq!(node_ids(root.select(&sel)), scoped, "{}", s);
+            }
+        }
+    }
+
+    #[test]
+    fn has_agrees_with_scope_anchored_selection(
+        steps in proptest::collection::vec(
+            (select(&['>', '+', '~', ' '][..]), select(&["div", "p", "span", "i", "*"][..])),
+            1..5,
+        ),
+        lead in select(&['>', ' '][..]),
+        html in prop_oneof![soup(TREE_ATOMS, 48), siblings()],
+    ) {
+        // `:has(> a + b ~ c)` is what `:scope > a + b ~ c` finds below the
+        // subject: `:has` takes a bounded shortcut when it has no descendant
+        // combinator, `:scope` selection walks everything.
+        let mut rel = String::new();
+        for (i, (comb, tag)) in steps.iter().enumerate() {
+            let comb = if i == 0 { lead } else { *comb };
+            match comb {
+                ' ' => rel.push(' '),
+                c => rel.push_str(&format!(" {c} ")),
+            }
+            rel.push_str(tag);
+        }
+        let dom = parse(&html);
+        let has = Selector::parse(&format!("*:has({})", rel.trim())).unwrap();
+        let below = Selector::parse(&format!(":scope{rel}")).unwrap();
+        let expected = node_ids(
+            dom.nodes()
+                .filter(|n| n.is_element() && n.select(&below).next().is_some()),
+        );
+        prop_assert_eq!(node_ids(dom.select(&has)), expected.clone(), "{}", rel);
+        for node in dom.nodes().filter(|n| n.is_element()) {
+            prop_assert_eq!(node.matches(&has), expected.contains(&node.id()), "{} on {:?}", rel, node);
+        }
     }
 
     #[test]

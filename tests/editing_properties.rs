@@ -463,3 +463,204 @@ proptest! {
         }
     }
 }
+
+// --- the <noscript> content decision --------------------------------------
+//
+// Whether `<noscript>` shows in text, Markdown and links depends on how much
+// text is inside `<noscript>` versus outside it. That is a property of the
+// tree as it is now: a document edited into some shape reads like the
+// document parsed from that shape's HTML.
+
+/// Well-formed pieces, so the HTML of any edited tree parses back to the same
+/// tree: no `<p>` (which nesting would re-parent), no stray end tags.
+fn noscript_html() -> impl Strategy<Value = String> {
+    let pieces = vec![
+        "<div>",
+        "</div>",
+        "<section>",
+        "</section>",
+        "<noscript>",
+        "</noscript>",
+        "short ",
+        "<span>a few words of text</span>",
+        "<span>x</span>",
+        "<a href=/x>go</a>",
+        "<article><span>a good deal more text than the rest of this page holds</span></article>",
+    ];
+    proptest::collection::vec(proptest::sample::select(pieces), 0..14).prop_map(|v| v.concat())
+}
+
+fn fragment() -> impl Strategy<Value = &'static str> {
+    proptest::sample::select(vec![
+        "<noscript><article><span>The whole forum thread lives here, long enough to outweigh the shell.</span></article></noscript>",
+        "<noscript><a href=/n>inside</a></noscript>",
+        "<noscript>x</noscript>",
+        "<span>Enable JavaScript</span>",
+        "<div><span>a lot of visible words outside any noscript element at all</span></div>",
+        "<section></section>",
+    ])
+}
+
+#[derive(Debug, Clone)]
+enum NoscriptOp {
+    Remove(usize),
+    SetText(usize, &'static str),
+    Rename(usize, &'static str),
+    AppendHtml(usize, &'static str),
+    InsertHtmlBefore(usize, &'static str),
+    InsertHtmlAfter(usize, &'static str),
+    CreateNoscript(usize, usize),
+    Move(usize, usize),
+    SetHidden(usize, bool),
+}
+
+fn noscript_op() -> impl Strategy<Value = NoscriptOp> {
+    let i = || any::<usize>();
+    let words = || {
+        proptest::sample::select(vec![
+            "",
+            "x",
+            "short",
+            "a good deal more text than the rest of this page holds",
+        ])
+    };
+    prop_oneof![
+        i().prop_map(NoscriptOp::Remove),
+        (i(), words()).prop_map(|(a, s)| NoscriptOp::SetText(a, s)),
+        (
+            i(),
+            proptest::sample::select(vec!["div", "noscript", "section"])
+        )
+            .prop_map(|(a, t)| NoscriptOp::Rename(a, t)),
+        (i(), fragment()).prop_map(|(a, h)| NoscriptOp::AppendHtml(a, h)),
+        (i(), fragment()).prop_map(|(a, h)| NoscriptOp::InsertHtmlBefore(a, h)),
+        (i(), fragment()).prop_map(|(a, h)| NoscriptOp::InsertHtmlAfter(a, h)),
+        (i(), i()).prop_map(|(a, b)| NoscriptOp::CreateNoscript(a, b)),
+        (i(), i()).prop_map(|(a, b)| NoscriptOp::Move(a, b)),
+        (i(), any::<bool>()).prop_map(|(a, h)| NoscriptOp::SetHidden(a, h)),
+    ]
+}
+
+/// Apply `op` to a random attached node (text nodes included for `SetText`).
+fn apply_noscript(dom: &mut Dom, op: &NoscriptOp) {
+    let ids: Vec<NodeId> = dom.nodes().map(|n| n.id()).collect();
+    let elements: Vec<NodeId> = dom
+        .nodes()
+        .filter(|n| n.is_element())
+        .map(|n| n.id())
+        .collect();
+    let (Some(_), Some(_)) = (ids.first(), elements.first()) else {
+        return;
+    };
+    let any = |i: usize| ids[i % ids.len()];
+    let el = |i: usize| elements[i % elements.len()];
+    match *op {
+        NoscriptOp::Remove(a) => dom.remove(any(a)),
+        NoscriptOp::SetText(a, s) => dom.set_text(any(a), s),
+        NoscriptOp::Rename(a, t) => dom.rename(el(a), t),
+        NoscriptOp::AppendHtml(a, h) => drop(dom.append_html(el(a), h)),
+        NoscriptOp::InsertHtmlBefore(a, h) => drop(dom.insert_html_before(any(a), h)),
+        NoscriptOp::InsertHtmlAfter(a, h) => drop(dom.insert_html_after(any(a), h)),
+        NoscriptOp::CreateNoscript(a, b) => {
+            if let Some(n) = dom.create_element("noscript") {
+                let t = dom.create_text("a good deal more text than the rest of this page holds");
+                dom.append_child(n, t);
+                dom.append_child(el(a), n);
+                let _ = b;
+            }
+        }
+        NoscriptOp::Move(a, b) => drop(dom.append_child(el(a), any(b))),
+        NoscriptOp::SetHidden(a, true) => dom.set_attr(el(a), "hidden", ""),
+        NoscriptOp::SetHidden(a, false) => dom.remove_attr(el(a), "hidden"),
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 2048, ..ProptestConfig::default() })]
+
+    #[test]
+    fn an_edited_document_reads_like_its_own_html(
+        doc in noscript_html(),
+        ops in proptest::collection::vec(noscript_op(), 1..8),
+    ) {
+        let mut dom = parse(&doc);
+        for op in &ops {
+            // Read in between, so a stale cached answer would be used.
+            let _ = dom.to_text();
+            apply_noscript(&mut dom, op);
+        }
+        let html = dom.to_html();
+        let reparsed = parse(&html);
+        // Skip documents whose HTML parses into a different tree (a text node
+        // split in two, say): only the cached decision is under test.
+        prop_assume!(reparsed.to_html() == html);
+        prop_assert_eq!(dom.to_text(), reparsed.to_text(), "{}", html);
+        #[cfg(feature = "markdown")]
+        prop_assert_eq!(dom.to_markdown(), reparsed.to_markdown(), "{}", html);
+        let links = |d: &Dom| -> Vec<(String, String)> {
+            d.links(None).iter().map(|l| (l.url.clone(), l.text.clone())).collect()
+        };
+        prop_assert_eq!(links(&dom), links(&reparsed), "{}", html);
+        let main = |d: &Dom| d.main_content().map(|n| n.to_html());
+        prop_assert_eq!(main(&dom), main(&reparsed), "{}", html);
+    }
+}
+
+#[test]
+fn the_issue_repros_read_like_their_own_html() {
+    let article = "<noscript><article><p>The whole forum thread lives here, long enough to \
+                   outweigh the shell.</p></article></noscript>";
+    let shell = "<p>Enable JavaScript</p>";
+    let whole = parse(&format!("{shell}{article}"));
+    assert!(whole.to_text().contains("forum thread"));
+
+    // `insert_html_after` a parsed document with no noscript.
+    let mut dom = parse(shell);
+    let p = dom.root().unwrap().id();
+    dom.insert_html_after(p, article);
+    assert_eq!(dom.to_html(), whole.to_html());
+    assert_eq!(dom.to_text(), whole.to_text());
+
+    // `append_html` and `create_element`.
+    let mut dom = parse(&format!("{shell}<div></div>"));
+    let div = dom.find_by_tag("div").next().unwrap().id();
+    dom.append_html(div, article);
+    assert_eq!(dom.to_text(), parse(&dom.to_html()).to_text());
+    let mut dom = parse(shell);
+    let n = dom.create_element("noscript").unwrap();
+    let t =
+        dom.create_text("The whole forum thread lives here, long enough to outweigh the shell.");
+    dom.append_child(n, t);
+    dom.append_child(dom.root().unwrap().id(), n);
+    assert_eq!(dom.to_text(), parse(&dom.to_html()).to_text());
+
+    // `rename` a div that holds the article.
+    let mut dom = parse(&format!(
+        "{shell}<div><article><p>The whole forum thread lives here, long enough to outweigh \
+         the shell.</p></article></div>"
+    ));
+    assert_eq!(
+        dom.to_text(),
+        "Enable JavaScript\n\nThe whole forum thread lives here, long enough to outweigh the shell."
+    );
+    let div = dom.find_by_tag("div").next().unwrap().id();
+    dom.rename(div, "noscript");
+    assert_eq!(dom.to_text(), whole.to_text());
+    dom.rename(div, "div");
+    assert_eq!(dom.to_text(), parse(&dom.to_html()).to_text());
+
+    // `set_text` and `remove` move the balance too.
+    let mut dom = parse(&format!("{shell}{article}"));
+    let ns = dom.find_by_tag("noscript").next().unwrap().id();
+    assert!(dom.to_text().contains("forum thread"));
+    dom.set_text(ns, "x");
+    assert_eq!(dom.to_text(), parse(&dom.to_html()).to_text());
+    let mut dom = parse(&format!("{shell}{article}"));
+    let ns = dom.find_by_tag("noscript").next().unwrap().id();
+    dom.remove(ns);
+    assert_eq!(dom.to_text(), "Enable JavaScript");
+    let mut dom = parse(&format!("{shell}<noscript>x</noscript>"));
+    let p = dom.find_by_tag("p").next().unwrap().id();
+    dom.remove(p);
+    assert_eq!(dom.to_text(), parse(&dom.to_html()).to_text());
+}

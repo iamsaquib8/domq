@@ -11,6 +11,7 @@ from _typeshed import DataclassInstance
 __all__ = [
     "Attr",
     "Chunk",
+    "Decoded",
     "Document",
     "Element",
     "ExtractError",
@@ -25,6 +26,7 @@ __all__ = [
     "Select",
     "Selector",
     "__version__",
+    "decode",
     "extract",
     "extract_all",
     "parse",
@@ -37,13 +39,36 @@ __version__: str
 _T = TypeVar("_T")
 _D = TypeVar("_D", bound=DataclassInstance)
 
-def parse(html: str) -> Document:
+def parse(source: str | bytes, encoding: Optional[str] = None) -> Document:
     """Parse an HTML document (or fragment) into a :class:`Document`.
+
+    Accepts a ``str`` or raw ``bytes``. When ``bytes`` are passed, character
+    encoding is detected automatically via the WHATWG encoding-sniffing
+    algorithm (or overridden with ``encoding``).
 
     Never raises on malformed HTML: anything the parser had to recover from is
     listed in :attr:`Document.errors`. Large inputs are parsed with the GIL
     released.
     """
+
+def decode(bytes: bytes, encoding: Optional[str] = None) -> Decoded:
+    """Decode raw HTML bytes into a string, using WHATWG encoding sniffing."""
+
+@final
+class Decoded:
+    """The result of :func:`domq.decode`."""
+
+    @property
+    def text(self) -> str:
+        """The decoded text."""
+    @property
+    def encoding(self) -> str:
+        """The encoding detected or chosen."""
+    @property
+    def warning(self) -> Optional[str]:
+        """Any warning produced during decoding."""
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
 
 def resolve_url(base: str, relative: str) -> str:
     """Resolve ``relative`` against ``base``, following RFC 3986 §5.2."""
@@ -263,6 +288,7 @@ class Document:
         paragraphs."""
     def to_markdown(
         self,
+        *,
         links: Optional[Literal["inline", "reference", "footer"]] = None,
         images: Optional[Literal["keep", "alt", "drop"]] = None,
         drop_data_uris: bool = False,
@@ -279,13 +305,17 @@ class Document:
     def to_markdown_chunks(
         self,
         max_chars: Optional[int] = None,
-        max_bytes: Optional[int] = None,
+        *,
         links: Optional[Literal["inline", "reference", "footer"]] = None,
         images: Optional[Literal["keep", "alt", "drop"]] = None,
         drop_data_uris: bool = False,
         base_url: Optional[str] = None,
     ) -> list[Chunk]:
-        """CommonMark + GFM Markdown split at headings into chunks under ``max_chars``."""
+        """CommonMark + GFM Markdown split at headings into chunks under ``max_chars``.
+
+        Links are always written inline, whatever ``links`` says, so that each chunk
+        stands alone.
+        """
     def tables(self, selector: str = "table") -> list[list[list[str]]]:
         """Extract rows of cell text for tables matching ``selector`` (default ``"table"``)."""
     def to_csv(self, selector: str = "table") -> str:
@@ -379,6 +409,7 @@ class Element:
         """The :class:`Document` this element belongs to."""
     def to_markdown(
         self,
+        *,
         links: Optional[Literal["inline", "reference", "footer"]] = None,
         images: Optional[Literal["keep", "alt", "drop"]] = None,
         drop_data_uris: bool = False,
@@ -394,13 +425,16 @@ class Element:
     def to_markdown_chunks(
         self,
         max_chars: Optional[int] = None,
-        max_bytes: Optional[int] = None,
+        *,
         links: Optional[Literal["inline", "reference", "footer"]] = None,
         images: Optional[Literal["keep", "alt", "drop"]] = None,
         drop_data_uris: bool = False,
         base_url: Optional[str] = None,
     ) -> list[Chunk]:
-        """CommonMark + GFM Markdown chunks for this element's subtree."""
+        """CommonMark + GFM Markdown chunks for this element's subtree.
+
+        Links are always written inline, whatever ``links`` says.
+        """
     def outline(self) -> PageOutline:
         """Extract a semantic page outline for this element's subtree."""
     def to_json(self) -> str:

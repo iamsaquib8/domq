@@ -122,7 +122,12 @@ TOOLS (all read-only):
     links       links with resolved URLs and text
     metadata    title, description, OpenGraph, JSON-LD, feeds, ...
     tables      tables as rows of cells
+    outline     landmarks, headings and controls, with selectors to act on
     lint        accessibility and markup problems, with positions
+
+    markdown and chunks also take links (inline, reference, footer), images
+    (keep, alt, drop) and drop_data_uris, like the --markdown-* flags. Chunks
+    always write links inline: each chunk must stand alone.
 
 SETUP:
     Claude Code:   claude mcp add domq -- domq mcp
@@ -384,7 +389,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, ArgEr
     }
 
     opts.selector = selector.join(" ").trim().to_string();
-    validate(&opts)?;
+    validate(&mut opts)?;
     Ok(Command::Run(opts))
 }
 
@@ -417,7 +422,15 @@ fn parse_lint(mut args: impl Iterator<Item = String>) -> Result<Command, ArgErro
                     )));
                 }
             },
-            "--encoding" => opts.encoding = Some(value(inline)?),
+            "--encoding" => {
+                let enc = value(inline)?;
+                if domq::lookup_encoding(&enc).is_none() {
+                    return Err(ArgError::lint(format!(
+                        "unknown or unsupported encoding '{enc}' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
+                    )));
+                }
+                opts.encoding = Some(enc);
+            }
             "-" => opts.files.push(arg),
             _ if name.starts_with('-') => {
                 return Err(ArgError::lint(format!("unknown lint option '{arg}'")));
@@ -440,8 +453,22 @@ fn parse_mcp(mut args: impl Iterator<Item = String>) -> Result<Command, ArgError
 }
 
 /// Reject flag combinations that have no sensible meaning.
-fn validate(opts: &Options) -> Result<(), ArgError> {
+fn validate(opts: &mut Options) -> Result<(), ArgError> {
     let err = |msg: String| Err(ArgError::new(msg));
+    let markdown_option = [
+        (opts.markdown_links.is_some(), "--markdown-links"),
+        (opts.markdown_images.is_some(), "--markdown-images"),
+        (opts.markdown_drop_data_uris, "--markdown-drop-data-uris"),
+    ]
+    .into_iter()
+    .find_map(|(set, flag)| set.then_some(flag));
+    if let Some(flag) = markdown_option {
+        match opts.mode {
+            Mode::Html => opts.mode = Mode::Markdown,
+            Mode::Markdown => {}
+            mode => return err(format!("{flag} needs -m/--markdown (got {})", mode.flag())),
+        }
+    }
     let tasks: Vec<&str> = [
         (!opts.extract.is_empty(), "--extract"),
         (opts.links, "--links"),
@@ -586,6 +613,18 @@ impl Flag {
     }
 }
 
+/// Whether `url` is an absolute URL with a scheme and authority or path (`scheme://…`).
+pub(crate) fn is_absolute_url(url: &str) -> bool {
+    let url = url.trim();
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let mut chars = scheme.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        && !rest.trim().is_empty()
+}
+
 fn apply_value(opts: &mut Options, flag: Flag, value: String) -> Result<(), ArgError> {
     match flag {
         Flag::Attribute => opts.attribute = Some(value),
@@ -600,10 +639,24 @@ fn apply_value(opts: &mut Options, flag: Flag, value: String) -> Result<(), ArgE
             opts.extract.push(field);
         }
         Flag::Remove => opts.remove.push(value),
-        Flag::Base => opts.base = Some(value),
+        Flag::Base => {
+            if !is_absolute_url(&value) {
+                return Err(ArgError::new(
+                    "--base must be an absolute URL (scheme://…)".into(),
+                ));
+            }
+            opts.base = Some(value);
+        }
         Flag::Filename => opts.input = Some(value),
         Flag::Output => opts.output = Some(value),
-        Flag::Encoding => opts.encoding = Some(value),
+        Flag::Encoding => {
+            if domq::lookup_encoding(&value).is_none() {
+                return Err(ArgError::new(format!(
+                    "unknown or unsupported encoding '{value}' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
+                )));
+            }
+            opts.encoding = Some(value);
+        }
         Flag::MarkdownLinks => {
             let val = value.to_ascii_lowercase();
             if !matches!(val.as_str(), "inline" | "reference" | "footer") {
@@ -611,9 +664,6 @@ fn apply_value(opts: &mut Options, flag: Flag, value: String) -> Result<(), ArgE
                     "invalid --markdown-links: {:?} (expected inline, reference or footer)",
                     value
                 )));
-            }
-            if opts.mode == Mode::Html {
-                opts.mode = Mode::Markdown;
             }
             opts.markdown_links = Some(val);
         }
@@ -624,9 +674,6 @@ fn apply_value(opts: &mut Options, flag: Flag, value: String) -> Result<(), ArgE
                     "invalid --markdown-images: {:?} (expected keep, alt or drop)",
                     value
                 )));
-            }
-            if opts.mode == Mode::Html {
-                opts.mode = Mode::Markdown;
             }
             opts.markdown_images = Some(val);
         }
@@ -645,9 +692,6 @@ fn apply_switch(opts: &mut Options, flag: Flag) -> Result<Option<Command>, ArgEr
         Flag::Csv => Mode::Csv,
         Flag::Count => Mode::Count,
         Flag::MarkdownDropDataUris => {
-            if opts.mode == Mode::Html {
-                opts.mode = Mode::Markdown;
-            }
             opts.markdown_drop_data_uris = true;
             return Ok(None);
         }
@@ -760,6 +804,38 @@ mod tests {
         assert!(parse([OsString::from("--nope")]).is_err());
         assert!(parse([OsString::from("-a")]).is_err());
         assert!(parse([OsString::from("--text=1")]).is_err());
+        let err = try_run(&["--encoding", "bogus"]).unwrap_err();
+        assert_eq!(
+            err.message,
+            "unknown or unsupported encoding 'bogus' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
+        );
+        assert_eq!(err.help, "domq --help");
+        for bad in ["not a url", "/relative/", "htps://", "https://"] {
+            let err = try_run(&["--base", bad]).unwrap_err();
+            assert_eq!(err.message, "--base must be an absolute URL (scheme://…)");
+            assert_eq!(err.help, "domq --help");
+
+            let err = try_run(&["-b", bad]).unwrap_err();
+            assert_eq!(err.message, "--base must be an absolute URL (scheme://…)");
+            assert_eq!(err.help, "domq --help");
+        }
+    }
+
+    #[test]
+    fn absolute_urls() {
+        assert!(is_absolute_url("https://example.com"));
+        assert!(is_absolute_url("https://example.com/foo/bar"));
+        assert!(is_absolute_url("http://localhost:3000"));
+        assert!(is_absolute_url("file:///etc/hosts"));
+        assert!(is_absolute_url("custom+scheme://host"));
+        assert!(!is_absolute_url("/relative/"));
+        assert!(!is_absolute_url("not a url"));
+        assert!(!is_absolute_url("htps://"));
+        assert!(!is_absolute_url("https://"));
+        assert!(!is_absolute_url("https://   "));
+        assert!(!is_absolute_url("://foo"));
+        assert!(!is_absolute_url("1http://foo"));
+        assert!(!is_absolute_url("mailto:user@example.com"));
     }
 
     #[test]
@@ -816,12 +892,19 @@ mod tests {
             &["lint", "--format", "xml"][..],
             &["lint", "-x"],
             &["lint", "--encoding"],
+            &["lint", "--encoding", "bogus"],
         ] {
             assert_eq!(
                 try_run(bad).map(|_| ()).map_err(|e| e.help),
                 Err("domq lint --help")
             );
         }
+        let err = try_run(&["lint", "--encoding", "bogus"]).unwrap_err();
+        assert_eq!(
+            err.message,
+            "unknown or unsupported encoding 'bogus' (supported: utf-8, utf-16le, utf-16be, windows-1252)"
+        );
+        assert_eq!(err.help, "domq lint --help");
         // Only the first argument names the subcommand.
         assert_eq!(run(&["-c", "lint"]).selector, "lint");
     }

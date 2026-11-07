@@ -151,7 +151,7 @@ fn links_inside_hidden_elements_are_still_found() {
     // check is for content hidden inside a link.
     let html = "<nav hidden><a href=/menu>Menu item</a></nav>\
                 <a href=/self hidden>Self</a>\
-                <a href=/outer>out<span hidden>in<a href=/inner>inner</a></span>side</a>";
+                <a href=/outer>out<span hidden>in<table><tr><td><a href=/inner>inner</a></td></tr></table></span>side</a>";
     assert_eq!(
         urls(html, None),
         [
@@ -228,13 +228,22 @@ fn text_fallbacks_for_icon_links() {
 
 #[test]
 fn nested_links_split_their_text() {
-    // Invalid HTML this parser keeps nested: the inner text belongs to the
-    // inner link only, and both are reported in document order.
-    let html = "<a href=/outer>before <a href=/inner>inside</a> after</a>";
+    // A link inside a table cell inside a link stays nested (a table cell is
+    // a scope boundary, so the inner `<a>` does not close the outer one): the
+    // inner text belongs to the inner link only, and both are reported in
+    // document order.
+    let html = "<a href=/outer>before <table><tr><td><a href=/inner>inside</a></td></tr></table> after</a>";
     assert_eq!(
         urls(html, None),
         [pair("/outer", "before after"), pair("/inner", "inside")]
     );
+}
+
+#[test]
+fn a_link_in_a_link_is_a_sibling() {
+    // Browsers never nest links: the second `<a>` closes the first.
+    let html = "<a href=/one>One<a href=/two>Two</a> after";
+    assert_eq!(urls(html, None), [pair("/one", "One"), pair("/two", "Two")]);
 }
 
 #[test]
@@ -368,4 +377,106 @@ fn many_links_and_resources() {
     let dom = parse(&html);
     assert_eq!(dom.links(None).len(), 20_000);
     assert_eq!(dom.resources(None).len(), 60_000);
+}
+
+// --- `NodeRef::links` / `NodeRef::resources` ------------------------------------
+
+/// Every element of `dom`, plus the document's own text nodes' parents: the
+/// nodes whose subtree results are compared with the document-wide ones.
+fn all_nodes(dom: &domq::Dom) -> Vec<domq::NodeRef<'_>> {
+    dom.roots()
+        .flat_map(|root| core::iter::once(root).chain(root.descendants()))
+        .collect()
+}
+
+fn inside(node: domq::NodeRef<'_>, root: domq::NodeRef<'_>) -> bool {
+    node.id() == root.id() || node.ancestors().any(|a| a.id() == root.id())
+}
+
+/// The subtree's links and resources are exactly the document-wide ones whose
+/// element is in the subtree, for every node and with and without a base.
+fn assert_subtrees_match(html: &str) {
+    let dom = parse(html);
+    for base in [None, Some("https://example.com/dir/page.html")] {
+        let all_links = dom.links(base);
+        let all_resources = dom.resources(base);
+        let resolved = dom.base_url(base);
+        for root in all_nodes(&dom) {
+            let want: Vec<_> = all_links
+                .iter()
+                .filter(|l| inside(l.node, root))
+                .map(|l| (l.node.id(), l.href, l.url.clone(), l.text.clone()))
+                .collect();
+            for got in [root.links(base), root.links_resolved(resolved.as_deref())] {
+                let got: Vec<_> = got
+                    .iter()
+                    .map(|l| (l.node.id(), l.href, l.url.clone(), l.text.clone()))
+                    .collect();
+                assert_eq!(got, want, "links under {root:?} in {html}");
+            }
+            let want: Vec<_> = all_resources
+                .iter()
+                .filter(|r| inside(r.node, root))
+                .map(|r| (r.node.id(), r.attr, r.value, r.url.clone()))
+                .collect();
+            for got in [
+                root.resources(base),
+                root.resources_resolved(resolved.as_deref()),
+            ] {
+                let got: Vec<_> = got
+                    .iter()
+                    .map(|r| (r.node.id(), r.attr, r.value, r.url.clone()))
+                    .collect();
+                assert_eq!(got, want, "resources under {root:?} in {html}");
+            }
+        }
+    }
+}
+
+#[test]
+fn subtree_links_and_resources_match_the_document_ones() {
+    for html in [
+        r#"<div><a href="/a">A</a><p><a href="b">B <img src=b.png alt=bee></a></p></div>
+           <div><a href="javascript:x()">no</a><area href="/map" alt="Map"><img src="i.png" srcset="i.png 1x, j.png 2x"></div>"#,
+        // Icon links, hidden parts inside a link, `<noscript>`.
+        r#"<a href=/1 aria-label=One><svg></svg></a><a href=/2>two <span hidden>x</span> <b style="display:none">y</b> z</a>
+           <noscript><a href=/3>three</a></noscript><a href=/4><img alt=four src=4.png></a>"#,
+        // Content a document walk does not enter, and an element inside it.
+        r#"<template><a href=/t>t</a><img src=t.png></template><script>var a = "<a href=/s>";</script><p><a href=/v>v</a></p>"#,
+        // A `<base>` that changes every URL.
+        r#"<head><base href="/docs/"><link rel=stylesheet href=s.css></head><body><ul><li><a href=a>a</a></li><li><a href="../b">b</a><img src=b.png></li></ul></body>"#,
+        // Nested links and an element between them.
+        r#"<a href=/outer>outer <span><a href=/inner>inner</a></span> tail</a><table><tr><td><a href=/c>c</a></td></tr></table>"#,
+        // Documents with nothing to find, and a fragment of several roots.
+        "<p>none</p>",
+        "text <a href=/x>x</a> text<a href=/y>y</a>",
+        "",
+    ] {
+        assert_subtrees_match(html);
+    }
+    for page in ["blog", "docs", "messy"] {
+        let path = format!("{}/tests/pages/{page}.html", env!("CARGO_MANIFEST_DIR"));
+        assert_subtrees_match(&std::fs::read_to_string(path).unwrap());
+    }
+}
+
+#[test]
+fn subtree_links_do_not_see_the_rest_of_the_document() {
+    let dom = parse(r#"<p id=a><a href=/a>A</a></p><p id=b><a href=/b>B</a><img src=b.png></p>"#);
+    let b = dom.find_by_tag("p").nth(1).unwrap();
+    let links = b.links(Some("https://x.dev/"));
+    assert_eq!(links.len(), 1);
+    assert_eq!(
+        (links[0].url.as_str(), links[0].text.as_str()),
+        ("https://x.dev/b", "B")
+    );
+    let resources = b.resources(Some("https://x.dev/"));
+    assert_eq!(resources.len(), 1);
+    assert_eq!(resources[0].url, "https://x.dev/b.png");
+    // The node itself counts, a text node has none, and the document-wide
+    // answer is unchanged.
+    let a = dom.find_by_tag("a").nth(1).unwrap();
+    assert_eq!(a.links(None).len(), 1);
+    assert!(a.first_child().unwrap().links(None).is_empty());
+    assert_eq!(dom.links(None).len(), 2);
 }

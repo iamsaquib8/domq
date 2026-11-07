@@ -56,6 +56,9 @@ domq -j 'table tr:nth-child(3)' -f report.html
 | `-a, --attribute <NAME>` | print this attribute of each match (no selector = all elements) |
 | `-t, --text` | readable text of each match (block elements → line breaks, scripts dropped) |
 | `-m, --markdown` | each match as Markdown (CommonMark + GFM tables) |
+| `--markdown-links <STYLE>` | Markdown link style: `inline` (default), `reference` (`[text][1]` plus definitions at the end) or `footer` (a `### Links` list) |
+| `--markdown-images <STYLE>` | Markdown image style: `keep` (default), `alt` (the alt text only) or `drop` |
+| `--markdown-drop-data-uris` | leave `data:` URIs out of Markdown links and images (their text stays) |
 | `-j, --json` | matches as a JSON array (whole document as JSON with no selector) |
 | `--jsonl` | one JSON value per line ([JSON Lines](https://jsonlines.org)): elements, `-a` values, `-e` objects or `--links` |
 | `--csv` | matched `<table>`s as RFC 4180 CSV (default selector `table`), separated by a blank line |
@@ -155,7 +158,7 @@ $ curl -sL https://www.rust-lang.org | domq --links --jsonl header
 `--meta` prints the page's metadata as one object: `title`, `description`,
 `canonical`, `lang`, `site_name`, `image`, `author`, `published`, `keywords`,
 `og` and `twitter` (arrays of `[property, value]` pairs, repeats kept),
-`json_ld` (raw blocks) and `feeds`. Missing values are `null` or `[]`; with
+`json_ld` (blocks as written, minus any CDATA or comment wrapper) and `feeds`. Missing values are `null` or `[]`; with
 `-b`/`-B`, `canonical`, `image` and `feeds` are made absolute.
 
 ## Encodings
@@ -166,9 +169,8 @@ Input is decoded the way a browser would, minus HTTP headers: a byte-order mark
 bytes are valid UTF-8 (a character cut off at the very end still counts);
 otherwise Windows-1252. `iso-8859-1`, `latin1` and `ascii` mean Windows-1252,
 as in browsers. Other encodings are not supported: an unknown `--encoding`
-label prints a warning and decodes as UTF-8, with invalid bytes as U+FFFD (a
-page declaring an unsupported charset is decoded as UTF-8 if it is valid UTF-8,
-else as Windows-1252 with a warning).
+label is a usage error (exit 2); a page that declares an unsupported charset is
+decoded as UTF-8 if it is valid UTF-8, else as Windows-1252 with a warning.
 
 ## Lint
 
@@ -233,14 +235,15 @@ clients). The WASI build works too: `"command": "wasmtime", "args":
 
 | Tool | Arguments (besides `html`) | Returns |
 |---|---|---|
-| `markdown` | `selector`, `main`, `base_url` | Markdown of the page, or of each match |
+| `markdown` | `selector`, `main`, `base_url`, `links`, `images`, `drop_data_uris` | Markdown of the page, or of each match |
 | `text` | `selector`, `main` | readable text |
 | `select` | `selector`, `limit` (50), `include_html`, `max_chars` (1000) | `{count, truncated, matches: [{tag, attrs, text, html?}]}` |
 | `extract` | `fields` (name → spec, as in `-e`), `selector`, `base_url` | `{results: [{…}]}`, one object per match of `selector` |
-| `chunks` | `max_chars` (2000), `selector`, `main`, `base_url` | `{chunks: [{context, heading_path, markdown}]}` |
+| `chunks` | `max_chars` (2000), `selector`, `main`, `base_url`, `links`, `images`, `drop_data_uris` | `{chunks: [{context, heading_path, markdown}]}` |
 | `links` | `selector`, `base_url` | `{count, links: [{url, text}]}` |
 | `metadata` | `base_url` | the `--meta` object |
 | `tables` | `selector` (`table`) | `{tables: [{rows: [[cell, …]]}]}` |
+| `outline` | `selector` | `{count, outline: [{ref, role, name, level, selector, href, tag, depth, source_range}]}`, plus the indented text outline |
 | `lint` | `include_notes` | `{errors, warnings, notes, findings: [{line, column, level, rule, message}]}` |
 
 All tools are read-only (`readOnlyHint`) and closed-world: they work on the

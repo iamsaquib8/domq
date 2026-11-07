@@ -1,4 +1,4 @@
-# Stream huge documents
+# Process a huge dump without building a tree
 
 `domq::events` streams a document as start, end, text, comment and doctype
 events without building a tree. The events come *after* recovery, from the
@@ -30,5 +30,4 @@ Each event carries its byte range in the input; implied end tags have an empty
 range. For raw tokens before any recovery, use `domq::tokenize`.
 
 Running CSS selectors directly over the event stream (for multi-gigabyte
-dumps) is on the [roadmap](https://github.com/iamsaquib8/domq/blob/main/ROADMAP.md)
-for 0.6.
+dumps) is on the [roadmap](https://github.com/iamsaquib8/domq/blob/main/ROADMAP.md).

@@ -1,11 +1,11 @@
-# Extract structured data
+# Pull fields from a list of items
 
 Describe the fields you want once, and get typed values back, with errors
 that name the selector that failed.
 
 ## Rust: `#[derive(FromHtml)]`
 
-Enable the `derive` feature (`domq = { version = "0.5", features = ["derive"] }`).
+Enable the `derive` feature (`domq = { version = "0.6", features = ["derive"] }`).
 
 ```rust,ignore
 use domq::FromHtml;

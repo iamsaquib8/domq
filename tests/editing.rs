@@ -938,3 +938,34 @@ fn editing_deep_trees_does_not_recurse() {
     dom.set_text(outer, "flat"); // detaches a 50k-deep subtree
     assert_eq!(dom.to_html(), "<body><main><div>flat</div></main></body>");
 }
+
+/// Creating `<noscript>` elements (and parsing fragments that hold them) must
+/// not re-walk the document each time: the answer to "does `<noscript>` hold
+/// the page's content?" is worked out when a reader asks. The ceiling is the
+/// convention of `LINEAR_TIME_LIMIT_MS` in `tests/parsing.rs`; the walk per
+/// edit took tens of seconds in a debug build.
+#[test]
+fn creating_many_noscript_elements_is_linear() {
+    use std::time::{Duration, Instant};
+
+    let html = "<p>Some text of the page, a sentence or so.</p>".repeat(30_000);
+    let mut dom = parse(&format!("<div>{html}</div>"));
+    let body = dom.root().unwrap().id();
+    let start = Instant::now();
+    for _ in 0..1_000 {
+        let n = dom.create_element("noscript").unwrap();
+        dom.append_child(body, n);
+        dom.append_html(body, "<noscript>x</noscript>");
+    }
+    let edits = start.elapsed();
+    let text = dom.to_text();
+    assert!(!text.is_empty());
+    let total = start.elapsed();
+    assert!(edits < Duration::from_secs(5), "edits took {edits:?}");
+    assert!(
+        total < Duration::from_secs(5),
+        "edits and read took {total:?}"
+    );
+    // The answer follows the edits: the noscript text is outside the page's.
+    assert!(text.ends_with("or so."), "{:?}", &text[text.len() - 20..]);
+}

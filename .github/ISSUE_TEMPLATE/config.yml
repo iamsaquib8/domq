@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Ask a question or show what you built
+    url: https://github.com/iamsaquib8/domq/discussions
+    about: Questions, ideas and show-and-tell go in Discussions, so issues stay actionable.
   - name: Try it in the browser
     url: https://iamsaquib8.github.io/domq/
     about: The live playground — paste HTML, try selectors, see text/Markdown/JSON output.

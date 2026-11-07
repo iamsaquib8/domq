@@ -1,8 +1,21 @@
 # Publishing & release runbook
 
-The library crate, the CLI crate and its prebuilt binaries, the WASM/npm package,
-and docs.rs. Run from a clean `main` with green CI. Keep all versions in lock-step
-(`Cargo.toml`, `cli/Cargo.toml`, `wasm/Cargo.toml`).
+The library and derive crates, the CLI crate and its prebuilt binaries, the
+WASM/npm package, the Python package, Homebrew and docs.rs. Run from a clean
+`main` with green CI. Keep all versions in lock-step:
+
+- `version` in `Cargo.toml`, `derive/Cargo.toml`, `cli/Cargo.toml`,
+  `wasm/Cargo.toml` and `python/Cargo.toml` (npm and PyPI take theirs from the
+  last two);
+- the `domq-derive` requirement in `Cargo.toml` and the `domq` requirement in
+  `cli/Cargo.toml` and `python/Cargo.toml`;
+- `domq = "X.Y"` and `domq-wasm@X.Y` in `README.md`, `derive/README.md`,
+  `derive/src/lib.rs`, `wasm/README.md`, `book/src/install.md` and
+  `book/src/cookbook/{extracting,lint}.md`, and the supported versions in
+  `SECURITY.md`.
+
+`grep -rn 'X.Y' --include='*.toml' --include='*.md' .` with the old version
+finds anything missed.
 
 ## 0. Pre-flight
 
@@ -15,11 +28,13 @@ cargo doc --no-deps --all-features                                      # docs b
 cargo publish --dry-run                                                 # packaging
 ```
 
-Bump the version in `Cargo.toml` and move the `CHANGELOG.md` "unreleased"
-section under the new version. Commit, then tag:
+Bump the versions (above), run `python3 scripts/changelog.py release X.Y.Z` to
+turn the `changes/` fragments into the new `CHANGELOG.md` section (then add the
+summary and upgrade notes), and update ROADMAP's "Where we are", "What works where" and
+"Shipped". Merge that, then tag `main`:
 
 ```sh
-git tag v0.5.0 && git push origin main --tags
+git tag v0.6.0 && git push origin main --tags
 ```
 
 ## 1. crates.io
@@ -43,25 +58,36 @@ docs.rs builds automatically from the published crate (config is already in
 **Automated:** pushing a `v*` tag runs the `npm` job in
 `.github/workflows/release.yml`, which builds, smoke-tests and publishes with
 npm *trusted publishing* (OIDC, with provenance) — no token in the repo. One-time
-setup: npmjs.com → `domq` → Settings → Trusted publishing → GitHub
+setup: npmjs.com → `domq-wasm` → Settings → Trusted publishing → GitHub
 Actions, repository `iamsaquib8/domq`, workflow `release.yml`,
 environment `npm`. The manual steps below are the fallback.
 
-The npm version comes from `wasm/Cargo.toml`; bump it there. The
-package is one `--target web` build plus a small Node entry point
-(`npm/node.js`) and an `"exports"` map that `npm/finish.mjs` adds. Don't build
-with `--target nodejs` or `bundler`: the one package serves every runtime.
+The npm version comes from `wasm/Cargo.toml`; bump it there. The package is
+one `--target web` build per entry plus a small Node entry point
+(`npm/node.js`) and an `"exports"` map. Two builds from one crate (the
+`extract` cargo feature, on by default):
+
+- `domq-wasm`: the **core** (`--no-default-features`), in the package root;
+- `domq-wasm/extract`: the **full** build with extraction (`mainContent`,
+  `metadata`, `links`, `resources`, `toMarkdownChunks`, `tables`, `toCsv`),
+  in `extract/`.
+
+`npm/build.mjs` runs both `wasm-pack build`s and then `npm/finish.mjs`, which
+adds each entry's Node entry point, the `"exports"` map and the `files` list,
+and checks that the core's `.d.ts` declares none of the extraction API. Don't
+build with `--target nodejs` or `bundler`: the one package serves every runtime.
 
 ```sh
 cd wasm
-wasm-pack build --target web --release
-node npm/finish.mjs                             # Node entry point + "exports" in pkg/package.json
-wasm-pack test --node                           # binding tests
-sh npm/smoke-test.sh                            # npm-pack pkg/, install it, run tests/node.mjs
-gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c    # expect ~41 KB (CI gate: 46080 bytes)
+node npm/build.mjs                              # core -> pkg/, extract -> pkg/extract/, Node entry points, "exports"
+wasm-pack test --node                           # binding tests, extract build
+wasm-pack test --node -- --no-default-features  # binding tests, core build
+sh npm/smoke-test.sh                            # npm-pack pkg/, install it, run tests/node.mjs against both entries
+gzip -9 -c pkg/domq_wasm_bg.wasm | wc -c            # core: expect ~56.6 KB (CI gate: 60000 bytes)
+gzip -9 -c pkg/extract/domq_wasm_bg.wasm | wc -c    # extract: expect ~77.8 KB (CI gate: 80000 bytes)
 
 cd pkg
-npm pack --dry-run                              # expect 7 files, incl. node.js and the .wasm
+npm pack --dry-run                              # expect 11 files: LICENSE, README.md, package.json, and per entry the .wasm, .js, .d.ts and node.js
 npm login
 npm publish --access public
 ```
@@ -75,9 +101,25 @@ itself on pushes to `main` that touch `src/`, `wasm/` or `playground/`
 (`.github/workflows/pages.yml`). It needs a one-time setting: Settings → Pages
 → Build and deployment → Source: **GitHub Actions**.
 
-## 3. Post-publish
+## 3. PyPI
+
+**Automated:** the same `v*` tag runs `.github/workflows/python.yml`, which
+builds the abi3 wheels and the sdist and publishes them with trusted
+publishing (environment `pypi`). The version comes from `python/Cargo.toml`.
+
+## 4. Homebrew
+
+The `release` job's summary prints a filled-in formula. Copy it into the tap
+(see [packaging/homebrew/README.md](../packaging/homebrew/README.md)), commit
+and push, then `brew update && brew upgrade iamsaquib8/tap/domq && domq --version`.
+
+## 5. Post-publish
 
 - Confirm <https://docs.rs/domq> built and <https://crates.io/crates/domq>
   shows the new version.
+- Confirm <https://www.npmjs.com/package/domq-wasm> and
+  <https://pypi.org/project/domq/> show it, and that
+  <https://iamsaquib8.github.io/domq/docs/> (the guide) and
+  <https://iamsaquib8.github.io/domq/> (the playground) load.
 - Confirm the README badges render (CI / crates.io / docs.rs).
 - Then run the launch checklist (see the launch drafts handed over separately).

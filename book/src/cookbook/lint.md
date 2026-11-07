@@ -1,4 +1,4 @@
-# Lint HTML in CI
+# Check HTML for accessibility problems in CI
 
 `domq lint` checks HTML for common accessibility and markup problems and
 prints one line per finding, in the `file:line:col` format editors and CI
@@ -38,8 +38,8 @@ Turn the JSON report into annotations on the pull request's lines:
 - name: Lint the built site
   shell: bash   # with pipefail, so findings fail the step
   run: |
-    curl -sSfL https://github.com/iamsaquib8/domq/releases/download/v0.5.0/domq-v0.5.0-x86_64-unknown-linux-musl.tar.gz | tar xz
-    ./domq-v0.5.0-x86_64-unknown-linux-musl/domq lint -q --format json public/*.html \
+    curl -sSfL https://github.com/iamsaquib8/domq/releases/download/v0.6.0/domq-v0.6.0-x86_64-unknown-linux-musl.tar.gz | tar xz
+    ./domq-v0.6.0-x86_64-unknown-linux-musl/domq lint -q --format json public/*.html \
       | jq -r '.[] | "::\(if .level == "error" then "error" else "warning" end) file=\(.file),line=\(.line),col=\(.column)::\(.message) [\(.rule)]"'
 ```
 

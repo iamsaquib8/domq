@@ -5,6 +5,7 @@ import json
 import random
 import re
 import threading
+import time
 
 import pytest
 
@@ -68,9 +69,9 @@ def test_classes_are_not_constructible():
         domq.PageOutline()
 
 
-def test_parse_requires_str():
+def test_parse_requires_str_or_bytes():
     with pytest.raises(TypeError):
-        domq.parse(b"<p>bytes</p>")
+        domq.parse(123)
     with pytest.raises(TypeError):
         domq.parse(None)
 
@@ -94,7 +95,7 @@ def test_document_to_markdown_options():
         "[Guide][1] ![Logo](data:image/png;base64,abc)\n\n[1]: /guide"
     )
     assert doc.to_markdown(links="footer") == (
-        "[Guide][1] ![Logo](data:image/png;base64,abc)\n\n### Links\n\n1. [Guide](/guide)"
+        "Guide [1] ![Logo](data:image/png;base64,abc)\n\n### Links\n\n1. [Guide](/guide)"
     )
     assert doc.to_markdown(images="alt") == "[Guide](/guide) Logo"
     assert doc.to_markdown(images="drop") == "[Guide](/guide)"
@@ -430,7 +431,7 @@ def test_precompiled_selector(page):
     sel = domq.Selector("div.card")
     assert sel.query == "div.card"
     assert str(sel) == "div.card"
-    assert repr(sel) == 'Selector("div.card")'
+    assert repr(sel) == "Selector('div.card')"
 
     cards = page.select(sel)
     assert len(cards) == 2
@@ -608,6 +609,243 @@ def test_links_and_resources():
     assert len(main.resources(base)) == 3
 
 
+# --- Element methods release the GIL ------------------------------------------
+
+BIG_SECTIONS = 1500
+
+
+def _big_page():
+    sections = "".join(
+        f"<section><h2>Part {i}</h2><p>Some <b>bold</b> text and a <a href='/x/{i}'>link</a>.</p>"
+        "<ul><li>one</li><li>two</li></ul></section>"
+        for i in range(BIG_SECTIONS)
+    )
+    table = "<table>" + "".join(f"<tr><td>{i}</td><td>x</td></tr>" for i in range(2000)) + "</table>"
+    return domq.parse(f"<main>{sections}{table}</main><p id=small>tiny</p>")
+
+
+# Every Element method that does real work, as a function of the element.
+ELEMENT_WORK = {
+    "text": lambda e: e.text,
+    "to_text": lambda e: e.to_text(),
+    "text_content": lambda e: e.text_content,
+    "html": lambda e: e.html,
+    "inner_html": lambda e: e.inner_html,
+    "to_markdown": lambda e: e.to_markdown(),
+    "to_markdown_chunks": lambda e: e.to_markdown_chunks(),
+    "outline": lambda e: e.outline(),
+    "to_json": lambda e: e.to_json(),
+    "table_rows": lambda e: e.select_first("table").table_rows(),
+    "to_csv": lambda e: e.select_first("table").to_csv(),
+}
+
+
+@pytest.mark.parametrize("name", sorted(ELEMENT_WORK))
+def test_large_element_methods_run_without_the_gil(name):
+    """While one thread is inside the method, a Python thread keeps running.
+
+    The ticker stamps the time on every turn and gives the GIL up each time.
+    If the call holds the GIL, the stretch of the call with no stamp is as long
+    as the call; if it releases it, stamps come all through it. No timing
+    limit is involved, only the shape of the stamps: machine load decides how
+    many calls are needed before the ticker is scheduled promptly.
+    """
+    main = _big_page().select_first("main")
+    work = ELEMENT_WORK[name]
+    stamps = []
+    stop = threading.Event()
+
+    def tick():
+        while not stop.is_set():
+            stamps.append(time.perf_counter())
+            time.sleep(0)
+
+    ticker = threading.Thread(target=tick)
+    ticker.start()
+    try:
+        for _ in range(60):
+            time.sleep(0.002)  # let the ticker run, so that it is waiting for the GIL
+            del stamps[:]
+            start = time.perf_counter()
+            work(main)
+            end = time.perf_counter()
+            points = [start] + [t for t in list(stamps) if start < t < end] + [end]
+            longest_silence = max(b - a for a, b in zip(points, points[1:]))
+            if longest_silence < (end - start) / 2:
+                break
+        else:
+            pytest.fail(f"Element.{name} never let another thread run: it holds the GIL")
+    finally:
+        stop.set()
+        ticker.join()
+
+
+def _plain(value):
+    """A comparable form of what an Element method returned."""
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    if isinstance(value, (str, int, float, bool, type(None))):
+        return value
+    return str(value) if isinstance(value, domq.PageOutline) else (value.markdown, value.heading_path)
+
+
+def test_element_methods_agree_across_threads():
+    """The same answers from many threads at once as from one."""
+    doc = _big_page()
+    main = doc.select_first("main")
+    small = doc.select_first("#small")
+    expected = {name: _plain(work(main)) for name, work in ELEMENT_WORK.items()}
+    small_expected = {
+        name: _plain(ELEMENT_WORK[name](small))
+        for name in ("text", "to_text", "html", "inner_html", "to_markdown", "to_json")
+    }
+    results = []
+    errors = []
+
+    def run():
+        try:
+            got = {name: _plain(work(main)) for name, work in ELEMENT_WORK.items()}
+            small_got = {name: _plain(ELEMENT_WORK[name](small)) for name in small_expected}
+            results.append((got, small_got))
+        except Exception as e:  # pragma: no cover - only on failure
+            errors.append(e)
+
+    threads = [threading.Thread(target=run) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors
+    assert len(results) == 6
+    for got, small_got in results:
+        assert got == expected
+        assert small_got == small_expected
+    assert small_expected["text"] == "tiny"
+    assert small_expected["html"] == '<p id="small">tiny</p>'
+
+
+def test_element_serialization_scales_across_threads(capsys):
+    """Record how much faster 4 threads are than 4 sequential calls.
+
+    A benchmark, not a timing test: it only asserts that the answers match,
+    because the speedup depends on the machine (one core, a loaded CI runner,
+    a free-threaded build all give a different number). Run with `-s` to see
+    it. Before Element methods released the GIL it was about x1.0.
+    """
+    main = _big_page().select_first("main")
+    expected = main.to_markdown()
+
+    def best(fn, runs=5):
+        best = float("inf")
+        for _ in range(runs):
+            start = time.perf_counter()
+            fn()
+            best = min(best, time.perf_counter() - start)
+        return best
+
+    def sequential():
+        return [main.to_markdown() for _ in range(4)]
+
+    def threaded():
+        out = []
+        threads = [threading.Thread(target=lambda: out.append(main.to_markdown())) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        return out
+
+    assert sequential() == [expected] * 4
+    assert threaded() == [expected] * 4
+    seq, par = best(sequential), best(threaded)
+    with capsys.disabled():
+        print(f"\nElement.to_markdown, 4 calls: sequential {seq * 1e3:.1f} ms, 4 threads {par * 1e3:.1f} ms, x{seq / par:.2f}")
+
+
+def test_element_links_and_resources_stay_in_the_subtree():
+    doc = domq.parse(
+        "<div class=c><a href=/a>A</a><img src=a.png></div>"
+        "<div class=c><a href=b>B</a><img src=b.png><img src='c.png' srcset='c.png 1x, d.png 2x'></div>"
+    )
+    first, second = doc.select(".c")
+    assert [(l.url, l.text) for l in first.links("https://x.dev/dir/")] == [
+        ("https://x.dev/a", "A")
+    ]
+    assert [(l.url, l.text) for l in second.links("https://x.dev/dir/")] == [
+        ("https://x.dev/dir/b", "B")
+    ]
+    assert [r.url for r in second.resources("https://x.dev/dir/")] == [
+        "https://x.dev/dir/b.png",
+        "https://x.dev/dir/c.png",
+        "https://x.dev/dir/c.png",
+        "https://x.dev/dir/d.png",
+    ]
+    # The element itself counts when it is a link.
+    link = doc.select_first("a")
+    assert [l.url for l in link.links()] == ["/a"]
+    assert link.links()[0].element == link
+    # The same answers as the document's, restricted to the subtree.
+    for base in (None, "https://x.dev/dir/"):
+        for card in (first, second):
+            want = [l.url for l in doc.links(base) if l.element.parent == card]
+            assert [l.url for l in card.links(base)] == want
+
+
+def test_element_links_honour_base_element_and_change_of_base_url():
+    doc = domq.parse(
+        '<head><base href="/docs/"></head><ul><li><a href="a">A</a><img src="a.png"></li></ul>'
+    )
+    li = doc.select_first("li")
+    # Alternate the argument: the document remembers only the last base.
+    for page in ("https://x.dev/", "https://y.dev/en/", "https://x.dev/", None, None):
+        assert [l.url for l in li.links(page)] == [l.url for l in doc.links(page)]
+        assert [r.url for r in li.resources(page)] == [r.url for r in doc.resources(page)]
+    assert li.links("https://x.dev/")[0].url == "https://x.dev/docs/a"
+
+
+def _best_of(runs, fn):
+    """The fastest of `runs` calls, with the garbage collector paused (its
+    passes over a growing heap would otherwise show up as superlinear work)."""
+    best = float("inf")
+    gc.disable()
+    try:
+        for _ in range(runs):
+            start = time.perf_counter()
+            fn()
+            best = min(best, time.perf_counter() - start)
+    finally:
+        gc.enable()
+    return best
+
+
+def test_element_links_and_resources_take_time_proportional_to_the_subtree():
+    """A per-card loop is linear in the number of cards (it was quadratic).
+
+    Compares 250 cards with 2000 instead of timing anything absolutely: linear
+    work costs about 8x more, quadratic about 64x. The bound sits between the
+    two, far from both, so a loaded machine does not make it flaky.
+    """
+
+    def loop_time(cards, method):
+        html = "".join(
+            f'<div class=c><a href="/p/{i}">item {i}</a><img src="/i/{i}.png"></div>'
+            for i in range(cards)
+        )
+        doc = domq.parse(html)
+        elements = doc.select(".c")
+        assert len(elements) == cards
+        return _best_of(
+            7, lambda: [getattr(e, method)("https://example.com/") for e in elements]
+        )
+
+    for method in ("links", "resources"):
+        small = loop_time(250, method)
+        large = loop_time(2000, method)
+        ratio = large / max(small, 1e-9)
+        print(f"{method}(): 250 cards {small * 1e3:.2f} ms, 2000 cards {large * 1e3:.2f} ms, x{ratio:.1f} (linear: x8)")
+        assert ratio < 24, f"{method}() looks superlinear: x{ratio:.1f} for 8x the cards"
+
+
 # --- tables & CSV -------------------------------------------------------------
 
 
@@ -692,9 +930,20 @@ def test_markdown_chunks():
     assert len(h1_chunks) == 1
     assert "Chapter 1" in h1_chunks[0].markdown
 
-    # Supports max_bytes alias
-    bytes_chunks = doc.to_markdown_chunks(max_bytes=120)
-    assert len(bytes_chunks) == len(chunks)
+    # Markdown options are keyword-only.
+    with pytest.raises(TypeError):
+        doc.to_markdown_chunks(120, "reference")  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        doc.to_markdown("reference")  # type: ignore[misc]
+
+
+def test_value_reprs_use_python_syntax():
+    doc = domq.parse(
+        '<title>It\'s</title><link rel=canonical href="c"><a href="/x">a "b"</a>'
+    )
+    assert repr(doc.metadata()) == """<Metadata title="It's" canonical='c' lang=None>"""
+    assert repr(doc.links()[0]) == """<Link url='/x' text='a "b"'>"""
+    assert "Some(" not in repr(doc.metadata())
 
 
 # --- page outline -------------------------------------------------------------
@@ -766,4 +1015,58 @@ def test_page_outline():
     main_outline = main_el.outline()
     assert len(main_outline) < len(outline)
     assert any(n.role == "heading" and n.name == "Article Heading" for n in main_outline)
+
+
+# --- bytes input and decoding ------------------------------------------------
+
+
+def test_parse_bytes():
+    # UTF-8 bytes
+    doc = domq.parse(b"<p class='test'>hello world</p>")
+    assert doc.select_first("p").text == "hello world"
+
+    # Prescan meta charset (Windows-1252 / latin1)
+    doc = domq.parse(b"<meta charset='latin1'><p>caf\xe9</p>")
+    assert doc.select_first("p").text == "café"
+
+    # Explicit encoding parameter
+    doc = domq.parse(b"<p>caf\xe9</p>", encoding="windows-1252")
+    assert doc.select_first("p").text == "café"
+
+    # BOM detection (UTF-16LE)
+    doc = domq.parse(b"\xff\xfe<\x00p\x00>\x00h\x00i\x00")
+    assert doc.select_first("p").text == "hi"
+
+    # TypeError on invalid source type
+    with pytest.raises(TypeError, match="source must be str or bytes"):
+        domq.parse(12345)
+
+
+def test_decode():
+    res = domq.decode(b"<p>caf\xc3\xa9</p>")
+    assert res.text == "<p>café</p>"
+    assert res.encoding == "utf-8"
+    assert res.warning is None
+    assert str(res) == "<p>café</p>"
+    assert "utf-8" in repr(res)
+
+    # Windows-1252 fallback
+    res = domq.decode(b"caf\xe9 \x80\x81\x9f\xff")
+    assert res.encoding == "windows-1252"
+    assert "café" in res.text
+    assert res.warning is not None
+    assert "windows-1252" in res.warning
+
+    # Stray invalid byte recovers as UTF-8 with warning
+    res = domq.decode(b"<p>caf\xc3\xa9</p>\xa0")
+    assert res.encoding == "utf-8"
+    assert res.text == "<p>café</p>\ufffd"
+    assert res.warning == "1 invalid UTF-8 sequence replaced with U+FFFD"
+
+    # Unknown encoding warning
+    res = domq.decode(b"<p>test</p>", encoding="non-existent-encoding")
+    assert res.encoding == "utf-8"
+    assert res.warning is not None
+    assert "non-existent-encoding" in res.warning
+
 

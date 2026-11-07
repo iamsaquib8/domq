@@ -6,9 +6,11 @@ Security fixes are released for the latest minor version of each package:
 
 | package | supported |
 |---|---|
-| `domq` (crate) | 0.5.x |
-| `domq-cli` (crate / binaries) | 0.5.x |
-| `domq-wasm` (npm) | 0.5.x |
+| `domq` (crate) | 0.6.x |
+| `domq-derive` (crate) | 0.6.x |
+| `domq-cli` (crate / binaries, including `domq mcp`) | 0.6.x |
+| `domq-wasm` (npm) | 0.6.x |
+| `domq` (PyPI) | 0.6.x |
 
 ## What counts as a vulnerability
 

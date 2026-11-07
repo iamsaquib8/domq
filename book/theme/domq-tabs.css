@@ -1,0 +1,57 @@
+/* Language tabs (theme/domq-tabs.js). Without JavaScript the group is plain:
+   a bold label, then its block, for every language. */
+
+.domq-tabs { margin: 1.25em 0; }
+
+.domq-tabs > p > strong:only-child { font-size: 0.9em; }
+
+.domq-tabs-ready { margin: 1.25em 0; }
+
+.domq-tablist {
+    display: flex;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--quote-border);
+}
+
+.domq-tab {
+    appearance: none;
+    background: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    margin: 0 0 -1px;
+    padding: 0.4em 0.9em;
+    font: inherit;
+    font-size: 0.9em;
+    color: var(--fg);
+    opacity: 0.8;
+    cursor: pointer;
+}
+
+.domq-tab:hover { opacity: 1; background: var(--quote-bg); }
+
+.domq-tab[aria-selected="true"] {
+    opacity: 1;
+    font-weight: 600;
+    border-bottom-color: var(--links);
+}
+
+.domq-tab:focus-visible {
+    outline: 2px solid var(--links);
+    outline-offset: -2px;
+}
+
+.domq-panel > :first-child { margin-top: 0.8em; }
+.domq-panel > :last-child { margin-bottom: 0; }
+
+/* Narrow screens: tabs scroll sideways instead of wrapping to many rows. */
+@media (max-width: 480px) {
+    .domq-tablist { flex-wrap: nowrap; overflow-x: auto; }
+    .domq-tab { flex: none; }
+}
+
+/* Print: every language, with its label. */
+@media print {
+    .domq-tablist { display: none; }
+    .domq-panel[hidden] { display: block; }
+    .domq-panel::before { content: attr(data-label); font-weight: 600; }
+}

@@ -1,4 +1,4 @@
-# Links, metadata and tables
+# Scrape links, metadata and tables
 
 ## Links
 
@@ -46,8 +46,8 @@ assert_eq!(m.lang.as_deref(), Some("en"));
 ```
 
 `Metadata` also has `canonical`, `image`, `author`, `published`, `keywords`,
-the OpenGraph and Twitter tags as `(property, value)` pairs, raw JSON-LD
-blocks and feed URLs. `domq --meta` prints it as JSON.
+the OpenGraph and Twitter tags as `(property, value)` pairs, JSON-LD
+blocks (unparsed, minus any CDATA or comment wrapper) and feed URLs. `domq --meta` prints it as JSON.
 
 ## Tables
 
@@ -68,3 +68,6 @@ print!("{}", domq::to_csv(&rows));
 ```sh
 domq --csv -1 '#results' < report.html > results.csv
 ```
+
+Links, resources and tables for a whole crawl, as CSV: [Crawl results to a
+table](crawl-to-table.md).

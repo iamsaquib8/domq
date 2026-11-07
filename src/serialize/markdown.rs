@@ -20,11 +20,13 @@
 //! styling is lost. There is no pure-Markdown spelling of it that keeps the
 //! text unchanged.
 
+use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
 use core::mem;
 
 use super::{is_space, push_verbatim, skip_newline, walk};
+use crate::extract::table::{MAX_SPAN, SPAN_CELLS, SPAN_FACTOR, span};
 use crate::node::{NodeId, NodeKind};
 use crate::tags::{self, Display};
 use crate::tree::{Dom, NodeRef};
@@ -41,7 +43,16 @@ const MAX_PAD: usize = 64;
 const MAX_NUMBER: i64 = 999_999_999;
 
 /// How hyperlinks are formatted in Markdown.
+///
+/// ```
+/// use domq::{LinkStyle, MarkdownOptions};
+///
+/// let dom = domq::parse("<p><a href='/a'>A</a></p>");
+/// let opts = MarkdownOptions::new().link_style(LinkStyle::Footer);
+/// assert_eq!(dom.to_markdown_with(&opts), "A [1]\n\n### Links\n\n1. [A](/a)");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum LinkStyle {
     /// Standard CommonMark inline links: `[text](url)` or `[text](url "title")`.
     #[default]
@@ -49,19 +60,24 @@ pub enum LinkStyle {
     /// CommonMark reference-style links: `[text][1]` inline, with `[1]: url`
     /// definitions collected at the end of the document.
     Reference,
-    /// Summary links footer: `[text][1]` inline, with an ordered `### Links`
-    /// summary list at the end of the document.
+    /// Summary links footer: `text [1]` inline, with an ordered `### Links`
+    /// list at the end of the document that gives each number its link
+    /// (`1. [text](url)`). The number is a plain citation, not a Markdown
+    /// reference.
     Footer,
 }
 
-impl LinkStyle {
-    /// Alias for [`LinkStyle::Footer`].
-    #[allow(non_upper_case_globals)]
-    pub const Footnote: Self = Self::Footer;
-}
-
 /// How images are formatted in Markdown.
+///
+/// ```
+/// use domq::{ImageStyle, MarkdownOptions};
+///
+/// let dom = domq::parse("<p>See <img src='/i.png' alt='a chart'></p>");
+/// let opts = MarkdownOptions::new().image_style(ImageStyle::AltOnly);
+/// assert_eq!(dom.to_markdown_with(&opts), "See a chart");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum ImageStyle {
     /// Standard CommonMark images: `![alt](url)` or `![alt](url "title")`.
     #[default]
@@ -72,8 +88,26 @@ pub enum ImageStyle {
     Drop,
 }
 
-/// Configuration options for Markdown conversion.
+/// Configuration options for Markdown conversion, built with
+/// [`MarkdownOptions::new`] and its setters (more options may be added, so the
+/// struct cannot be built with a literal).
+///
+/// ```
+/// use domq::{ImageStyle, LinkStyle, MarkdownOptions};
+///
+/// let opts = MarkdownOptions::new()
+///     .link_style(LinkStyle::Reference)
+///     .image_style(ImageStyle::Drop)
+///     .drop_data_uris(true)
+///     .base_url("https://example.com/docs/");
+/// let dom = domq::parse("<p><a href='intro'>Intro</a><img src='x.png'></p>");
+/// assert_eq!(
+///     dom.to_markdown_with(&opts),
+///     "[Intro][1]\n\n[1]: https://example.com/docs/intro",
+/// );
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct MarkdownOptions {
     /// How hyperlinks are formatted.
     pub link_style: LinkStyle,
@@ -83,8 +117,6 @@ pub struct MarkdownOptions {
     pub drop_data_uris: bool,
     /// Base URL to resolve relative `href` and `src` attributes against.
     pub base_url: Option<String>,
-    /// Maximum blank lines between blocks (default 1).
-    pub max_blank_lines: usize,
 }
 
 impl Default for MarkdownOptions {
@@ -94,13 +126,18 @@ impl Default for MarkdownOptions {
             image_style: ImageStyle::Keep,
             drop_data_uris: false,
             base_url: None,
-            max_blank_lines: 1,
         }
     }
 }
 
 impl MarkdownOptions {
-    /// Create default options.
+    /// Default options: inline links, images kept, `data:` URIs kept, no
+    /// base URL.
+    ///
+    /// ```
+    /// let dom = domq::parse("<p>a</p><p>b</p>");
+    /// assert_eq!(dom.to_markdown_with(&domq::MarkdownOptions::new()), dom.to_markdown());
+    /// ```
     pub fn new() -> Self {
         Self::default()
     }
@@ -117,21 +154,33 @@ impl MarkdownOptions {
         self
     }
 
-    /// Whether to drop `data:` URIs.
+    /// Whether to drop `data:` URIs from links and images (the link text and
+    /// image alt text stay).
+    ///
+    /// ```
+    /// use domq::MarkdownOptions;
+    ///
+    /// let dom = domq::parse("<p><img src='data:image/png;base64,AAAA' alt='dot'></p>");
+    /// let opts = MarkdownOptions::new().drop_data_uris(true);
+    /// assert_eq!(dom.to_markdown_with(&opts), "dot");
+    /// ```
     pub fn drop_data_uris(mut self, drop: bool) -> Self {
         self.drop_data_uris = drop;
         self
     }
 
-    /// Set the base URL.
+    /// Resolve relative `href` and `src` values against this base URL (the
+    /// document's `<base href>` applies on top, as in a browser).
+    ///
+    /// ```
+    /// use domq::MarkdownOptions;
+    ///
+    /// let dom = domq::parse("<a href='b'>B</a>");
+    /// let opts = MarkdownOptions::new().base_url("https://example.com/a/");
+    /// assert_eq!(dom.to_markdown_with(&opts), "[B](https://example.com/a/b)");
+    /// ```
     pub fn base_url(mut self, base: impl Into<String>) -> Self {
         self.base_url = Some(base.into());
-        self
-    }
-
-    /// Set the maximum blank lines between blocks.
-    pub fn max_blank_lines(mut self, max: usize) -> Self {
-        self.max_blank_lines = max;
         self
     }
 }
@@ -141,11 +190,9 @@ static DEFAULT_OPTIONS: MarkdownOptions = MarkdownOptions {
     image_style: ImageStyle::Keep,
     drop_data_uris: false,
     base_url: None,
-    max_blank_lines: 1,
 };
 
 impl Dom {
-    /// Convert the document to Markdown with custom options; see [`MarkdownOptions`].
     /// Convert the document to Markdown with custom options; see [`MarkdownOptions`].
     ///
     /// ```
@@ -163,7 +210,7 @@ impl Dom {
         let mut md = Markdown {
             options,
             base,
-            noscript: self.noscript_is_content,
+            noscript: self.noscript_is_content(),
             ..Markdown::default()
         };
         for root in self.roots() {
@@ -182,6 +229,11 @@ impl Dom {
     /// `display: none`, …) are skipped as in [`Dom::to_text`]. Blocks are separated by one blank line, `<br>` becomes
     /// a backslash hard break, and the output has no leading or trailing
     /// newline.
+    ///
+    /// A table cell with `colspan` or `rowspan` keeps its columns: the cell
+    /// is written once, and the slots it covers are empty (Markdown tables
+    /// cannot merge cells). Use [`NodeRef::table_rows`] for a grid that
+    /// repeats the text instead.
     ///
     /// ```
     /// let dom = domq::parse(
@@ -218,7 +270,7 @@ impl NodeRef<'_> {
             options,
             base,
             root: Some(self.id()),
-            noscript: self.dom().noscript_is_content,
+            noscript: self.dom().noscript_is_content(),
             ..Markdown::default()
         };
         walk(*self, |node, enter| md.visit(node, enter));
@@ -267,6 +319,8 @@ struct Wrap<'a> {
     used: bool,
     /// Whitespace was pending when the element opened.
     spaced: bool,
+    /// Where its content starts in the current line, once `open`.
+    from: usize,
 }
 
 impl Wrap<'_> {
@@ -313,8 +367,23 @@ struct Code<'a> {
 /// A GFM table being collected; it is written when the `<table>` closes.
 #[derive(Default)]
 struct Table {
-    rows: Vec<Vec<String>>,
-    cells: Vec<String>,
+    rows: Vec<TableRow>,
+    cells: Vec<Cell>,
+    /// Which `<thead>`/`<tbody>`/`<tfoot>` the rows being collected are in.
+    group: usize,
+}
+
+/// One row of a table being collected.
+struct TableRow {
+    group: usize,
+    cells: Vec<Cell>,
+}
+
+/// One cell: its Markdown, and how many columns and rows it spans.
+struct Cell {
+    text: String,
+    colspan: usize,
+    rowspan: usize,
 }
 
 /// What an open element changed, undone when it closes.
@@ -348,6 +417,17 @@ struct RefDef {
     text: String,
 }
 
+/// The link definitions of `LinkStyle::Reference` and `Footer`, in order of
+/// first use, with an index so that finding a repeated link is a lookup, not a
+/// scan of every earlier one.
+#[derive(Default)]
+struct References {
+    defs: Vec<RefDef>,
+    /// Position in `defs` of each distinct `(url, title)`, keyed by
+    /// [`reference_key`].
+    index: BTreeMap<String, usize>,
+}
+
 struct Markdown<'a> {
     out: String,
     /// Separation owed before the next block: 1 = new line, 2 = blank line.
@@ -366,7 +446,9 @@ struct Markdown<'a> {
     wraps: Vec<Wrap<'a>>,
     /// Closing markers of spans that just ended, held back so an adjacent span
     /// of the same kind can continue instead.
-    closing: Vec<Mark<'a>>,
+    /// The marks to close before the next content, and where each one's
+    /// content starts in the line.
+    closing: Vec<(Mark<'a>, usize)>,
     /// An inline code span held back so adjacent `<code>`s join into one.
     code_run: String,
     heading: u8,
@@ -374,6 +456,8 @@ struct Markdown<'a> {
     inline_only: u32,
     code: Option<Code<'a>>,
     table: Option<Table>,
+    /// The `colspan` and `rowspan` of the cell being written.
+    cell_span: (usize, usize),
     /// The node `NodeRef::to_markdown` was called on: shown even if hidden.
     root: Option<NodeId>,
     /// `<noscript>` holds the document's content (see
@@ -381,7 +465,7 @@ struct Markdown<'a> {
     noscript: bool,
     options: &'a MarkdownOptions,
     base: Option<String>,
-    references: Vec<RefDef>,
+    references: References,
 }
 
 impl<'a> Default for Markdown<'a> {
@@ -403,11 +487,12 @@ impl<'a> Default for Markdown<'a> {
             inline_only: 0,
             code: None,
             table: None,
+            cell_span: (1, 1),
             root: None,
             noscript: false,
             options: &DEFAULT_OPTIONS,
             base: None,
-            references: Vec::new(),
+            references: References::default(),
         }
     }
 }
@@ -459,7 +544,12 @@ impl<'a> Markdown<'a> {
             "hr" if top => {
                 self.block(&mut f);
                 self.begin_block();
-                self.out.push_str("---");
+                // After a `-` bullet, `- ---` would be one thematic break and
+                // the list would be gone: a different character keeps the item.
+                let line = self.out.rsplit('\n').next().unwrap_or("");
+                let after_dashes =
+                    line.contains('-') && line.bytes().all(|b| matches!(b, b'-' | b' '));
+                self.out.push_str(if after_dashes { "***" } else { "---" });
             }
             "img" => self.image(node),
             "code" | "kbd" | "samp" | "tt" => self.start_code(&mut f, false, ""),
@@ -493,22 +583,30 @@ impl<'a> Markdown<'a> {
             }
             "ul" | "ol" | "menu" if top => {
                 self.flush();
-                // A list nested in an item follows the item's text tightly.
+                let ordered = tag == "ol";
+                let reversed = ordered && node.has_attr("reversed");
+                let start = number(node.attr("start")).unwrap_or_else(|| {
+                    if reversed {
+                        let items = node.child_elements().filter(|c| c.tag_name() == Some("li"));
+                        items.count() as i64
+                    } else {
+                        1
+                    }
+                });
+                // A list nested in an item follows the item's text tightly,
+                // except an ordered one that does not start at 1: it cannot
+                // interrupt a paragraph, so it needs a blank line.
                 let nested = matches!(self.prefixes.last(), Some(Prefix::Item { .. }));
-                self.sep(if nested { 1 } else { 2 });
+                let first = node
+                    .child_elements()
+                    .find(|c| c.tag_name() == Some("li"))
+                    .and_then(|li| number(li.attr("value")))
+                    .unwrap_or(start)
+                    .clamp(0, MAX_NUMBER);
+                let tight = nested && !(ordered && first != 1 && self.prefixes.len() < MAX_NEST);
+                self.sep(if tight { 1 } else { 2 });
                 f.block = true;
                 if self.prefixes.len() < MAX_NEST {
-                    let ordered = tag == "ol";
-                    let reversed = ordered && node.has_attr("reversed");
-                    let start = number(node.attr("start")).unwrap_or_else(|| {
-                        if reversed {
-                            let items =
-                                node.child_elements().filter(|c| c.tag_name() == Some("li"));
-                            items.count() as i64
-                        } else {
-                            1
-                        }
-                    });
                     // Right after a list of the same kind (nothing between)?
                     let depth = self.prefixes.len();
                     let alt = matches!(self.last_list, Some((d, at, o, false))
@@ -575,7 +673,16 @@ impl<'a> Markdown<'a> {
                     self.inline_only += 1;
                     f.role = Role::Cell;
                     f.inline = true;
+                    self.cell_span = (span(node.attr("colspan")), span(node.attr("rowspan")));
                 }
+            }
+            // Spans stop at the end of their row group.
+            "thead" | "tbody" | "tfoot" if top && self.table.is_some() => {
+                if let Some(t) = &mut self.table {
+                    t.end_row();
+                    t.group += 1;
+                }
+                self.block(&mut f);
             }
             "td" | "th" => {
                 self.space = true;
@@ -605,9 +712,14 @@ impl<'a> Markdown<'a> {
         }
         match f.role {
             Role::Cell => {
-                let cell = self.take_cell();
+                let text = self.take_cell();
+                let (colspan, rowspan) = self.cell_span;
                 if let Some(t) = &mut self.table {
-                    t.cells.push(cell);
+                    t.cells.push(Cell {
+                        text,
+                        colspan,
+                        rowspan,
+                    });
                 }
             }
             Role::Row => {
@@ -697,6 +809,7 @@ impl<'a> Markdown<'a> {
         }
         self.breaks = 0;
         self.space = false;
+        let footer = self.options.link_style == LinkStyle::Footer;
         for w in self.wraps.iter_mut().filter(|w| w.pending()) {
             w.open = true;
             w.used = true;
@@ -704,8 +817,11 @@ impl<'a> Markdown<'a> {
                 Mark::Strong => "**",
                 Mark::Emphasis => "*",
                 Mark::Strike => "~~",
+                // A footer link is `text [1]`: no brackets round the text.
+                Mark::Link(_) if footer => "",
                 Mark::Link(_) => "[",
             });
+            w.from = self.line.len();
         }
     }
 
@@ -716,10 +832,11 @@ impl<'a> Markdown<'a> {
             self.code_run.clear();
         }
         let marks = core::mem::take(&mut self.closing);
-        for mark in marks {
+        for (mark, from) in marks {
             push_close(
                 &mut self.line,
                 mark,
+                from,
                 self.options,
                 self.base.as_deref(),
                 &mut self.references,
@@ -744,7 +861,7 @@ impl<'a> Markdown<'a> {
             && self
                 .closing
                 .last()
-                .is_some_and(|m| mem::discriminant(m) == kind)
+                .is_some_and(|(m, _)| mem::discriminant(m) == kind)
             && !self.wraps.iter().any(Wrap::pending);
         if resume {
             self.closing.pop();
@@ -754,6 +871,7 @@ impl<'a> Markdown<'a> {
             open: resume,
             used: resume,
             spaced: self.space,
+            from: 0,
         });
         true
     }
@@ -780,7 +898,7 @@ impl<'a> Markdown<'a> {
         if let Some(w) = self.wraps.pop()
             && w.open
         {
-            self.closing.push(w.mark);
+            self.closing.push((w.mark, w.from));
         }
     }
 
@@ -883,7 +1001,11 @@ impl<'a> Markdown<'a> {
             if i > 0 {
                 self.next_line(false);
             }
-            self.out.push_str(part);
+            if self.heading > 0 && i == 0 {
+                self.out.push_str(part);
+            } else {
+                push_line_start_escaped(&mut self.out, part, i > 0);
+            }
         }
         self.line = line;
         self.line.clear();
@@ -896,10 +1018,11 @@ impl<'a> Markdown<'a> {
         for i in (0..self.wraps.len()).rev() {
             if self.wraps[i].open {
                 self.wraps[i].open = false;
-                let mark = self.wraps[i].mark;
+                let (mark, from) = (self.wraps[i].mark, self.wraps[i].from);
                 push_close(
                     &mut self.line,
                     mark,
+                    from,
                     self.options,
                     self.base.as_deref(),
                     &mut self.references,
@@ -913,12 +1036,8 @@ impl<'a> Markdown<'a> {
     /// Start a block's first line: the owed separation, then the prefixes.
     fn begin_block(&mut self) {
         if !self.out.is_empty() {
-            if self.sep >= 2 && self.options.max_blank_lines > 0 {
-                let blanks =
-                    usize::from(self.sep.saturating_sub(1)).min(self.options.max_blank_lines);
-                for _ in 0..blanks {
-                    self.next_line(true);
-                }
+            if self.sep >= 2 {
+                self.next_line(true);
             }
             self.out.push('\n');
         }
@@ -1033,8 +1152,9 @@ impl<'a> Markdown<'a> {
 
     fn emit_table(&mut self, mut table: Table) {
         table.end_row();
-        let cols = table.rows.iter().map(Vec::len).max().unwrap_or(0);
-        let Some((head, body)) = table.rows.split_first().filter(|_| cols > 0) else {
+        let rows = table.grid();
+        let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
+        let Some((head, body)) = rows.split_first().filter(|_| cols > 0) else {
             return;
         };
         // GFM needs a header row: the first row is it, whatever its cells are,
@@ -1058,14 +1178,14 @@ impl<'a> Markdown<'a> {
         self.flush();
         let end = self.out.trim_end().len();
         self.out.truncate(end);
-        if !self.references.is_empty() {
+        if !self.references.defs.is_empty() {
             match self.options.link_style {
                 LinkStyle::Inline => {}
                 LinkStyle::Reference => {
                     if !self.out.is_empty() {
                         self.out.push_str("\n\n");
                     }
-                    for (i, r) in self.references.iter().enumerate() {
+                    for (i, r) in self.references.defs.iter().enumerate() {
                         if i > 0 {
                             self.out.push('\n');
                         }
@@ -1081,17 +1201,23 @@ impl<'a> Markdown<'a> {
                         self.out.push_str("\n\n");
                     }
                     self.out.push_str("### Links\n\n");
-                    for (i, r) in self.references.iter().enumerate() {
+                    for (i, r) in self.references.defs.iter().enumerate() {
                         if i > 0 {
                             self.out.push('\n');
                         }
                         push_usize(&mut self.out, r.id);
                         self.out.push_str(". [");
-                        for c in r.text.chars() {
-                            if matches!(c, '[' | ']' | '\\') {
-                                self.out.push('\\');
+                        if r.text.is_empty() {
+                            // Nothing to read (an empty link): the URL.
+                            for c in r.url.chars() {
+                                if matches!(c, '[' | ']' | '\\') {
+                                    self.out.push('\\');
+                                }
+                                self.out.push(c);
                             }
-                            self.out.push(c);
+                        } else {
+                            // Already escaped Markdown.
+                            self.out.push_str(&r.text);
                         }
                         self.out.push_str("](");
                         push_destination(&mut self.out, &r.url);
@@ -1135,8 +1261,104 @@ impl Code<'_> {
 impl Table {
     fn end_row(&mut self) {
         if !self.cells.is_empty() {
-            self.rows.push(mem::take(&mut self.cells));
+            self.rows.push(TableRow {
+                group: self.group,
+                cells: mem::take(&mut self.cells),
+            });
         }
+    }
+
+    /// The rows as a grid of cell Markdown, a spanning cell followed by empty
+    /// cells for the columns it covers (and, below it, for the rows): Markdown
+    /// tables cannot merge cells, and this keeps every cell under its column.
+    /// Spans work as in [`NodeRef::table_rows`]: they stop at the end of their
+    /// row group, `rowspan=0` covers the rest of it, and a table's spans add
+    /// at most a bounded number of cells.
+    fn grid(self) -> Vec<Vec<String>> {
+        let rows = self.rows;
+        let own: usize = rows.iter().map(|r| r.cells.len()).sum();
+        let mut budget = SPAN_CELLS.saturating_add(own.saturating_mul(SPAN_FACTOR));
+        // Where each row's group ends (for `rowspan=0` and the cut-off).
+        let mut group_end = alloc::vec![rows.len(); rows.len()];
+        for i in (0..rows.len().saturating_sub(1)).rev() {
+            let same = rows.get(i).map(|r| r.group) == rows.get(i + 1).map(|r| r.group);
+            let next = group_end.get(i + 1).copied().unwrap_or(rows.len());
+            if let Some(end) = group_end.get_mut(i) {
+                *end = if same { next } else { i + 1 };
+            }
+        }
+        let mut out = Vec::with_capacity(rows.len());
+        // Per column: how many more rows a `rowspan` above still covers.
+        let mut covered: Vec<usize> = Vec::new();
+        let mut group = None;
+        for (i, row) in rows.into_iter().enumerate() {
+            if group != Some(row.group) {
+                covered.clear();
+                group = Some(row.group);
+            }
+            let rows_left = group_end.get(i).copied().unwrap_or(i + 1).saturating_sub(i);
+            let mut line: Vec<String> = Vec::with_capacity(row.cells.len());
+            // Columns that a `rowspan` above covers are empty here.
+            let skip = |line: &mut Vec<String>, covered: &mut Vec<usize>| {
+                while let Some(left) = covered.get_mut(line.len()).filter(|n| **n > 0) {
+                    *left -= 1;
+                    line.push(String::new());
+                }
+            };
+            for mut cell in row.cells {
+                skip(&mut line, &mut covered);
+                let colspan = cell.colspan.clamp(1, MAX_SPAN);
+                let rowspan = match cell.rowspan {
+                    0 => rows_left,
+                    n => n.min(rows_left),
+                }
+                .clamp(1, MAX_SPAN);
+                let extra = colspan.saturating_mul(rowspan).saturating_sub(1);
+                let (colspan, rowspan) = if extra <= budget {
+                    budget -= extra;
+                    (colspan, rowspan)
+                } else {
+                    (1, 1)
+                };
+                let col = line.len();
+                if covered.len() < col + colspan {
+                    covered.resize(col + colspan, 0);
+                }
+                for c in 0..colspan {
+                    if let Some(n) = covered.get_mut(col + c) {
+                        // A cell overlapping an earlier `rowspan` takes the column.
+                        *n = rowspan - 1;
+                    }
+                    line.push(if c == 0 {
+                        mem::take(&mut cell.text)
+                    } else {
+                        String::new()
+                    });
+                }
+            }
+            skip(&mut line, &mut covered);
+            // A `rowspan` reaching past the row's last cell: empty cells
+            // up to it.
+            loop {
+                skip(&mut line, &mut covered);
+                let more = covered
+                    .get(line.len()..)
+                    .is_some_and(|rest| rest.iter().any(|&n| n > 0));
+                if !more {
+                    break;
+                }
+                if budget == 0 {
+                    covered.clear();
+                    break;
+                }
+                budget -= 1;
+                line.push(String::new());
+            }
+            let used = covered.iter().rposition(|&n| n > 0).map_or(0, |i| i + 1);
+            covered.truncate(used);
+            out.push(line);
+        }
+        out
     }
 }
 
@@ -1177,6 +1399,36 @@ fn code_lang<'a>(pre: NodeRef<'a>) -> &'a str {
         })
         .filter(|l| !l.contains('`'))
         .unwrap_or("")
+}
+
+/// Append a finished line of a paragraph, escaping the block syntax its text
+/// formed across nodes, where [`escape`] only saw one word at a time:
+/// `<span>1</span>. x` and `1<!-- -->. x` (React's server rendering) read as
+/// an ordered list, and, after a hard break (`later`), a line of only `|`,
+/// `-` and `:` is a table's delimiter row.
+fn push_line_start_escaped(out: &mut String, line: &str, later: bool) {
+    let digits = line.bytes().take_while(u8::is_ascii_digit).count();
+    let marker = (1..=9).contains(&digits)
+        && matches!(line.as_bytes().get(digits), Some(b'.' | b')'))
+        && matches!(line.as_bytes().get(digits + 1), None | Some(b' '));
+    if marker {
+        out.push_str(line.get(..digits).unwrap_or_default());
+        out.push('\\');
+        out.push_str(line.get(digits..).unwrap_or_default());
+    } else if later
+        && line.contains('|')
+        && line.contains('-')
+        && line.bytes().all(|b| matches!(b, b'|' | b'-' | b':' | b' '))
+    {
+        for c in line.chars() {
+            if c == '|' {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+    } else {
+        out.push_str(line);
+    }
 }
 
 /// Append one word (no whitespace) of text, escaping what Markdown would
@@ -1228,22 +1480,43 @@ fn escape(out: &mut String, word: &str, line_start: bool) {
 
 fn is_data_uri(url: &str) -> bool {
     let trimmed = url.trim_start();
-    trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("data:")
+    // Use a byte/prefix check so multi-byte characters never panic on a
+    // mid-char slice boundary (#88).
+    trimmed
+        .as_bytes()
+        .get(..5)
+        .is_some_and(|p| p.eq_ignore_ascii_case(b"data:"))
+}
+
+/// One string for a `(url, title)` pair that no other pair shares: `-` for no
+/// title, else the title's length, `:` and the title, then the URL.
+fn reference_key(url: &str, title: Option<&str>) -> String {
+    let mut key = String::new();
+    match title {
+        None => key.push('-'),
+        Some(t) => {
+            push_usize(&mut key, t.len());
+            key.push(':');
+            key.push_str(t);
+        }
+    }
+    key.push_str(url);
+    key
 }
 
 fn record_reference(
-    references: &mut Vec<RefDef>,
+    references: &mut References,
     url: &str,
     title: Option<&str>,
     text: &str,
 ) -> usize {
-    if let Some(existing) = references
-        .iter()
-        .find(|r| r.url == url && r.title.as_deref() == title)
+    let key = reference_key(url, title);
+    if let Some(&at) = references.index.get(&key)
+        && let Some(existing) = references.defs.get(at)
     {
         return existing.id;
     }
-    let id = references.len() + 1;
+    let id = references.defs.len() + 1;
     let mut clean_text = String::new();
     for word in text.split(is_space).filter(|w| !w.is_empty()) {
         if !clean_text.is_empty() {
@@ -1251,26 +1524,24 @@ fn record_reference(
         }
         clean_text.push_str(word);
     }
-    let text = if clean_text.is_empty() {
-        url.to_string()
-    } else {
-        clean_text
-    };
-    references.push(RefDef {
+    references.defs.push(RefDef {
         id,
         url: url.to_string(),
         title: title.map(String::from),
-        text,
+        text: clean_text,
     });
+    references.index.insert(key, id - 1);
     id
 }
 
+/// Close `mark`, whose content starts at byte `from` of the line `out`.
 fn push_close(
     out: &mut String,
     mark: Mark<'_>,
+    from: usize,
     options: &MarkdownOptions,
     base: Option<&str>,
-    references: &mut Vec<RefDef>,
+    references: &mut References,
 ) {
     match mark {
         Mark::Strong => out.push_str("**"),
@@ -1297,9 +1568,12 @@ fn push_close(
                     out.push(']');
                 }
                 LinkStyle::Footer => {
-                    let text = a.text_content();
+                    // The footer entry reads like the inline link: the
+                    // content as written (escaped, with its marks and
+                    // images), on one line.
+                    let text = out.get(from..).unwrap_or("").replace("\\\n", " ");
                     let id = record_reference(references, &url, title, &text);
-                    out.push_str("][");
+                    out.push_str(" [");
                     push_usize(out, id);
                     out.push(']');
                 }
@@ -1337,7 +1611,7 @@ fn push_destination(out: &mut String, url: &str) {
     if pointy {
         out.push('<');
     }
-    for c in url.chars() {
+    for (i, c) in url.char_indices() {
         match c {
             '\n' | '\r' | '\t' => {}
             '\\' => out.push_str("\\\\"),
@@ -1345,6 +1619,10 @@ fn push_destination(out: &mut String, url: &str) {
                 out.push('\\');
                 out.push(c);
             }
+            // CommonMark decodes character references here, and a backslash
+            // does not stop it: `&amp;` is the only way to write a literal `&`
+            // where one would read as a reference.
+            '&' if url.get(i..).is_some_and(starts_char_reference) => out.push_str("&amp;"),
             c => out.push(c),
         }
     }
@@ -1353,17 +1631,35 @@ fn push_destination(out: &mut String, url: &str) {
     }
 }
 
+/// Whether `s` starts with a character reference as CommonMark reads one:
+/// `&name;` (letters and digits, up to 32 characters, starting with a letter),
+/// `&#` and 1–7 digits `;`, or `&#x` and 1–6 hex digits `;`. Whether the name
+/// is known does not matter: writing `&amp;` for the `&` is right either way.
+fn starts_char_reference(s: &str) -> bool {
+    let bytes = s.as_bytes().get(1..).unwrap_or(&[]);
+    let (skip, valid, max): (usize, fn(&u8) -> bool, usize) = match bytes {
+        [b'#', b'x' | b'X', ..] => (2, u8::is_ascii_hexdigit, 6),
+        [b'#', ..] => (1, u8::is_ascii_digit, 7),
+        [first, ..] if first.is_ascii_alphabetic() => (0, u8::is_ascii_alphanumeric, 32),
+        _ => return false,
+    };
+    let body = bytes.get(skip..).unwrap_or(&[]);
+    let run = body.iter().take_while(|b| valid(b)).count();
+    (1..=max).contains(&run) && body.get(run) == Some(&b';')
+}
+
 fn push_title(out: &mut String, title: Option<&str>) {
     let Some(title) = title.map(str::trim).filter(|t| !t.is_empty()) else {
         return;
     };
     out.push_str(" \"");
-    for c in title.chars() {
+    for (i, c) in title.char_indices() {
         match c {
             '"' | '\\' => {
                 out.push('\\');
                 out.push(c);
             }
+            '&' if title.get(i..).is_some_and(starts_char_reference) => out.push_str("&amp;"),
             c if is_space(c) => out.push(' '),
             c => out.push(c),
         }

@@ -54,26 +54,29 @@ drops it; `extract-links` also collects an owned `{href, title, rel}` record
 for every `<a href>`. Every parser finds the same links on every page.
 
 GitHub Actions `ubuntu-latest` (AMD EPYC 7763, 4 vCPUs), criterion median, µs
-(lower is better), from the Benchmarks workflow run on 2026-10-25:
+(lower is better), from the Benchmarks workflow run on 2026-11-07:
 
 | parse-document | iniconfig (6 KB) | Bootstrap (22 KB) | Rust Book (89 KB) | PEP 8 (122 KB) | PEP index (419 KB) |
 |---|---:|---:|---:|---:|---:|
-| domq | 6.5 | 56.1 | 224.3 | 489.1 | 1,707.4 |
-| astral-html | 5.2 | 36.7 | 140.8 | 319.1 | 994.5 |
-| tl | 7.3 | 43.1 | 171.4 | 390.2 | 1,154.5 |
-| scraper | 62.0 | 349.9 | 1,468.5 | 2,826.0 | 9,544.8 |
+| domq | 6.8 | 54.1 | 223.0 | 497.4 | 1,525.5 |
+| astral-html | 5.3 | 37.0 | 141.3 | 319.4 | 984.1 |
+| tl | 7.5 | 44.4 | 172.9 | 369.5 | 1,188.7 |
+| scraper | 62.1 | 353.7 | 1,505.2 | 2,901.7 | 9,569.6 |
 
 | extract-links | iniconfig | Bootstrap | Rust Book | PEP 8 | PEP index |
 |---|---:|---:|---:|---:|---:|
-| domq | 8.2 | 60.8 | 260.9 | 558.1 | 2,088.4 |
-| domq (events) | 8.2 | 59.4 | 249.7 | 541.4 | 1,906.4 |
-| astral-html (Document) | 6.2 | 39.0 | 158.8 | 357.4 | 1,245.7 |
-| astral-html (Reader) | 6.5 | 44.8 | 191.5 | 413.3 | 1,393.8 |
-| tl | 10.3 | 46.7 | 199.5 | 408.9 | 1,475.7 |
-| scraper | 65.4 | 358.8 | 1,511.4 | 2,919.3 | 10,119.0 |
+| domq | 8.6 | 59.3 | 259.2 | 563.9 | 1,906.1 |
+| domq (events) | 9.1 | 68.4 | 282.4 | 616.9 | 2,061.8 |
+| astral-html (Document) | 6.1 | 39.0 | 158.6 | 350.1 | 1,266.6 |
+| astral-html (Reader) | 5.9 | 40.9 | 171.4 | 366.9 | 1,275.7 |
+| tl | 11.4 | 47.0 | 202.1 | 414.6 | 1,521.5 |
+| scraper | 65.3 | 370.9 | 1,541.2 | 2,986.9 | 10,144.0 |
 
-On real pages domq is 5–6× faster than `scraper`, but **25–48% slower than
-`tl`** on all but the smallest page and slower than astral-html everywhere.
+On real pages domq is 5–9× faster than `scraper`, but **22–35% slower than
+`tl`** on all but the smallest page and 28–58% slower than astral-html. (The
+previous run, 2026-10-25, had 25–48% behind `tl`; classifying each tag name
+once, [#73](https://github.com/iamsaquib8/domq/issues/73), is the main
+change since. The `domq (events)` row is slower than in that run.)
 The generated inputs below over-represent what domq is fast at; the earlier
 "ahead of `tl` on large documents" holds only for them. Closing the gap is on
 the roadmap.

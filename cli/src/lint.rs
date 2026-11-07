@@ -94,7 +94,7 @@ pub fn run(opts: &LintOptions) -> (String, u8) {
         let html = match crate::read_input(Some(file), opts.encoding.as_deref()) {
             Ok(html) => html,
             Err(e) => {
-                eprintln!("domq: {e}");
+                warn!("domq: {e}");
                 unreadable = true;
                 continue;
             }
@@ -605,6 +605,7 @@ fn other_parse_error(src: &str, e: &ParseError) -> Raw {
         ErrorKind::UnterminatedCdata => (Level::Warning, "unterminated-cdata"),
         ErrorKind::UnexpectedEof => (Level::Warning, "unexpected-eof"),
         ErrorKind::BogusComment => (Level::Warning, "bogus-comment"),
+        ErrorKind::UnexpectedEqualsSign => (Level::Warning, "unexpected-equals-sign"),
         _ => (Level::Warning, "parse-error"),
     };
     let message = match (&e.kind, tag_at(src, e.position)) {
@@ -759,10 +760,11 @@ mod tests {
 
     #[test]
     fn nested_links_are_linear() {
-        // `<a>` does not close an open `<a>`, so these nest 50,000 deep.
-        let html = "<a href=/>".repeat(50_000) + "x";
+        // An `<a>` closes an open `<a>`, except past a scope boundary such as
+        // `<object>`, so these nest 50,000 deep (100,000 elements).
+        let html = "<a href=/><object>".repeat(50_000) + "x";
         let findings = check(&html);
-        assert_eq!(findings.len(), 50_000);
+        assert_eq!(findings.len(), 100_000);
         assert!(findings.iter().all(|f| f.rule == "unclosed-element"));
     }
 

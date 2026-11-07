@@ -644,6 +644,110 @@ fn wide_sibling_lists_stay_linear() {
     });
 }
 
+/// Generous ceiling for the scaling tests below: a debug build on a loaded
+/// machine takes a fraction of it, the quadratic code they guard against takes
+/// tens of seconds (the same convention as `LINEAR_TIME_LIMIT_MS` in
+/// `tests/parsing.rs`).
+const SCALING_LIMIT: Duration = Duration::from_secs(5);
+
+#[test]
+fn of_type_pseudo_classes_stay_linear_on_distinct_tag_names() {
+    let n = 20_000;
+    let mut html = String::from("<div>");
+    for i in 0..n {
+        html.push_str(&format!("<x{i}></x{i}>"));
+    }
+    html.push_str("</div>");
+    let dom = parse(&html);
+    let div = dom.root().unwrap();
+    let start = Instant::now();
+    // Every child is the only one of its type; so is the div itself.
+    for sel in [
+        "*:first-of-type",
+        "*:last-of-type",
+        "*:only-of-type",
+        "*:nth-of-type(1)",
+        "*:nth-last-of-type(1)",
+        "*:nth-of-type(2n+1)",
+        "*:nth-last-of-type(odd)",
+        "*:nth-of-type(n+2)",
+    ] {
+        let expected = if sel == "*:nth-of-type(n+2)" {
+            0
+        } else {
+            n + 1
+        };
+        assert_eq!(dom.select(sel).count(), expected, "{sel}");
+        // A query on a subtree keeps its memo in a hash map instead.
+        let expected = if sel == "*:nth-of-type(n+2)" { 0 } else { n };
+        assert_eq!(div.select(sel).count(), expected, "{sel} below the root");
+    }
+    // Late siblings are the expensive ones: ask about the last element alone.
+    let tail = dom.select_first(&format!("x{}", n - 1)).unwrap();
+    assert!(tail.matches(":last-of-type:only-of-type"));
+    let elapsed = start.elapsed();
+    assert!(elapsed < SCALING_LIMIT, "took {elapsed:?}");
+}
+
+#[test]
+fn of_type_pseudo_classes_count_each_type_among_many() {
+    // Two interleaved runs of types with 12 distinct names each, so the walk
+    // back to a sibling of the same type steps over many other types.
+    let mut html = String::from("<div>");
+    for i in 0..48 {
+        html.push_str(&format!("<t{}>{i}</t{}>", i % 12, i % 12));
+    }
+    html.push_str("</div>");
+    let dom = parse(&html);
+    let texts = |sel: &str| -> Vec<String> { dom.select(sel).map(|n| n.text_content()).collect() };
+    assert_eq!(texts("t5:first-of-type"), ["5"]);
+    assert_eq!(texts("t5:last-of-type"), ["41"]);
+    assert_eq!(texts("t5:nth-of-type(3)"), ["29"]);
+    assert_eq!(texts("t5:nth-last-of-type(3)"), ["17"]);
+    assert_eq!(texts("t5:only-of-type"), Vec::<String>::new());
+    assert_eq!(dom.select("div > *:first-of-type").count(), 12);
+    assert_eq!(dom.select("div > *:last-of-type").count(), 12);
+    assert_eq!(dom.select("div > *:nth-of-type(2n)").count(), 24);
+}
+
+#[test]
+fn has_with_child_combinators_looks_only_as_deep_as_it_must() {
+    // 20k nested divs, then a span: `:has(> span)` once scanned each div's
+    // whole subtree.
+    let dom = parse(&nested_divs(20_000));
+    let start = Instant::now();
+    assert_eq!(dom.select("div:has(> span)").count(), 1);
+    assert_eq!(dom.select("div:has(> div > span)").count(), 1);
+    assert_eq!(dom.select("div:has(> div > div > span)").count(), 1);
+    assert_eq!(dom.select("div:has(> p)").count(), 0);
+    assert_eq!(dom.select("div:has(> span + p)").count(), 0);
+    assert_eq!(dom.select("div:has(> div ~ span)").count(), 0);
+    assert_eq!(dom.select("div:not(:has(> span))").count(), 19_999);
+    let elapsed = start.elapsed();
+    assert!(elapsed < SCALING_LIMIT, "took {elapsed:?}");
+}
+
+#[test]
+fn has_with_child_combinators_matches_at_the_right_depth() {
+    let dom = parse("<a><b><c>x</c><d></d></b><e></e></a>");
+    let ids = |sel: &str| -> Vec<String> {
+        dom.select(sel)
+            .filter_map(|n| n.tag_name().map(str::to_string))
+            .collect()
+    };
+    assert_eq!(ids(":has(> b)"), ["a"]);
+    assert_eq!(ids(":has(> c)"), ["b"]);
+    assert_eq!(ids(":has(> d > c)"), Vec::<String>::new());
+    assert_eq!(ids(":has(c)"), ["a", "b"]);
+    assert_eq!(ids(":has(> b > c)"), ["a"]);
+    assert_eq!(ids(":has(> b > d)"), ["a"]);
+    assert_eq!(ids(":has(> c + d)"), ["b"]);
+    assert_eq!(ids(":has(> c ~ d)"), ["b"]);
+    assert_eq!(ids(":has(> b ~ e)"), ["a"]);
+    assert_eq!(ids(":has(> b + e > c)"), Vec::<String>::new());
+    assert_eq!(ids(":has(> b c)"), ["a"]);
+}
+
 #[test]
 fn nested_nth_of_selectors_are_memoized() {
     let dom = parse(&format!("<ul>{}</ul>", "<li>x</li>".repeat(1_000)));

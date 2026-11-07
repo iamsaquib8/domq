@@ -11,11 +11,12 @@ use alloc::string::String;
 use crate::serialize::is_space;
 use crate::tree::{Dom, NodeRef};
 
+mod json_ld;
 mod links;
 mod meta;
 mod outline;
 mod readable;
-mod table;
+pub(crate) mod table;
 
 pub use links::{Link, Resource};
 pub use meta::Metadata;

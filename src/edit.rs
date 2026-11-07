@@ -126,6 +126,7 @@ impl Dom {
         };
         self.unlink(node);
         self.link(parent, before, node);
+        self.invalidate_noscript();
         // Subtrees are uniformly flagged, so the root's flag speaks for all.
         if self.node(node).is_some_and(|n| n.detached != detached) {
             self.set_detached(node, detached);
@@ -148,6 +149,7 @@ impl Dom {
         before: Option<NodeId>,
         html: &str,
     ) -> Vec<NodeId> {
+        self.invalidate_noscript();
         let roots = self.graft(&builder::parse_document(html));
         let attached = match parent {
             Some(p) => self.node(p).is_some_and(|n| !n.detached),
@@ -171,10 +173,7 @@ impl Dom {
     /// exactly its document: they are appended wholesale, and node ids, string
     /// spans and attribute runs all shift by a constant.
     fn graft(&mut self, frag: &Dom) -> Vec<NodeId> {
-        if frag.has_noscript {
-            self.has_noscript = true;
-            self.noscript_is_content = crate::serialize::noscript_is_content(self);
-        }
+        self.has_noscript |= frag.has_noscript;
         let base = self.nodes.len();
         let shift = |id: Option<NodeId>| id.map(|i| NodeId::from_index(base + i.index()));
         // `as u32` like `intern`: an arena past 4 GiB is out of reach anyway.
@@ -247,6 +246,7 @@ impl Dom {
         // only the links need fixing (keeps `-r div` on deep nesting linear).
         let already_detached = node.detached;
         self.unlink(id);
+        self.invalidate_noscript();
         if !already_detached {
             self.set_detached(id, true);
         }
@@ -270,6 +270,7 @@ impl Dom {
         let Some(attrs) = self.attr_range(id) else {
             return;
         };
+        self.invalidate_noscript();
         if !tags::is_valid_attr_name(name) {
             return;
         }
@@ -325,6 +326,7 @@ impl Dom {
         let Some(attrs) = self.attr_range(id) else {
             return;
         };
+        self.invalidate_noscript();
         // Pack the attributes that stay at the front of the run, in order.
         let mut kept = 0;
         for i in attrs.range() {
@@ -434,6 +436,7 @@ impl Dom {
     /// assert_eq!(dom.to_html(), r#"<script>if (a < b) log("<\/script>")</script>"#);
     /// ```
     pub fn set_text(&mut self, id: NodeId, text: &str) {
+        self.invalidate_noscript();
         match self.shape(id) {
             Some(Shape::Text) => {
                 let span = self.intern(text);
@@ -476,6 +479,8 @@ impl Dom {
             return;
         }
         let span = self.intern_lower(tag);
+        self.has_noscript |= tag.eq_ignore_ascii_case("noscript");
+        self.invalidate_noscript();
         if let Some(Node {
             raw: RawKind::Element { name, .. },
             ..
@@ -517,10 +522,7 @@ impl Dom {
         if !tags::is_valid_tag_name(tag) {
             return None;
         }
-        if tag.eq_ignore_ascii_case("noscript") {
-            self.has_noscript = true;
-            self.noscript_is_content = crate::serialize::noscript_is_content(self);
-        }
+        self.has_noscript |= tag.eq_ignore_ascii_case("noscript");
         let name = self.intern_lower(tag);
         // An empty run at the end of the arena: the first `set_attr` appends
         // in place.

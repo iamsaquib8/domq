@@ -185,6 +185,8 @@ struct Page {
     /// Per [`FIELDS`] entry: `None` when Readability found no value, else
     /// whether domq's matches.
     fields: Vec<Option<bool>>,
+    /// `metadata().json_ld`: how many blocks, and how many parse as JSON.
+    json_ld: (usize, usize),
 }
 
 fn score(dir: &Path) -> Option<Page> {
@@ -222,12 +224,18 @@ fn score(dir: &Path) -> Option<Page> {
             Some(ours(key).map(|o| normalize(&o)) == Some(theirs))
         })
         .collect();
+    let parsed = m
+        .json_ld
+        .iter()
+        .filter(|b| serde_json::from_str::<serde_json::Value>(b).is_ok())
+        .count();
     Some(Page {
         name: dir.file_name()?.to_str()?.to_string(),
         main: prf(&words(&main_text), &reference),
         whole: prf(&words(&whole_text), &reference),
         fallback,
         fields,
+        json_ld: (m.json_ld.len(), parsed),
     })
 }
 
@@ -372,11 +380,23 @@ Readability found a value; equal after collapsing whitespace.
         };
         let _ = writeln!(out, "| {label} | {} | {rate} |", known.len());
     }
+    let blocks: usize = scores.iter().map(|p| p.json_ld.0).sum();
+    let parsed: usize = scores.iter().map(|p| p.json_ld.1).sum();
+    let with = count(&|p| p.json_ld.0 > 0);
+    let _ = write!(
+        out,
+        "
+`Metadata::json_ld` holds the page's JSON-LD blocks for a JSON parser: on {with} pages, {blocks} blocks, of which {parsed} parse with `serde_json` as returned.
+"
+    );
     out.push_str(
         "
-Readability's byline also comes from the page text (\"By Jane Doe\"), and its
-title drops a trailing site name (\"Article | Site\"); domq reads both from
-markup only, so those two rows count differences of convention too.
+domq reads the title, author and published time from the page's JSON-LD
+article first (`headline`, `author`, `datePublished`), then from meta tags and
+other markup. Readability's byline also comes from the page text (\"By Jane
+Doe\"), and its title drops a trailing site name (\"Article | Site\"); domq
+reads both from markup only, so those two rows count differences of convention
+too.
 
 ## Hardest pages
 

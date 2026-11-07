@@ -1,4 +1,4 @@
-# Edit and serialize
+# Edit HTML and write it back
 
 A parsed `Dom` can be rewritten in place and serialized back to HTML. Nodes
 are addressed by `NodeId` (`node.id()`); removing a node detaches it, so ids
@@ -42,4 +42,5 @@ and properly nested), `node.outer_html()` and `node.inner_html()`,
 raw-text elements is written so it cannot close its element early.
 
 From the shell, `domq -r 'script, .ad' -p` removes nodes and pretty-prints the
-rest.
+rest. A complete cleaning pass (remove, absolute URLs, strip attributes, round
+trip) is in [Clean HTML before storing it](clean-html.md).

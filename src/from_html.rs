@@ -193,6 +193,23 @@ pub trait FromHtml: Sized {
 
     /// Read a value from `scope`.
     fn from_html(scope: Scope<'_>) -> Result<Self, ExtractError>;
+
+    /// Compile every selector this type reads, once, so that reading many
+    /// values (`Dom::extract_all`) does not parse them again for each one.
+    /// `#[derive(FromHtml)]` overrides it; the default, for hand-written
+    /// impls, has nothing to prepare.
+    #[doc(hidden)]
+    fn __plan() -> Result<Plan, ExtractError> {
+        Ok(Plan::new())
+    }
+
+    /// [`from_html`](FromHtml::from_html) with the selectors from
+    /// [`__plan`](FromHtml::__plan) already compiled.
+    #[doc(hidden)]
+    fn __from_html_prepared(scope: Scope<'_>, plan: &Plan) -> Result<Self, ExtractError> {
+        let _ = plan;
+        Self::from_html(scope)
+    }
 }
 
 /// A type that can be parsed from one string value: an attribute value, an
@@ -350,15 +367,16 @@ impl Dom {
     /// ```
     pub fn extract<T: FromHtml>(&self) -> Result<T, ExtractError> {
         match T::SELECTOR {
-            None => T::from_html(Scope::Document(self)),
+            None => T::__from_html_prepared(Scope::Document(self), &T::__plan()?),
             Some(css) => {
                 let sel = type_selector::<T>(css)?;
+                let plan = T::__plan()?;
                 let node = self.select_first(&sel).ok_or_else(|| {
                     ExtractError::new(ExtractErrorKind::NoMatch)
                         .with_selector(css)
                         .in_type(short_type_name::<T>())
                 })?;
-                T::from_html(Scope::Element(node))
+                T::__from_html_prepared(Scope::Element(node), &plan)
             }
         }
     }
@@ -407,9 +425,13 @@ impl Dom {
                 .in_type(short_type_name::<T>()));
         };
         let sel = type_selector::<T>(css)?;
+        // The field selectors are compiled once, not once per item.
+        let plan = T::__plan()?;
         self.select(&sel)
             .enumerate()
-            .map(|(i, node)| T::from_html(Scope::Element(node)).map_err(|e| e.at_index(i)))
+            .map(|(i, node)| {
+                T::__from_html_prepared(Scope::Element(node), &plan).map_err(|e| e.at_index(i))
+            })
             .collect()
     }
 }
@@ -434,7 +456,7 @@ impl NodeRef<'_> {
     /// assert_eq!(li.extract::<i64>(), Ok(4));
     /// ```
     pub fn extract<T: FromHtml>(&self) -> Result<T, ExtractError> {
-        T::from_html(Scope::Element(*self))
+        T::__from_html_prepared(Scope::Element(*self), &T::__plan()?)
     }
 }
 
@@ -843,16 +865,94 @@ impl Ctx {
         Selector::parse(css).map_err(|e| self.selector_error(ExtractErrorKind::InvalidSelector(e)))
     }
 
+    /// The compiled selector from the plan, or, for a plan that lacks it,
+    /// the selector parsed now.
+    fn selector<'p>(
+        &self,
+        css: &str,
+        field: &'p FieldPlan,
+    ) -> Result<Cow<'p, Selector>, ExtractError> {
+        match &field.selector {
+            Some(sel) => Ok(Cow::Borrowed(sel)),
+            None => self.parse_selector(css).map(Cow::Owned),
+        }
+    }
+
     /// The first match of the selector, or the scope itself without one.
-    fn target<'a>(&self, scope: Scope<'a>) -> Result<Option<Scope<'a>>, ExtractError> {
+    fn target<'a>(
+        &self,
+        scope: Scope<'a>,
+        field: &FieldPlan,
+    ) -> Result<Option<Scope<'a>>, ExtractError> {
         match self.select {
             None => Ok(Some(scope)),
             Some(css) => {
-                let sel = self.parse_selector(css)?;
+                let sel = self.selector(css, field)?;
                 Ok(scope.select_first(&sel).map(Scope::Element))
             }
         }
     }
+}
+
+/// The selectors a derived type compiled for one call: one [`FieldPlan`] per
+/// field that reads something (not `skip`), in declaration order.
+#[doc(hidden)]
+#[derive(Clone, Debug, Default)]
+pub struct Plan {
+    fields: Vec<FieldPlan>,
+}
+
+/// One field's compiled selector and, for a nested type, that type's plan.
+#[doc(hidden)]
+#[derive(Clone, Debug, Default)]
+pub struct FieldPlan {
+    selector: Option<Selector>,
+    nested: Plan,
+}
+
+/// What a plan returns for a field it does not have (never, with generated
+/// code).
+static NO_FIELD: FieldPlan = FieldPlan {
+    selector: None,
+    nested: Plan { fields: Vec::new() },
+};
+
+impl Plan {
+    /// A plan with nothing to prepare.
+    pub const fn new() -> Self {
+        Plan { fields: Vec::new() }
+    }
+
+    /// Add the next field.
+    pub fn push(&mut self, field: FieldPlan) {
+        self.fields.push(field);
+    }
+
+    /// The `index`th field.
+    pub fn field(&self, index: usize) -> &FieldPlan {
+        self.fields.get(index).unwrap_or(&NO_FIELD)
+    }
+}
+
+/// Compile the selector of a field that reads a value (not a nested type).
+#[doc(hidden)]
+pub fn plan_value(ctx: &Ctx) -> Result<FieldPlan, ExtractError> {
+    let selector = match ctx.select {
+        Some(css) => Some(ctx.parse_selector(css)?),
+        None => None,
+    };
+    Ok(FieldPlan {
+        selector,
+        nested: Plan::new(),
+    })
+}
+
+/// Compile the selector of a nested field and the plan of its type `T`.
+#[doc(hidden)]
+pub fn plan_nested<T: FromHtml>(ctx: &Ctx) -> Result<FieldPlan, ExtractError> {
+    let mut field = plan_value(ctx)?;
+    field.nested = T::__plan().map_err(|e| ctx.wrap(e))?;
+    Ok(field)
 }
 
 /// The converter result: `Ok(None)` is a missing attribute.
@@ -863,12 +963,13 @@ type Converted<T> = Result<Option<T>, ExtractError>;
 pub fn one<'a, T>(
     scope: Scope<'a>,
     ctx: &Ctx,
-    convert: impl FnOnce(Scope<'a>, &Ctx) -> Converted<T>,
+    field: &FieldPlan,
+    convert: impl FnOnce(Scope<'a>, &Ctx, &FieldPlan) -> Converted<T>,
 ) -> Result<T, ExtractError> {
     let target = ctx
-        .target(scope)?
+        .target(scope, field)?
         .ok_or_else(|| ctx.selector_error(ExtractErrorKind::NoMatch))?;
-    convert(target, ctx)
+    convert(target, ctx, field)
         .map_err(|e| ctx.wrap(e))?
         .ok_or_else(|| ctx.wrap(ctx.missing_attribute(target)))
 }
@@ -878,11 +979,12 @@ pub fn one<'a, T>(
 pub fn opt<'a, T>(
     scope: Scope<'a>,
     ctx: &Ctx,
-    convert: impl FnOnce(Scope<'a>, &Ctx) -> Converted<T>,
+    field: &FieldPlan,
+    convert: impl FnOnce(Scope<'a>, &Ctx, &FieldPlan) -> Converted<T>,
 ) -> Result<Option<T>, ExtractError> {
-    match ctx.target(scope)? {
+    match ctx.target(scope, field)? {
         None => Ok(None),
-        Some(target) => convert(target, ctx).map_err(|e| ctx.wrap(e)),
+        Some(target) => convert(target, ctx, field).map_err(|e| ctx.wrap(e)),
     }
 }
 
@@ -891,16 +993,17 @@ pub fn opt<'a, T>(
 pub fn all<'a, T>(
     scope: Scope<'a>,
     ctx: &Ctx,
-    mut convert: impl FnMut(Scope<'a>, &Ctx) -> Converted<T>,
+    field: &FieldPlan,
+    mut convert: impl FnMut(Scope<'a>, &Ctx, &FieldPlan) -> Converted<T>,
 ) -> Result<Vec<T>, ExtractError> {
     let Some(css) = ctx.select else {
         // The macro requires `select` on a `Vec`; read the scope itself.
-        return one(scope, ctx, convert).map(|v| alloc::vec![v]);
+        return one(scope, ctx, field, convert).map(|v| alloc::vec![v]);
     };
-    let sel = ctx.parse_selector(css)?;
+    let sel = ctx.selector(css, field)?;
     let mut out = Vec::new();
     for (i, node) in scope.select(&sel).enumerate() {
-        match convert(Scope::Element(node), ctx) {
+        match convert(Scope::Element(node), ctx, field) {
             Ok(Some(v)) => out.push(v),
             Ok(None) => {
                 let e = ctx.missing_attribute(Scope::Element(node)).at_index(i);
@@ -914,13 +1017,13 @@ pub fn all<'a, T>(
 
 /// Convert with `T`'s own `FromHtml` (nested structs and leaf types).
 #[doc(hidden)]
-pub fn nested<T: FromHtml>(scope: Scope<'_>, _: &Ctx) -> Converted<T> {
-    T::from_html(scope).map(Some)
+pub fn nested<T: FromHtml>(scope: Scope<'_>, _: &Ctx, field: &FieldPlan) -> Converted<T> {
+    T::__from_html_prepared(scope, &field.nested).map(Some)
 }
 
 /// Read the field's source and convert it with `FromHtmlValue`.
 #[doc(hidden)]
-pub fn value<T: FromHtmlValue>(scope: Scope<'_>, ctx: &Ctx) -> Converted<T> {
+pub fn value<T: FromHtmlValue>(scope: Scope<'_>, ctx: &Ctx, _: &FieldPlan) -> Converted<T> {
     let src = ctx.source.unwrap_or(Src::Text);
     match src.read(scope) {
         None => Ok(None),
