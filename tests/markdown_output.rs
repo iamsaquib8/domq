@@ -831,10 +831,12 @@ fn markdown_options_chunks() {
     let opts = MarkdownOptions::default()
         .base_url("https://example.com/")
         .link_style(LinkStyle::Reference);
+    // The base URL applies; the reference style does not (a chunk stands
+    // alone, so its links are inline).
     let chunks = dom.to_markdown_chunks_with(1000, &opts);
     assert_eq!(chunks.len(), 1);
     assert_eq!(
         chunks[0].markdown,
-        "# Title\n\nVisit [Page][1].\n\n[1]: https://example.com/page"
+        "# Title\n\nVisit [Page](https://example.com/page)."
     );
 }

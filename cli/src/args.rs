@@ -126,7 +126,8 @@ TOOLS (all read-only):
     lint        accessibility and markup problems, with positions
 
     markdown and chunks also take links (inline, reference, footer), images
-    (keep, alt, drop) and drop_data_uris, like the --markdown-* flags.
+    (keep, alt, drop) and drop_data_uris, like the --markdown-* flags. Chunks
+    always write links inline: each chunk must stand alone.
 
 SETUP:
     Claude Code:   claude mcp add domq -- domq mcp

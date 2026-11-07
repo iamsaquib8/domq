@@ -13,7 +13,7 @@ use alloc::vec::Vec;
 use core::mem;
 
 use super::is_space;
-use super::markdown::MarkdownOptions;
+use super::markdown::{LinkStyle, MarkdownOptions};
 use crate::tree::{Dom, NodeRef};
 
 /// The longest heading title kept in a [`Chunk::heading_path`], in characters;
@@ -124,25 +124,33 @@ impl Dom {
 
     /// Split the document into Markdown chunks using custom options; see [`Dom::to_markdown_chunks`].
     ///
+    /// Every chunk stands alone, so links are always written inline,
+    /// whatever [`MarkdownOptions::link_style`] says: a reference
+    /// (`[text][1]`) points at a definition (`[1]: url`) or a footer list at
+    /// the end of the document, which would leave every other chunk with
+    /// links that go nowhere. The other options apply.
+    ///
     /// ```
     /// use domq::{LinkStyle, MarkdownOptions};
     ///
     /// let dom = domq::parse("<h1>Guide</h1><p><a href='/x'>Link</a></p>");
     /// let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
     /// let chunks = dom.to_markdown_chunks_with(500, &opts);
-    /// assert_eq!(chunks[0].markdown, "# Guide\n\n[Link][1]\n\n[1]: /x");
+    /// assert_eq!(chunks[0].markdown, "# Guide\n\n[Link](/x)");
     /// ```
     pub fn to_markdown_chunks_with(
         &self,
         max_chars: usize,
         options: &MarkdownOptions,
     ) -> Vec<Chunk> {
-        chunk_markdown(&self.to_markdown_with(options), max_chars)
+        let options = options.clone().link_style(LinkStyle::Inline);
+        chunk_markdown(&self.to_markdown_with(&options), max_chars)
     }
 }
 
 impl NodeRef<'_> {
-    /// This node's subtree as Markdown chunks with custom options; see [`Dom::to_markdown_chunks`].
+    /// This node's subtree as Markdown chunks with custom options; see
+    /// [`Dom::to_markdown_chunks_with`] (links are always written inline).
     ///
     /// ```
     /// use domq::{LinkStyle, MarkdownOptions};
@@ -151,14 +159,15 @@ impl NodeRef<'_> {
     /// let article = dom.find_by_tag("article").next().unwrap();
     /// let opts = MarkdownOptions::default().link_style(LinkStyle::Reference);
     /// let chunks = article.to_markdown_chunks_with(500, &opts);
-    /// assert_eq!(chunks[0].markdown, "# Guide\n\n[Link][1]\n\n[1]: /x");
+    /// assert_eq!(chunks[0].markdown, "# Guide\n\n[Link](/x)");
     /// ```
     pub fn to_markdown_chunks_with(
         &self,
         max_chars: usize,
         options: &MarkdownOptions,
     ) -> Vec<Chunk> {
-        chunk_markdown(&self.to_markdown_with(options), max_chars)
+        let options = options.clone().link_style(LinkStyle::Inline);
+        chunk_markdown(&self.to_markdown_with(&options), max_chars)
     }
 
     /// This node's subtree as Markdown chunks; see [`Dom::to_markdown_chunks`].
@@ -529,6 +538,14 @@ fn heading_text(line: &str) -> String {
             '!' if after.starts_with('[') => {}
             ']' if after.starts_with('(') => {
                 rest = skip_destination(after);
+                continue;
+            }
+            // A reference label (`[text][1]`, `[text][]`): not part of the title.
+            ']' if after.starts_with('[') => {
+                rest = match after.find(']') {
+                    Some(end) => after.get(end + 1..).unwrap_or(""),
+                    None => after,
+                };
                 continue;
             }
             ']' => {}

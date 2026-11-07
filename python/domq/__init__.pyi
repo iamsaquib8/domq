@@ -311,7 +311,11 @@ class Document:
         drop_data_uris: bool = False,
         base_url: Optional[str] = None,
     ) -> list[Chunk]:
-        """CommonMark + GFM Markdown split at headings into chunks under ``max_chars``."""
+        """CommonMark + GFM Markdown split at headings into chunks under ``max_chars``.
+
+        Links are always written inline, whatever ``links`` says, so that each chunk
+        stands alone.
+        """
     def tables(self, selector: str = "table") -> list[list[list[str]]]:
         """Extract rows of cell text for tables matching ``selector`` (default ``"table"``)."""
     def to_csv(self, selector: str = "table") -> str:
@@ -427,7 +431,10 @@ class Element:
         drop_data_uris: bool = False,
         base_url: Optional[str] = None,
     ) -> list[Chunk]:
-        """CommonMark + GFM Markdown chunks for this element's subtree."""
+        """CommonMark + GFM Markdown chunks for this element's subtree.
+
+        Links are always written inline, whatever ``links`` says.
+        """
     def outline(self) -> PageOutline:
         """Extract a semantic page outline for this element's subtree."""
     def to_json(self) -> str:

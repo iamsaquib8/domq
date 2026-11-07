@@ -864,6 +864,9 @@ impl Document {
     }
 
     /// CommonMark + GFM Markdown split at headings into chunks under `max_chars`.
+    ///
+    /// Links are always written inline, whatever `links` says, so that each chunk
+    /// stands alone.
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (max_chars = None, *, links = None, images = None, drop_data_uris = false, base_url = None))]
     fn to_markdown_chunks(
@@ -1254,6 +1257,8 @@ impl Element {
     }
 
     /// CommonMark + GFM Markdown chunks for this element's subtree.
+    ///
+    /// Links are always written inline, whatever `links` says.
     #[pyo3(signature = (max_chars = None, *, links = None, images = None, drop_data_uris = false, base_url = None))]
     fn to_markdown_chunks(
         &self,
