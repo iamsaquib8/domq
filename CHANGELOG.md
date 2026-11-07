@@ -13,10 +13,12 @@ when to re-embed. See [Output stability](./README.md#output-stability).
 
 ### Output changes
 
+- Tokenizer: a `<script>`'s content follows the HTML script data states ([#234](https://github.com/iamsaquib8/domq/issues/234)). After `<!--`, a `<script` starts a "double escaped" part in which `</script>` does not end the element, so `<script><!--<script>a</script>b</script><p>x</p>` is one script with the text `<!--<script>a</script>b`, followed by the paragraph; the `b</script>` that used to leak into `to_text()` and Markdown is gone. `-->` leaves the escaped part. Old-style inline scripts that write script tags (ad loaders, analytics snippets) are the usual cause. `to_html()` writes `<\/script` only for an end tag that would really end the element, and writes `<\script` for a `<script` that would leave an edited or unterminated script double escaped to its end, so the element still closes.
 - CLI: `-1` keeps the first result that survives `-a` and `-w` filtering in every mode, and `-c` honours `-w`.
 
 ### Fixed
 
+- Parser: HTML conformance (same structure) goes from 1210 to 1260 of 1959 tests, with no regressions: 50 script data cases in `domjs-unsafe.dat`, `scriptdata01.dat` and `tests16.dat`.
 - MCP: a request whose `_meta` specifies a handshake-era legacy version is served with legacy semantics rather than modern, allowing `initialize` and omitting modern result fields, and `clientCapabilities` is validated to be an object ([#159](https://github.com/iamsaquib8/domq/issues/159)).
 - CLI: `-1` is applied after attribute (`-a`) and whitespace (`-w`) filtering rather than before, and `-c` honours `-w` to skip blank matches ([#144](https://github.com/iamsaquib8/domq/issues/144)).
 - Reject Markdown options combined with another output format, regardless of flag order.
