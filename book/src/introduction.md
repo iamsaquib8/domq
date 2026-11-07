@@ -49,7 +49,13 @@ that you render.
 - The [quick start](quickstart.md) shows the same task in Rust, the shell,
   JavaScript and Python.
 - The [cookbook](cookbook/scraping.md) has recipes for scraping, extraction,
-  LLM pipelines, editing and CI.
+  LLM pipelines, editing and CI. Newer ones: [a RAG
+  index](cookbook/rag-index.md), [an agent that reads a
+  page](cookbook/agent-page.md), [crawl results as a
+  table](cookbook/crawl-to-table.md), [htmlq and pup in
+  scripts](cookbook/shell-scripts.md), [cleaning HTML before storing
+  it](cookbook/clean-html.md) and [Workers, Deno and the
+  browser](cookbook/edge.md).
 - Coming from another tool? See the guides for [htmlq](migrating/htmlq.md),
   [scraper](migrating/scraper.md), [BeautifulSoup](migrating/beautifulsoup.md)
   and [cheerio](migrating/cheerio.md).

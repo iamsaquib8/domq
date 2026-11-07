@@ -66,6 +66,8 @@ Node 22+, Bun and Deno use either directly
 ```
 
 For the extraction API, load `domq-wasm@0.7/extract/domq_wasm.js` instead.
+Workers, Deno, the browser and bytes: [Use domq in a Cloudflare Worker, Deno or
+the browser](cookbook/edge.md).
 Upgrading from 0.6? Extraction (`mainContent`, `metadata`, `links`,
 `resources`, `toMarkdownChunks`, `tables`, `toCsv`) is no longer exported by
 the root entry: import it from `domq-wasm/extract`.
