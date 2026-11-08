@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::{collapse, document_order, non_empty};
-use crate::node::{NodeId, NodeKind};
+use crate::node::NodeKind;
 use crate::serialize::{is_space, walk};
 use crate::tags::{self, Display};
 use crate::tree::{Dom, NodeRef};
@@ -29,11 +29,10 @@ pub struct Link<'a> {
     /// inside, or `title`; otherwise empty.
     ///
     /// Visible means not inside a hidden element ([`Dom::to_text`] skips the
-    /// same: `<script>`, `<template>`, …), nor inside an element of the link
-    /// that is hidden by its `hidden` attribute or by an inline `style`
-    /// declaring `display: none` or `visibility: hidden` (a simple check of
-    /// the attribute: no CSS cascade). `aria-hidden` content is kept, since it
-    /// is still shown on screen.
+    /// same: `<script>`, `<template>`, …), nor inside an element hidden by its
+    /// `hidden` attribute or inline `style` declaring `display: none` or
+    /// `visibility: hidden` (without a CSS cascade). `aria-hidden` content is
+    /// kept, since it is still shown on screen.
     pub text: String,
 }
 
@@ -106,8 +105,10 @@ impl Dom {
     ///
     /// URLs resolve against [`Dom::base_url`]`(base)`, so a `<base href>` in
     /// the page is honoured. `javascript:` links are skipped: they run code
-    /// rather than navigate. Fragment-only (`#top`), `mailto:` and other links
-    /// are kept; filter on [`Link::url`] as needed. Embedded resources (`<img
+    /// rather than navigate. Links hidden by their own or an ancestor's
+    /// `hidden` attribute or inline `style` are also skipped, as in
+    /// [`Dom::to_text`]. Fragment-only (`#top`), `mailto:` and other links are
+    /// kept; filter on [`Link::url`] as needed. Embedded resources (`<img
     /// src>`, `<link href>`, `<script src>`, …) are not links; see
     /// [`Dom::resources`].
     ///
@@ -359,9 +360,6 @@ struct TextCollector<'a> {
     /// Open links: (element, index into `done`).
     open: Vec<(NodeRef<'a>, usize)>,
     done: Vec<LinkText<'a>>,
-    /// The hidden element inside a link that the walk is in, if any: nothing
-    /// in it counts toward any link's text (links in it are still found).
-    hidden: Option<NodeId>,
     /// `<noscript>` holds the document's content: walk into it.
     noscript: bool,
 }
@@ -386,9 +384,7 @@ impl<'a> TextCollector<'a> {
         let tag = match node.kind() {
             NodeKind::Element { tag } => tag,
             NodeKind::Text(t) => {
-                if self.hidden.is_none()
-                    && let Some(link) = self.current()
-                {
+                if let Some(link) = self.current() {
                     link.push(t);
                 }
                 return false;
@@ -399,12 +395,6 @@ impl<'a> TextCollector<'a> {
             if self.open.last().is_some_and(|(n, _)| n.id() == node.id()) {
                 self.open.pop();
             }
-            if self.hidden.is_some() {
-                if self.hidden == Some(node.id()) {
-                    self.hidden = None;
-                }
-                return false;
-            }
             if tags::display(tag) != Display::Inline
                 && let Some(link) = self.current()
             {
@@ -413,15 +403,12 @@ impl<'a> TextCollector<'a> {
             return false;
         }
         let display = tags::display(tag);
-        if display == Display::Hidden && !(tag == "noscript" && self.noscript) {
+        if (display == Display::Hidden && !(tag == "noscript" && self.noscript))
+            || node.hides_itself()
+        {
             return false;
         }
-        if self.hidden.is_none() && !self.open.is_empty() && node.hides_itself() {
-            self.hidden = Some(node.id());
-        }
-        if self.hidden.is_none()
-            && let Some(link) = self.current()
-        {
+        if let Some(link) = self.current() {
             if display != Display::Inline || tag == "br" {
                 link.space = true;
             }
