@@ -146,21 +146,39 @@ fn hidden_content_is_not_link_text() {
 }
 
 #[test]
-fn links_inside_hidden_elements_are_still_found() {
-    // A hidden menu still holds links, and a hidden link is still a link: the
-    // check is for content hidden inside a link.
+fn links_inside_hidden_elements_are_omitted() {
+    // A hidden link or ancestor is not navigation-visible. This must also
+    // exclude links nested inside hidden content of an otherwise visible link.
     let html = "<nav hidden><a href=/menu>Menu item</a></nav>\
                 <a href=/self hidden>Self</a>\
                 <a href=/outer>out<span hidden>in<table><tr><td><a href=/inner>inner</a></td></tr></table></span>side</a>";
+    assert_eq!(urls(html, None), [pair("/outer", "outside")]);
+}
+
+#[test]
+fn styled_hidden_links_are_omitted_but_aria_hidden_links_remain() {
+    let html = "<section style='display:none'><a href=/secret>secret</a></section>\
+                <a href=/hide style='visibility: hidden'>hide</a>\
+                <a href=/aria aria-hidden=true>visible</a>\
+                <a href=/show>shown</a>";
     assert_eq!(
         urls(html, None),
-        [
-            pair("/menu", "Menu item"),
-            pair("/self", "Self"),
-            pair("/outer", "outside"),
-            pair("/inner", ""),
-        ]
+        [pair("/aria", "visible"), pair("/show", "shown")]
     );
+}
+
+#[test]
+fn subtree_links_do_not_escape_hidden_ancestors() {
+    let dom = parse(
+        "<section hidden><div><a href=/secret>no</a></div></section>\
+                     <section><div><a href=/shown>yes</a></div></section>",
+    );
+    let mut divs = dom.find_by_tag("div");
+    let hidden_child = divs.next().unwrap();
+    let visible_child = divs.next().unwrap();
+    assert!(hidden_child.links(None).is_empty());
+    assert!(hidden_child.links_resolved(None).is_empty());
+    assert_eq!(visible_child.links(None)[0].href, "/shown");
 }
 
 #[test]
