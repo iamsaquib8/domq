@@ -231,23 +231,34 @@ impl<'a> Scan<'a> {
         let Some(content) = node.attr("content").and_then(non_empty) else {
             return;
         };
-        if let Some(property) = node.attr("property").and_then(non_empty) {
-            let key = property.to_ascii_lowercase();
+        let property = node
+            .attr("property")
+            .and_then(non_empty)
+            .map(str::to_ascii_lowercase);
+        let name = node
+            .attr("name")
+            .and_then(non_empty)
+            .map(str::to_ascii_lowercase);
+        // Many templates emit `<meta property="og:…" name="og:…">` (or the
+        // same for `twitter:`) so indexers that ignore `property` still see
+        // the value. Treat the two attributes as aliases: when both name the
+        // same key, keep a single og/twitter entry (`property` is the spec
+        // attribute for these namespaces) instead of pushing a duplicate.
+        if let Some(key) = &property {
             if OG_PREFIXES.iter().any(|p| key.starts_with(p)) {
-                self.meta.og.push((key, String::from(content)));
+                self.meta.og.push((key.clone(), String::from(content)));
             } else if key.starts_with("twitter:") {
-                self.meta.twitter.push((key, String::from(content)));
+                self.meta.twitter.push((key.clone(), String::from(content)));
             }
         }
-        if let Some(name) = node.attr("name").and_then(non_empty) {
-            let key = name.to_ascii_lowercase();
-            if key.starts_with("twitter:") {
+        if let Some(key) = &name {
+            if key.starts_with("twitter:") && property.as_deref() != Some(key.as_str()) {
                 self.meta.twitter.push((key.clone(), String::from(content)));
-            } else if key.starts_with("og:") {
+            } else if key.starts_with("og:") && property.as_deref() != Some(key.as_str()) {
                 // A common mistake for `property="og:…"`.
                 self.meta.og.push((key.clone(), String::from(content)));
             }
-            self.names.push((key, content));
+            self.names.push((key.clone(), content));
         }
         if let Some(http) = node.attr("http-equiv")
             && http.trim().eq_ignore_ascii_case("content-language")
