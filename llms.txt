@@ -1,0 +1,13 @@
+# domq
+
+> A tiny, zero-dependency, never-panicking HTML parser with CSS selectors — for Rust, your shell, JavaScript (a ~58 KB gzipped WebAssembly module, ~80 KB with reader mode and extraction) and Python.
+
+## Core Resources
+
+- [GitHub Repository](https://github.com/iamsaquib8/domq): Source code, documentation, and issue tracker.
+- [Website](https://iamsaquib8.github.io/domq/): Official website and documentation.
+
+## AI Agent & LLM Indexing
+
+- Structured following the standard /llms.txt specification for AI search engines and coding assistants.
+- Validated via [AccessGuard AI-Readiness Suite](https://ronanchnlps-bit.github.io/).
